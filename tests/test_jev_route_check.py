@@ -3,8 +3,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from modelpilot.jev_route_check import (arrangement, child_env, command, git_diff, parse_events, reconcile,
-                                        validate, verify_checkout)
+from modelpilot.jev_route_check import (arrangement, check_anthropic_key, child_env, command, git_diff, parse_events,
+                                        reconcile, validate, verify_checkout)
 
 TOKEN = 'JEV_ROUTE_ABC'
 STDERR = '\n'.join([
@@ -74,6 +74,8 @@ class RouteCheckTests(unittest.TestCase):
             self.assertNotIn(name, env)
         self.assertEqual((env['HOME'], env['CLAUDE_CONFIG_DIR'], env['JEV_DEBUG']), ('/iso/home', '/iso/config', '1'))
         self.assertTrue(env['PATH'].startswith('/cli'))
+        # Client retries would re-trigger Jev routing and change cost/cache state.
+        self.assertEqual(env['CLAUDE_CODE_MAX_RETRIES'], '0')
 
     def test_parse_events_skips_noise(self):
         self.assertEqual(parse_events('noise\n' + json.dumps({'type': 'result'}) + '\n[1]\n'), [{'type': 'result'}])
@@ -163,6 +165,38 @@ class WireAccountingTests(unittest.TestCase):
         client = arrangement('stock', 'client', None)
         self.assertEqual((client['accounting'], client['launcher'], client['harness_patch']), ('client', 'stock', None))
         self.assertTrue(client['baseline_eligible_as_stock_jev'])
+
+
+
+class KeyCheckTests(unittest.TestCase):
+    def fake(self, status):
+        calls = []
+        def send(url, headers):
+            calls.append((url, headers))
+            return status
+        return send, calls
+
+    def test_valid_key_passes_with_one_free_catalog_call(self):
+        send, calls = self.fake(200)
+        self.assertIsNone(check_anthropic_key('sk-ant-api03-abc', send))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], 'https://api.anthropic.com/v1/models?limit=1')
+        self.assertEqual(calls[0][1]['x-api-key'], 'sk-ant-api03-abc')
+
+    def test_rejected_key_stops_before_any_billable_work(self):
+        send, _ = self.fake(401)
+        self.assertIn('401', check_anthropic_key('sk-ant-api03-abc', send))
+
+    def test_subscription_token_is_refused_without_network(self):
+        send, calls = self.fake(200)
+        self.assertIn('subscription', check_anthropic_key('sk-ant-oat01-abc', send))
+        self.assertEqual(calls, [])
+
+    def test_malformed_key_refused_without_network(self):
+        send, calls = self.fake(200)
+        for key in ('', 'sk-live-x', 'sk-ant-api03 abc'):
+            self.assertIsNotNone(check_anthropic_key(key, send))
+        self.assertEqual(calls, [])
 
 
 if __name__ == '__main__': unittest.main()
