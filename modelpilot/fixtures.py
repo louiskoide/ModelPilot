@@ -10,6 +10,9 @@ USAGE = {'input_tokens': 10, 'cache_creation_input_tokens': 0,
          'service_tier': 'standard', 'inference_geo': 'global'}
 
 
+CATALOG = {'data': [{'id': 'claude-sonnet-5', 'type': 'model', 'display_name': 'Synthetic Sonnet'}], 'has_more': False}
+
+
 def response_for(request):
     if request.get('metadata', {}).get('test_error'):
         return 429, 'application/json', b'{"error":{"type":"rate_limit_error","message":"synthetic"}}'
@@ -34,6 +37,20 @@ class FixtureHandler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     def log_message(self, *_):
         pass
+
+    def do_GET(self):
+        # Model catalog, as Jev requests it for discovery; anything else is unknown here.
+        with self.server.lock:
+            self.server.received.append({'method': 'GET', 'path': self.path, 'key': self.headers.get('x-api-key')})
+        if not self.path.startswith('/v1/models'):
+            self.send_error(404)
+            return
+        data = json.dumps(CATALOG).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def do_POST(self):
         raw = self.rfile.read(int(self.headers['Content-Length']))

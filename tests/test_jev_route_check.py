@@ -3,7 +3,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from modelpilot.jev_route_check import child_env, command, git_diff, parse_events, validate, verify_checkout
+from modelpilot.jev_route_check import (arrangement, child_env, command, git_diff, parse_events, reconcile,
+                                        validate, verify_checkout)
 
 TOKEN = 'JEV_ROUTE_ABC'
 STDERR = '\n'.join([
@@ -107,6 +108,61 @@ class CheckoutTests(unittest.TestCase):
         self.assertTrue(verify_checkout(self.repo, self.commit, patch))
         (self.repo/'proxy.mjs').write_bytes(b'something else\r\n')
         self.assertFalse(verify_checkout(self.repo, self.commit, patch))
+
+
+
+def row(model='claude-sonnet-5', cost=.01, status=200, tools=1, kind='messages'):
+    return {'kind': kind, 'model': model, 'cost_usd': cost, 'http_status': status, 'tool_count': tools, 'applied': False}
+
+
+class WireAccountingTests(unittest.TestCase):
+    def setUp(self):
+        self.rows = [row('claude-models-catalog', None, kind='models', tools=0), row(), row(),
+                     row('claude-haiku-4-5-20251001', .001, tools=0)]
+        self.result = {'total_cost_usd': .021}
+        self.decisions = [dict(DECISION, jev={'request': {'state': {}}, 'response': {'usage': {'input_tokens': 893, 'output_tokens': 100}}})]
+
+    def test_matching_totals_and_models_reconcile(self):
+        r = reconcile(self.rows, self.result, 'claude-sonnet-5', self.decisions)
+        self.assertTrue(r['accounting_matches'], r)
+        self.assertEqual((r['proxy_requests'], r['catalog_requests'], r['unpriced_requests']), (3, 1, 0))
+        self.assertAlmostEqual(r['proxy_known_cost_usd'], .021)
+        self.assertEqual(r['helper_models'], ['claude-haiku-4-5-20251001'])
+        self.assertEqual(r['routed_model_mismatch'], [])
+
+    def test_total_mismatch_fails(self):
+        self.assertFalse(reconcile(self.rows, {'total_cost_usd': .0211}, 'claude-sonnet-5', self.decisions)['accounting_matches'])
+        self.assertFalse(reconcile(self.rows, {}, 'claude-sonnet-5', self.decisions)['accounting_matches'])
+
+    def test_unpriced_or_failed_messages_fail(self):
+        unpriced = reconcile(self.rows + [row(cost=None)], self.result, 'claude-sonnet-5', self.decisions)
+        self.assertEqual(unpriced['unpriced_requests'], 1)
+        self.assertFalse(unpriced['accounting_matches'])
+        failed = reconcile(self.rows + [row(cost=0, status=429)], self.result, 'claude-sonnet-5', self.decisions)
+        self.assertEqual(failed['non_200_requests'], 1)
+        self.assertFalse(failed['accounting_matches'])
+
+    def test_routed_model_change_fails_but_helper_call_does_not(self):
+        rows = self.rows[:2] + [row('claude-opus-5', .01)] + self.rows[3:]
+        r = reconcile(rows, self.result, 'claude-sonnet-5', self.decisions)
+        self.assertEqual(r['routed_model_mismatch'], ['claude-opus-5'])
+        self.assertFalse(r['accounting_matches'])
+
+    def test_empty_log_never_passes(self):
+        self.assertFalse(reconcile([], {'total_cost_usd': 0}, 'claude-sonnet-5', self.decisions)['accounting_matches'])
+
+    def test_router_usage_recorded_and_left_unpriced(self):
+        r = reconcile(self.rows, self.result, 'claude-sonnet-5', self.decisions)
+        self.assertEqual(r['router_usage'], [{'input_tokens': 893, 'output_tokens': 100}])
+        self.assertIsNone(r['router_cost_usd'])
+
+    def test_arrangement_labels(self):
+        wire = arrangement('compat', 'wire', {'path': 'p', 'sha256': 'x'})
+        self.assertEqual((wire['accounting'], wire['launcher'], wire['variant']), ('wire', 'accounted-harness', 'compat-patched'))
+        self.assertFalse(wire['baseline_eligible_as_stock_jev'])
+        client = arrangement('stock', 'client', None)
+        self.assertEqual((client['accounting'], client['launcher'], client['harness_patch']), ('client', 'stock', None))
+        self.assertTrue(client['baseline_eligible_as_stock_jev'])
 
 
 if __name__ == '__main__': unittest.main()
