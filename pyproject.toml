@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modelpilot"
+version = "0.1.0"
+description = "Cache experiments for risk-first model routing"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+tls = ["certifi>=2024.2.2"]
+
+[project.scripts]
+modelpilot-cache-probe = "modelpilot.cache_probe:main"
+modelpilot-proxy = "modelpilot.proxy:main"
+modelpilot-soak = "modelpilot.soak:main"
+modelpilot-state = "modelpilot.m2:main"
+modelpilot-mcp = "modelpilot.m2_mcp:main"
+modelpilot-worker-check = "modelpilot.worker_check:main"
+
+[tool.setuptools.packages.find]
+include = ["modelpilot*"]
+
+[tool.setuptools.package-data]
+modelpilot = ["*.mjs"]

@@ -1,0 +1,10 @@
+{
+  "models": ["REPLACE_STRONG_MODEL_ID", "REPLACE_CHEAP_MODEL_ID"],
+  "efforts": ["low", "high"],
+  "repeats": 3,
+  "prefix_lines": 700,
+  "max_tokens": 32,
+  "ttls": ["5m", "1h"],
+  "anthropic_beta": "",
+  "rates": {}
+}

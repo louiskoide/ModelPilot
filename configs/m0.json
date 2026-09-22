@@ -1,0 +1,14 @@
+{
+  "models": ["claude-opus-4-6", "claude-sonnet-4-6"],
+  "efforts": ["low", "high"],
+  "thinking": {"type": "adaptive"},
+  "repeats": 3,
+  "prefix_lines": 700,
+  "max_tokens": 32,
+  "ttls": ["5m"],
+  "anthropic_beta": "",
+  "rates": {
+    "claude-opus-4-6": {"input": 5, "output": 25, "write_5m": 6.25, "write_1h": 10, "read": 0.5},
+    "claude-sonnet-4-6": {"input": 3, "output": 15, "write_5m": 3.75, "write_1h": 6, "read": 0.3}
+  }
+}

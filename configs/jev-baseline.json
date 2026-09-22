@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/gargpratyush/jev-router",
+  "commit": "38da6b84ea01241bfc41fbddc0928d0f40a703f0",
+  "inspected_on": "2026-09-22",
+  "adapter_status": "not_implemented",
+  "setup_guide": "docs/jev-baseline-setup.md",
+  "local_setup": {
+    "dependencies_installed": true,
+    "sdk_version": "0.6.0",
+    "upstream_offline_tests_passed": 65,
+    "claude_version": "2.1.278",
+    "live_preflight": "not_run"
+  }
+}
