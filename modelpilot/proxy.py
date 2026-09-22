@@ -116,7 +116,8 @@ def measured_cost(observer, request, rates):
     if observer.model != request.get('model'):
         return None  # aliases/fallback need explicit rate mapping, not guessing
     usage = observer.usage
-    if usage.get('service_tier', 'standard') != 'standard' or usage.get('inference_geo', 'global') != 'global':
+    # "not_available": the model has no data-residency option (e.g. Haiku 4.5), so standard pricing applies.
+    if usage.get('service_tier', 'standard') != 'standard' or usage.get('inference_geo', 'global') not in ('global', 'not_available'):
         return None
     if request.get('speed') == 'fast':
         return None

@@ -206,3 +206,27 @@ Both `runs/jev-route-compat-20260922-133343` (client accounting) and `runs/jev-r
 Two problems surfaced, both now fixed:
 - **Client retry storm.** Claude Code retried each 401 ten times. Jev treats each retry as a new turn, so every run made 11 TypeSafe decisions. Router usage was about 1,016 input and 128 output tokens each, unpriced. Children now get `CLAUDE_CODE_MAX_RETRIES=0`, the setting's name confirmed in the 2.1.280 binary, which matches the project's no-automatic-retries rule.
 - **No early key check.** `check_anthropic_key` now makes a free `GET /v1/models?limit=1` before any TypeSafe or billable work and stops on a non-200. It also refuses Claude subscription OAuth tokens (`sk-ant-oat…`), which pass a plain `sk-ant-` prefix check but aren't API keys. A real-network check with a fake key returned the expected 401 message.
+
+## First successful live routed task (wire accounting), and what it corrected
+
+`runs/jev-route-compat-wire-20260922-151453`, patched Jev, Claude Code 2.1.280. **The task succeeded.**
+- TypeSafe chose `opus -> haiku` (p=0.99, 371 ms), and every request was rewritten to and served by `claude-haiku-4-5-20251001`.
+- The Read tool ran and the answer was correct, with 4.1 s wall time.
+- No key text is in the evidence.
+
+The run's own summary said "failed". That verdict came from three wrong assumptions in the check, not from Jev routing:
+
+1. **Client dollars are wrong for Jev.** Claude Code keys usage by the model it asked for (`jev-router`) and prices it with an unknown-model rate (`costBasis: "unknown"`, $0.025704, which works out to $4/$20 per MTok). Reconciliation now compares **token counts** instead. They matched exactly: 5,826 input and 120 output from both the proxy and the client. Dollars come from ModelPilot's rates for the served model: **$0.006426** for the successful requests.
+2. **`inference_geo: "not_available"`.** Haiku 4.5 has no data-residency option. The proxy had treated that as an unknown price tier; it is now priced at standard rates.
+3. **A reshaped resend is routed again.** Jev sent Claude Code's system-role message to Haiku, and Haiku rejected it with a 400. Claude Code then merged the environment text into the first user message and resent. That changed Jev's conversation key, so Jev made a second, identical decision.
+
+   An offline probe reproduced this exactly: a fake API that rejects system-role messages for Haiku, with real Claude Code in front of it. Same-model repeat decisions are now allowed and reported (`jev_decisions`, `extra_decisions`). Rejected requests are listed and leave provider cost **incomplete**; they are never assumed free.
+
+Replaying the saved evidence under the corrected rules (`replay-corrected-rules.json`, with the original summary unchanged) gives:
+- all routing checks passed
+- accounting matches
+- provider cost for successful requests $0.006426
+- cost incomplete, because of 1 rejected request
+- 2 Jev decisions, router usage recorded and unpriced
+
+**Open compatibility gap: Haiku 4.5 and, per the API reference, Sonnet 5 do not accept mid-conversation system messages.** Jev's `applyTier()` doesn't adapt them, so each session start routed to those tiers costs one rejected request plus one extra TypeSafe decision. Claude Code recovers without help. Whether to extend the compat patch is the user's decision.

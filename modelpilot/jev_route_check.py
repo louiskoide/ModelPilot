@@ -66,20 +66,27 @@ def validate(events, stderr, decisions, token):
     served = [model for status, model in SERVED.findall(stderr) if status == '200']
     failures = [f for f in FAILURES if f in stderr]
     usage_models = sorted((result.get('modelUsage') or {}).keys())
-    decision = decisions[0] if len(decisions) == 1 else {}
+    # A reshaped resend (after a 400) is a new conversation to Jev, so it routes again. Repeats are
+    # acceptable only when every decision picks the same model and each is logged and recorded.
+    models = {d.get('model') for d in decisions}
+    consistent = (bool(decisions) and len(models) == 1 and len(routed) == len(decisions)
+                  and all(isinstance((d.get('jev') or {}).get('request'), dict) for d in decisions))
+    decision = decisions[0] if consistent else {}
     selected = decision.get('model')
     jev = decision.get('jev') or {}
     checks = {
         'task_succeeded': result.get('subtype') == 'success' and not result.get('is_error') and token in str(result.get('result', '')),
         'read_tool_used': 'Read' in tools,
-        'one_jev_decision': len(routed) == 1 and len(decisions) == 1,
-        'decision_has_exchange': isinstance(jev.get('request'), dict) and bool(jev['request'])
-                                 and isinstance(jev.get('response'), dict) and bool(jev['response']),
-        'confidence_valid': type(decision.get('confidence')) in (int, float) and 0 <= decision['confidence'] <= 1,
+        'jev_decisions_consistent': consistent,
+        'decision_has_exchange': consistent and all(
+            isinstance((d.get('jev') or {}).get(k), dict) and bool(d['jev'][k]) for d in decisions for k in ('request', 'response')),
+        'confidence_valid': consistent and all(
+            type(d.get('confidence')) in (int, float) and 0 <= d['confidence'] <= 1 for d in decisions),
         # The turn's opening request and its tool continuation both carry the sentinel.
         'continuations_stay_on_selection': len(rewrites) >= 2 and set(rewrites) == {selected},
         'selected_model_served': bool(selected) and selected in served,
-        'selected_model_billed_by_client': bool(selected) and selected in usage_models,
+        # Claude Code keys usage by the model it asked for (the sentinel); wire mode checks the tokens.
+        'client_usage_reported': bool(usage_models),
         'no_fallback_or_errors': not failures,
     }
     hint = None
@@ -87,6 +94,7 @@ def validate(events, stderr, decisions, token):
         hint = ('Sentinel rewritten without any Jev decision: Jev extracted no routable prompt from this client '
                 'request shape (run python3 -m modelpilot.jev_compat). This is silent fail-open, not routing.')
     return {'passed': all(checks.values()), 'checks': checks, 'hint': hint, 'selected_model': selected,
+            'jev_decisions': len(decisions), 'extra_decisions': max(0, len(decisions) - 1),
             'reason': decision.get('reason'), 'confidence': decision.get('confidence'),
             'jev_ms': int(routed[0][1]) if routed else None, 'rewrites': rewrites, 'served_models': served,
             'fallback_markers': failures, 'tool_names': tools, 'client_cost_usd': result.get('total_cost_usd'),
@@ -122,29 +130,40 @@ def check_anthropic_key(key, send=catalog_status):
     return None
 
 
-def reconcile(rows, result, selected, decisions):
-    """Wire-level accounting: every Messages request measured, priced and on the routed model.
+TOKEN_FIELDS = (('input_tokens', 'inputTokens'), ('output_tokens', 'outputTokens'),
+                ('cache_read_input_tokens', 'cacheReadInputTokens'), ('cache_creation_input_tokens', 'cacheCreationInputTokens'))
 
-    Helper calls without tools (titles, summaries) are Claude Code's own and are listed separately.
-    Router work is recorded as usage; it stays unpriced until TypeSafe rates are configured.
+
+def reconcile(rows, result, selected, decisions):
+    """Wire-level accounting: every successful request measured, priced and on the routed model.
+
+    Dollars come from ModelPilot's rates for the model actually served. Claude Code only knows the
+    jev-router sentinel and prices it with its own guess, so the client is reconciled by token counts.
+    Helper calls without tools are Claude Code's own and are listed separately. Rejected requests
+    are listed and leave cost incomplete: they are never assumed free. Router work stays unpriced.
     """
     messages = [r for r in rows if r.get('kind') == 'messages']
-    known = [r['cost_usd'] for r in messages if r.get('cost_usd') is not None]
-    unpriced = sum(r.get('cost_usd') is None for r in messages)
-    failed = sum(r.get('http_status') != 200 for r in messages)
-    routed = [r.get('model') for r in messages if r.get('tool_count', 0) > 0]
-    helpers = sorted({r.get('model') for r in messages if r.get('tool_count', 0) == 0})
-    mismatch = [m for m in routed if m != selected]
-    client = result.get('total_cost_usd')
-    total = sum(known)
-    matches = (bool(messages) and bool(routed) and not unpriced and not failed and not mismatch
-               and isinstance(client, (int, float)) and not isinstance(client, bool) and abs(client - total) < 1e-6)
-    usage = [((d.get('jev') or {}).get('response') or {}).get('usage') for d in decisions]
-    return {'accounting_matches': matches, 'proxy_requests': len(messages),
-            'catalog_requests': sum(r.get('kind') == 'models' for r in rows),
-            'proxy_known_cost_usd': total, 'client_cost_usd': client, 'unpriced_requests': unpriced,
-            'non_200_requests': failed, 'routed_models': routed, 'helper_models': helpers,
-            'routed_model_mismatch': mismatch, 'router_usage': [u for u in usage if u], 'router_cost_usd': None}
+    ok = [r for r in messages if r.get('http_status') == 200]
+    rejected = [{'http_status': r.get('http_status'), 'model': r.get('model')} for r in messages if r.get('http_status') != 200]
+    unpriced = sum(r.get('cost_usd') is None for r in ok)
+    routed = [r.get('model') for r in ok if r.get('tool_count', 0) > 0]
+    helpers = sorted({r.get('model') for r in ok if r.get('tool_count', 0) == 0})
+    mismatch = [r.get('model') for r in messages if r.get('tool_count', 0) > 0 and r.get('model') != selected]
+    proxy_tokens = {wire: sum((r.get('usage') or {}).get(wire, 0) for r in ok) for wire, _ in TOKEN_FIELDS}
+    usage = result.get('modelUsage') or {}
+    client_tokens = {wire: sum(m.get(name, 0) for m in usage.values() if isinstance(m, dict)) for wire, name in TOKEN_FIELDS}
+    tokens_match = bool(usage) and proxy_tokens == client_tokens
+    matches = bool(ok) and bool(routed) and not unpriced and not mismatch and tokens_match
+    router = [((d.get('jev') or {}).get('response') or {}).get('usage') for d in decisions]
+    return {'accounting_matches': matches, 'cost_complete': matches and not rejected,
+            'proxy_requests': len(messages), 'catalog_requests': sum(r.get('kind') == 'models' for r in rows),
+            'proxy_known_cost_usd': sum(r['cost_usd'] for r in ok if r.get('cost_usd') is not None),
+            'proxy_tokens': proxy_tokens, 'client_tokens': client_tokens, 'tokens_match': tokens_match,
+            'client_cost_usd': result.get('total_cost_usd'),
+            'client_cost_basis': 'sentinel_model_unknown_price' if 'jev-router' in usage else 'client_model_table',
+            'unpriced_requests': unpriced, 'rejected_requests': rejected, 'routed_models': routed,
+            'helper_models': helpers, 'routed_model_mismatch': mismatch,
+            'router_usage': [u for u in router if u], 'router_cost_usd': None}
 
 
 def arrangement(variant, accounting, patch_info):
@@ -276,6 +295,9 @@ def main():
         wire = reconcile(rows, final, report.get('selected_model'), json.loads((run/'decisions.json').read_text())
                          if (run/'decisions.json').exists() else [])
         report['wire'] = wire
+        # Provider (Anthropic) cost can be complete while router cost stays unpriced.
+        report['provider_cost_complete'] = wire['cost_complete']
+        report['provider_cost_usd'] = wire['proxy_known_cost_usd'] if wire['cost_complete'] else None
         if not wire['accounting_matches']:
             report['status'] = 'failed'
     (run/'summary.json').write_text(json.dumps(report, indent=2) + '\n')
