@@ -53,6 +53,7 @@ def main():
     if not key or any(c.isspace() for c in key):
         raise SystemExit('Missing or malformed key. No requests sent.')
     run = root / 'runs' / ('jev-preflight-' + time.strftime('%Y%m%d-%H%M%S'))
+    run.parent.mkdir(exist_ok=True)  # runs/ is gitignored, so absent in a fresh clone
     run.mkdir(mode=0o700)
     home = run / 'home'; home.mkdir(mode=0o700)
     tmp = run / 'tmp'; tmp.mkdir(mode=0o700)
