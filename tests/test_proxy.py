@@ -32,6 +32,15 @@ class ObserverTests(unittest.TestCase):
         observer.complete = True
         self.assertIsNone(measured_cost(observer, {'model': 'unknown'}, RATES))
 
+    def test_inference_geo_not_applicable_is_standard_price(self):
+        # Models without data-residency options (e.g. Haiku 4.5) report "not_available".
+        for geo, priced in (('not_available', True), ('global', True), ('us', False)):
+            observer = UsageObserver(False)
+            observer.feed(json.dumps({'model': 'claude-opus-4-6', 'usage': dict(USAGE, inference_geo=geo)}).encode())
+            observer.finish()
+            cost = measured_cost(observer, {'model': 'claude-opus-4-6'}, RATES)
+            self.assertEqual(cost is not None, priced, geo)
+
     def test_forecast_accounts_for_rebuild_once_and_never_applies(self):
         result = forecast({'model': 'claude-opus-4-6'}, USAGE, RATES)
         one = result['scenarios'][0]

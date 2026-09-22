@@ -44,15 +44,34 @@ class RouteCheckTests(unittest.TestCase):
                                 'rewrite jev-router -> claude-opus-5\n[jev] 200 served by claude-sonnet-5\n[jev] passthrough', 1)
         self.assertFalse(validate(events(), stderr, [DECISION], TOKEN)['checks']['continuations_stay_on_selection'])
 
-    def test_serving_and_billing_must_match_selection(self):
+    def test_serving_must_match_selection_and_client_usage_must_exist(self):
         stderr = STDERR.replace('served by claude-sonnet-5', 'served by claude-opus-5')
         self.assertFalse(validate(events(), stderr, [DECISION], TOKEN)['checks']['selected_model_served'])
-        billed = validate(events({'claude-opus-5': {}}), STDERR, [DECISION], TOKEN)
-        self.assertFalse(billed['checks']['selected_model_billed_by_client'])
+        # Claude Code only knows the sentinel, so its per-model usage cannot name the routed model.
+        sentinel = validate(events({'jev-router': {'inputTokens': 1}}), STDERR, [DECISION], TOKEN)
+        self.assertTrue(sentinel['passed'], sentinel['checks'])
+        empty = validate([e if e['type'] != 'result' else dict(e, modelUsage={}) for e in events()], STDERR, [DECISION], TOKEN)
+        self.assertFalse(empty['checks']['client_usage_reported'])
 
-    def test_wrong_answer_or_extra_decisions_fail(self):
+    def test_wrong_answer_fails(self):
         self.assertFalse(validate(events(answer='guess'), STDERR, [DECISION], TOKEN)['passed'])
-        self.assertFalse(validate(events(), STDERR, [DECISION, DECISION], TOKEN)['checks']['one_jev_decision'])
+
+    def test_repeated_same_model_decisions_are_reported_not_hidden(self):
+        # Claude Code resends a reshaped opening request after a 400; Jev sees a new conversation.
+        stderr = STDERR + '\n[jev] 9f9f9f9f9f9f 101ms p=0.95 opus -> sonnet (jev) ctx~5100 | Use the Read tool'
+        result = validate(events(), stderr, [DECISION, DECISION], TOKEN)
+        self.assertTrue(result['passed'], result['checks'])
+        self.assertEqual((result['jev_decisions'], result['extra_decisions']), (2, 1))
+
+    def test_decisions_on_different_models_fail(self):
+        stderr = STDERR + '\n[jev] 9f9f9f9f9f9f 101ms p=0.95 opus -> opus (jev) ctx~5100 | Use the Read tool'
+        other = dict(DECISION, model='claude-opus-5', tier='opus')
+        result = validate(events(), stderr, [DECISION, other], TOKEN)
+        self.assertFalse(result['checks']['jev_decisions_consistent'])
+        self.assertIsNone(result['selected_model'])
+
+    def test_decision_log_and_records_must_agree(self):
+        self.assertFalse(validate(events(), STDERR, [DECISION, DECISION], TOKEN)['checks']['jev_decisions_consistent'])
 
     def test_unrouted_sentinel_rewrite_is_flagged(self):
         stderr = '[jev] 1a2b3c4d5e6f rewrite jev-router -> claude-opus-5\n' * 3
@@ -113,36 +132,52 @@ class CheckoutTests(unittest.TestCase):
 
 
 
-def row(model='claude-sonnet-5', cost=.01, status=200, tools=1, kind='messages'):
-    return {'kind': kind, 'model': model, 'cost_usd': cost, 'http_status': status, 'tool_count': tools, 'applied': False}
+def row(model='claude-sonnet-5', cost=.01, status=200, tools=1, kind='messages', usage=None):
+    usage = {'input_tokens': 1000, 'output_tokens': 10, 'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0} \
+        if usage is None and status == 200 and kind == 'messages' else (usage or {})
+    return {'kind': kind, 'model': model, 'cost_usd': cost, 'http_status': status, 'tool_count': tools, 'applied': False,
+            'usage': usage}
+
+
+def client_usage(model, inp, out):
+    return {model: {'inputTokens': inp, 'outputTokens': out, 'cacheReadInputTokens': 0, 'cacheCreationInputTokens': 0, 'costUSD': .05}}
 
 
 class WireAccountingTests(unittest.TestCase):
     def setUp(self):
-        self.rows = [row('claude-models-catalog', None, kind='models', tools=0), row(), row(),
-                     row('claude-haiku-4-5-20251001', .001, tools=0)]
-        self.result = {'total_cost_usd': .021}
+        self.rows = [row(None, None, kind='models', tools=0), row(), row(),
+                     row('claude-haiku-4-5-20251001', .001, tools=0, usage={'input_tokens': 100, 'output_tokens': 5,
+                         'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0})]
+        self.result = {'total_cost_usd': .05, 'modelUsage': dict(client_usage('jev-router', 2000, 20),
+                                                                  **client_usage('claude-haiku-4-5-20251001', 100, 5))}
         self.decisions = [dict(DECISION, jev={'request': {'state': {}}, 'response': {'usage': {'input_tokens': 893, 'output_tokens': 100}}})]
 
-    def test_matching_totals_and_models_reconcile(self):
+    def test_tokens_and_models_reconcile(self):
         r = reconcile(self.rows, self.result, 'claude-sonnet-5', self.decisions)
         self.assertTrue(r['accounting_matches'], r)
+        self.assertTrue(r['cost_complete'])
         self.assertEqual((r['proxy_requests'], r['catalog_requests'], r['unpriced_requests']), (3, 1, 0))
         self.assertAlmostEqual(r['proxy_known_cost_usd'], .021)
         self.assertEqual(r['helper_models'], ['claude-haiku-4-5-20251001'])
         self.assertEqual(r['routed_model_mismatch'], [])
+        # The client priced the sentinel with its own guess; its dollars are recorded, never trusted.
+        self.assertEqual(r['client_cost_basis'], 'sentinel_model_unknown_price')
 
-    def test_total_mismatch_fails(self):
-        self.assertFalse(reconcile(self.rows, {'total_cost_usd': .0211}, 'claude-sonnet-5', self.decisions)['accounting_matches'])
+    def test_token_mismatch_or_missing_client_usage_fails(self):
+        wrong = dict(self.result, modelUsage=client_usage('jev-router', 2001, 25))
+        self.assertFalse(reconcile(self.rows, wrong, 'claude-sonnet-5', self.decisions)['accounting_matches'])
         self.assertFalse(reconcile(self.rows, {}, 'claude-sonnet-5', self.decisions)['accounting_matches'])
 
-    def test_unpriced_or_failed_messages_fail(self):
-        unpriced = reconcile(self.rows + [row(cost=None)], self.result, 'claude-sonnet-5', self.decisions)
-        self.assertEqual(unpriced['unpriced_requests'], 1)
-        self.assertFalse(unpriced['accounting_matches'])
-        failed = reconcile(self.rows + [row(cost=0, status=429)], self.result, 'claude-sonnet-5', self.decisions)
-        self.assertEqual(failed['non_200_requests'], 1)
-        self.assertFalse(failed['accounting_matches'])
+    def test_unpriced_success_fails(self):
+        r = reconcile(self.rows + [row(cost=None, usage={'input_tokens': 0, 'output_tokens': 0})], self.result, 'claude-sonnet-5', self.decisions)
+        self.assertEqual(r['unpriced_requests'], 1)
+        self.assertFalse(r['accounting_matches'])
+
+    def test_rejected_request_is_listed_and_cost_marked_incomplete(self):
+        r = reconcile(self.rows + [row(cost=None, status=400)], self.result, 'claude-sonnet-5', self.decisions)
+        self.assertTrue(r['accounting_matches'], r)  # tokens and models still reconcile
+        self.assertFalse(r['cost_complete'])  # never assumed free
+        self.assertEqual(r['rejected_requests'], [{'http_status': 400, 'model': 'claude-sonnet-5'}])
 
     def test_routed_model_change_fails_but_helper_call_does_not(self):
         rows = self.rows[:2] + [row('claude-opus-5', .01)] + self.rows[3:]
@@ -151,7 +186,7 @@ class WireAccountingTests(unittest.TestCase):
         self.assertFalse(r['accounting_matches'])
 
     def test_empty_log_never_passes(self):
-        self.assertFalse(reconcile([], {'total_cost_usd': 0}, 'claude-sonnet-5', self.decisions)['accounting_matches'])
+        self.assertFalse(reconcile([], {'modelUsage': {}}, 'claude-sonnet-5', self.decisions)['accounting_matches'])
 
     def test_router_usage_recorded_and_left_unpriced(self):
         r = reconcile(self.rows, self.result, 'claude-sonnet-5', self.decisions)
