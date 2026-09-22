@@ -20,7 +20,7 @@
     "reason": "Claude Code >=2.1.278 appends a trailing system-role message; stock newTurnPrompt() then never routes",
     "upstream_tests": "66/66 (65 upstream + 1 patch test)",
     "offline_probe": "routes on 2.1.280 with stable continuation",
-    "live_route_check": "not_run",
+    "live_route_check": "routing observed live (TypeSafe opus->haiku p=0.99, 398 ms) in runs 133343 and wire 144020; both failed on Anthropic 401 invalid key; not yet passed",
     "stock_jev_equivalent": false,
     "wire_accounting": "offline probe passed on 2.1.280 (catalog + 2 priced rows on selected model); live not run",
     "rates": "configs/jev-rates.json"

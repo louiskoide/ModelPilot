@@ -16,7 +16,10 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
+from .cache_probe import NoRedirect, tls_context
 from .proxy import ProxyServer
 
 DECISION = re.compile(r'^\[jev\] (\w+) (\d+)ms p=([0-9.]+) (\w+) -> (\w+) \(([^)]*)\)', re.M)
@@ -90,6 +93,35 @@ def validate(events, stderr, decisions, token):
             'client_model_usage': result.get('modelUsage'), 'num_turns': result.get('num_turns')}
 
 
+def catalog_status(url, headers):
+    request = urllib.request.Request(url, headers=headers, method='GET')
+    opener = urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(context=tls_context()))
+    try:
+        with opener.open(request, timeout=20) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+def check_anthropic_key(key, send=catalog_status):
+    """Free pre-check (model catalog, unbilled) so a bad key never reaches TypeSafe or a paid run.
+
+    Returns None when the key works, otherwise a reason. The key itself is never included.
+    """
+    if key.startswith('sk-ant-oat'):
+        return ('That is a Claude subscription OAuth token, not an API key. API cost comparison needs an '
+                'Anthropic Console API key (starts with sk-ant-api).')
+    if not key.startswith('sk-ant-') or any(c.isspace() for c in key):
+        return 'Anthropic key format is invalid.'
+    try:
+        status = send('https://api.anthropic.com/v1/models?limit=1', {'x-api-key': key, 'anthropic-version': '2023-06-01'})
+    except (OSError, ValueError) as error:
+        return f'Could not reach the Anthropic API to check the key ({type(error).__name__}).'
+    if status != 200:
+        return f'Anthropic rejected the key on a free catalog request (HTTP {status}). Check it in the Console.'
+    return None
+
+
 def reconcile(rows, result, selected, decisions):
     """Wire-level accounting: every Messages request measured, priced and on the routed model.
 
@@ -128,7 +160,7 @@ def child_env(base, jev_key, anthropic_key, home, tmp, config, cli_dir):
     node_dir = str(Path(shutil.which('node', path=base.get('PATH')) or 'node').parent)
     env.update(PATH=os.pathsep.join([str(cli_dir), node_dir, '/usr/bin', '/bin']), HOME=str(home), TMPDIR=str(tmp),
                CLAUDE_CONFIG_DIR=str(config), JEV_API_KEY=jev_key, ANTHROPIC_API_KEY=anthropic_key,
-               JEV_DEBUG='1', JEV_NO_STATUSLINE='1', DISABLE_AUTOUPDATER='1',
+               JEV_DEBUG='1', JEV_NO_STATUSLINE='1', DISABLE_AUTOUPDATER='1', CLAUDE_CODE_MAX_RETRIES='0',
                CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1')
     return env
 
@@ -180,8 +212,9 @@ def main():
     anthropic_key = os.environ.get('ANTHROPIC_API_KEY') or getpass.getpass('Anthropic API key (hidden): ').strip()
     if not jev_key or any(c.isspace() for c in jev_key):
         raise SystemExit('Missing or malformed TypeSafe key. No requests sent.')
-    if not anthropic_key.startswith('sk-ant-') or any(c.isspace() for c in anthropic_key):
-        raise SystemExit('Anthropic key format is invalid. No requests sent.')
+    problem = check_anthropic_key(anthropic_key)
+    if problem:
+        raise SystemExit(problem + ' No TypeSafe or billable requests sent.')
     run = root/'runs'/('jev-route-'+args.variant+('-wire' if args.accounting == 'wire' else '')+'-'+time.strftime('%Y%m%d-%H%M%S'))
     run.parent.mkdir(exist_ok=True)
     run.mkdir(mode=0o700)

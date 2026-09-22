@@ -193,3 +193,16 @@ The tests were written and committed failing first (`42ecd88`), then the code be
 
   Router usage from `decisions.json` is recorded, and router cost stays unpriced. Reports label `accounting: wire` and `launcher: accounted-harness`.
 - **Offline probe.** `python3 -m modelpilot.jev_compat --jev-root work/jev-router-compat --accounting wire` ran real Claude Code 2.1.280 → patched Jev → ModelPilot proxy → fake API, with no keys and no cost. It **passed**: one catalog row, one routing decision, and both the opening request and the tool follow-up on `claude-sonnet-5` and priced, with 0 unpriced rows.
+
+## Live compat runs: routing works, Anthropic key rejected
+
+Both `runs/jev-route-compat-20260922-133343` (client accounting) and `runs/jev-route-compat-wire-20260922-144020` (wire accounting) failed on **Anthropic authentication**. Every request returned 401 "API key is invalid", including the catalog GET in the wire run. Client cost was $0 and ModelPilot's proxy recorded 11 unpriced 401 rows. No provider tokens were billed, and no key text is in the evidence.
+
+**The patched Jev routed live for the first time.**
+- A genuine TypeSafe decision took 398 ms: `opus -> haiku (jev)`, p=0.99.
+- Every request was rewritten to `claude-haiku-4-5-20251001`.
+- ModelPilot's proxy sat behind Jev and saw the real routed model, one catalog request and every Messages request. The wire arrangement works end to end, up to the provider's auth check.
+
+Two problems surfaced, both now fixed:
+- **Client retry storm.** Claude Code retried each 401 ten times. Jev treats each retry as a new turn, so every run made 11 TypeSafe decisions. Router usage was about 1,016 input and 128 output tokens each, unpriced. Children now get `CLAUDE_CODE_MAX_RETRIES=0`, the setting's name confirmed in the 2.1.280 binary, which matches the project's no-automatic-retries rule.
+- **No early key check.** `check_anthropic_key` now makes a free `GET /v1/models?limit=1` before any TypeSafe or billable work and stops on a non-200. It also refuses Claude subscription OAuth tokens (`sk-ant-oat…`), which pass a plain `sk-ant-` prefix check but aren't API keys. A real-network check with a fake key returned the expected 401 message.
