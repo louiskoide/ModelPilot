@@ -8,7 +8,8 @@
     "dependencies_installed": true,
     "sdk_version": "0.6.0",
     "upstream_offline_tests_passed": 65,
-    "claude_version": "2.1.278",
-    "live_preflight": "not_run"
+    "claude_version": "2.1.280 (fresh clone; 2.1.278 on original machine)",
+    "live_preflight": "stock_deadline_passed_20260922-120150",
+    "end_to_end_routing": "prepared_not_run"
   }
 }

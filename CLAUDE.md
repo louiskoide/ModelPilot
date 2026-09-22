@@ -6,8 +6,10 @@ Last updated: September 22, 2026. Read this first, then the relevant milestone g
 
 Build a cache-aware governor for Claude Code in the user's existing repository, https://github.com/louiskoide/ModelPilot. The user requested a risk-first implementation and a handoff to Claude Code. The selected Jev baseline is https://github.com/gargpratyush/jev-router; determine and satisfy its setup requirements before running a comparison. See `docs/jev-baseline-setup.md` for inspected source, pinned revision and prerequisites.
 
-Local project root at handoff:
+Local project root at original handoff:
 `/Users/jasonosier/Documents/Codex/2026-09-21/build-order-risk-first-m0-test/outputs/ModelPilot`
+
+Current Claude Code checkout: `/Users/louiskoide/ModelPilot` (fresh clone; no `runs/`, `work/` Jev checkout or local Claude client travelled with it, so the evidence table below refers to the original machine).
 
 The initial project publication targets `main` in the GitHub repository above. Check `git status`, `git log` and the remote before changing branch history. Preserve existing work. Raw `runs/` evidence, dependencies and work directories are ignored and do not travel with Git. Markdown results are the portable summaries. Do not claim evidence exists on a different checkout unless it was copied there.
 
@@ -26,6 +28,7 @@ Switching model OR effort wrote a new cache prefix in tested M0 conditions. Retu
 | M4 | Source-span/test-evidence verifier; shadow lifecycle cost planner; two live drafts | Real cascade fallback execution, semantic/edit verification, integration |
 | M5 | In-memory rebase queue, thread-safe budget reservations, full-information offline threshold proposal | Durable integrated enforcement; real calibration; contextual bandit |
 | M6 | Paired four-arm direct API smoke benchmark; 16/16 passed | Integrated governor and Jev adapters; representative repository tasks, repeated trials |
+| Governor | Durable dry-run surface over one SQLite DB: budget admit/settle with crash-orphan recovery, ledger-fenced review, durable rebase plan/ack, decision journal, governed worker transport; 20 offline tests incl. multi-process | Proxy wiring, Claude Code hooks, correction/rebase delivery to a client, fallback execution, active mode |
 
 The project is a tested set of components and bounded harnesses, not an operational end-to-end governor. Never present the toy benchmark as proof of production quality or savings.
 
@@ -38,6 +41,8 @@ The project is a tested set of components and bounded harnesses, not an operatio
 - `workers.py`, `worker_check.py`: bounded search/fixed-command host adapters with one Sonnet summary per task; per-role histories, leases and accounting. Test subprocesses do not inherit provider credentials. This is not an OS sandbox.
 - `m4.py`, `cascade_check.py`: dry-run verifier and shadow planner; two-request live draft check. Exact spans prove grounding, not relevance. Destructive operations excluded; edits escalate.
 - `m5.py`: coalesces latest per-kind changes at idle/expiry/justified-switch/explicit-boundary points; defers during in-flight work. Budget reserves before dispatch, settles actual cost, halts on unknown cost; caller integration required. Learning needs both draft/fallback outcomes and disjoint train/validation data; not a bandit.
+- `governor.py`: durable integration surface (see `docs/governor.md`). Dry-run only; `mode` other than dry-run raises. Expired pending reservations become orphaned (unknown cost, halt) until settled with measured evidence. `governed_transport` wraps a Worker transport with admit/settle.
+- `jev_check.py`, `jev_route_check.py`: pinned Jev router-only credential preflight; one-task end-to-end routing preflight through the unmodified launcher with isolated HOME/config and wire-confirmed serving model.
 - `evaluate.py`: fresh-context Opus/Sonnet 4.6 × low/high, adaptive thinking, four typed-answer tasks, 16 requests, no retries. Unknown cost stops; $1 post-response stop threshold is not a hard ceiling.
 - `configs/m0.json`: tested model IDs, rates, cache parameters. Prices are configured estimates, not invoice reconciliation or perpetually current facts.
 
@@ -78,18 +83,19 @@ Python >=3.10; standard library runtime, optional `certifi`. Run from ModelPilot
 python3 -m unittest discover -s tests
 python3 -m modelpilot.evaluate
 python3 -m modelpilot.m5 --out runs/m5-new-report.json
+python3 -m modelpilot.governor --out runs/governor-demo.json
 ```
 
-Proxy tests bind local loopback sockets; a sandbox denial is not a product test failure. Last handoff verification: all 87 offline tests passed on September 22, 2026. No need to rerun expensive cache/TTL tests for documentation changes.
+Proxy tests bind local loopback sockets; a sandbox denial is not a product test failure. Last verification: 115 offline tests on September 22, 2026 (87 prior + 20 governor + 8 Jev route check). On this Mac only system Python 3.9 exists; there 113 pass and the two `test_transport` HTTPError tests error because of a 3.9 `HTTPError` quirk, not a product failure. CI runs 3.10 and 3.14. No need to rerun expensive cache/TTL tests for documentation changes.
 
-Paid entry points (inspect each plan first): `modelpilot.cache_probe`, `modelpilot.claude_check --suite m1|m2`, `modelpilot.worker_check`, `modelpilot.cascade_check`, `modelpilot.evaluate`, all with `--live`. Test limits are stopping thresholds, not hard billing caps.
+Paid entry points (inspect each plan first): `modelpilot.cache_probe`, `modelpilot.claude_check --suite m1|m2`, `modelpilot.worker_check`, `modelpilot.cascade_check`, `modelpilot.evaluate`, `modelpilot.jev_check`, `modelpilot.jev_route_check`, all with `--live`. Test limits are stopping thresholds, not hard billing caps.
 
 ## Next work, in order
 
-1. Read the pinned Jev setup note. Isolated dependencies are installed and all 65 upstream tests pass; the pinned checkout is unchanged. Project-local Claude 2.1.278 is verified. Configure child CLI PATH; obtain TypeSafe credential locally and establish router pricing/quotas. Validate sentinel routing and real provider model selection before a comparison. Do not count fail-open Claude as Jev routing.
-2. Define the end-to-end ModelPilot integration surface: observe real tasks/tools, supply ledger corrections, dispatch workers, apply verified fallback decisions, reserve/settle budget and acknowledge rebase changes. Add durable recovery and concurrency tests before enabling actions.
+1. Jev baseline. Credential and scoring gate passed at the stock deadline (`runs/jev-preflight-20260922-120150`, 393 ms). The pinned checkout was re-cloned into `work/jev-router-baseline` (65/65 upstream tests). Next: run `python3 -m modelpilot.jev_route_check --live` (one billable stock-launcher task) to validate real routing, continuation stability and serving model with Claude Code 2.1.280. Then build the wire-level accounting adapter and establish TypeSafe pricing. Do not count fail-open Claude as Jev routing.
+2. Integration surface. Done offline in `governor.py`: durable reserve/settle with crash recovery, ledger-fenced review, rebase plan/ack, journal, governed worker transport, and multi-process tests. Remaining: wire proxy usage records to settlement through a shared request ID; add Claude Code hooks that feed tool results to `observe` and deliver corrections and rebase plans; execute `would_escalate` fallbacks through `admit`. Keep dry-run until item 4 has evidence.
 3. Build representative, reproducible repository-task fixtures and shared graders; isolate checkouts and normalize tool access, model availability, auth, cache state and effort. Separate tuning from final evaluation.
 4. Add integrated ModelPilot, stock pinned Jev, and fixed-model/effort arms. Record any model-constrained Jev variant separately. Measure all costs, quality, wall time, routing failures and uncertainty together. Existing direct-API toy results cannot be reused as a fair agent baseline.
 5. Update docs with measured evidence; report incomplete gates explicitly. M6 is not complete until these comparisons actually run.
 
-Prepared Jev credential check: `python3 -m modelpilot.jev_check --live` privately prompts for a TypeSafe key and makes one router-only decision (one upstream retry possible); provider calls are zero, router cost unpriced. Three helper tests pass. Live check has not run; neither key was present in the assistant process. See setup guide for scope.
+Jev credential check (`python3 -m modelpilot.jev_check --live`) has passed. Keys are entered by the user in their own Terminal at hidden prompts; never ask for them in chat. A TypeSafe key was exposed in a screenshot on September 22, 2026 and must be treated as revoked. See setup guide for all preflight runs.
