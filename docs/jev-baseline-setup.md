@@ -230,3 +230,5 @@ Replaying the saved evidence under the corrected rules (`replay-corrected-rules.
 - 2 Jev decisions, router usage recorded and unpriced
 
 **Open compatibility gap: Haiku 4.5 and, per the API reference, Sonnet 5 do not accept mid-conversation system messages.** Jev's `applyTier()` doesn't adapt them, so each session start routed to those tiers costs one rejected request plus one extra TypeSafe decision. Claude Code recovers without help. Whether to extend the compat patch is the user's decision.
+
+**Decision (September 22, 2026): measure the overhead, don't patch it.** The compat patch stays at one functional line. The rejected request and the extra TypeSafe decision count as real costs of running Jev with current Claude Code. Benchmark reports carry `rejected_requests`, `extra_decisions` and router usage per task. Provider cost stays marked incomplete while any request was rejected, until the billing of rejected 400s is confirmed, for example from Console usage.
