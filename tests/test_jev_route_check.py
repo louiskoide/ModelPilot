@@ -50,6 +50,13 @@ class RouteCheckTests(unittest.TestCase):
         self.assertFalse(validate(events(answer='guess'), STDERR, [DECISION], TOKEN)['passed'])
         self.assertFalse(validate(events(), STDERR, [DECISION, DECISION], TOKEN)['checks']['one_jev_decision'])
 
+    def test_unrouted_sentinel_rewrite_is_flagged(self):
+        stderr = '[jev] 1a2b3c4d5e6f rewrite jev-router -> claude-opus-5\n' * 3
+        result = validate(events({'claude-opus-5': {}}), stderr, [], TOKEN)
+        self.assertFalse(result['passed'])
+        self.assertIn('without any Jev decision', result['hint'])
+        self.assertIsNone(validate(events(), STDERR, [DECISION], TOKEN)['hint'])
+
     def test_command_never_pins_a_model(self):
         cmd = command(__import__('pathlib').Path('/jev'), 'prompt', .5)
         self.assertNotIn('--model', cmd)

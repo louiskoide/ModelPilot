@@ -61,7 +61,11 @@ def validate(events, stderr, decisions, token):
         'selected_model_billed_by_client': bool(selected) and selected in usage_models,
         'no_fallback_or_errors': not failures,
     }
-    return {'passed': all(checks.values()), 'checks': checks, 'selected_model': selected,
+    hint = None
+    if rewrites and not routed:
+        hint = ('Sentinel rewritten without any Jev decision: Jev extracted no routable prompt from this client '
+                'request shape (run python3 -m modelpilot.jev_compat). This is silent fail-open, not routing.')
+    return {'passed': all(checks.values()), 'checks': checks, 'hint': hint, 'selected_model': selected,
             'reason': decision.get('reason'), 'confidence': decision.get('confidence'),
             'jev_ms': int(routed[0][1]) if routed else None, 'rewrites': rewrites, 'served_models': served,
             'fallback_markers': failures, 'tool_names': tools, 'client_cost_usd': result.get('total_cost_usd'),
@@ -92,13 +96,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--live', action='store_true', help='Required: sends billable Anthropic and TypeSafe requests')
     parser.add_argument('--jev-root', type=Path)
+    parser.add_argument('--claude', type=Path, help='Claude Code executable (default: work/claude-client, then PATH)')
     parser.add_argument('--budget', type=float, default=.5, help='Claude Code stop threshold in USD; not a hard billing cap')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     pin = json.loads((root/'configs/jev-baseline.json').read_text())
     jev = (args.jev_root or root/'work/jev-router-baseline').resolve()
     local = root/'work/claude-client/node_modules/.bin/claude'
-    cli = local if local.exists() else Path(shutil.which('claude') or '')
+    cli = args.claude.resolve() if args.claude else local if local.exists() else Path(shutil.which('claude') or '')
     if not args.live:
         print(f'Plan: one Read-tool task through stock {jev.name} with the jev-router sentinel; Claude Code stop threshold '
               f'${args.budget:.2f} (not a hard cap), max 5 turns, isolated HOME/config; TypeSafe cost unpriced. Add --live.')

@@ -10,6 +10,6 @@
     "upstream_offline_tests_passed": 65,
     "claude_version": "2.1.280 (fresh clone; 2.1.278 on original machine)",
     "live_preflight": "stock_deadline_passed_20260922-120150",
-    "end_to_end_routing": "prepared_not_run"
+    "end_to_end_routing": "failed_20260922-121832: anthropic 401; stock Jev does not route Claude Code >=2.1.278 (trailing system message); routes on 2.1.101 offline"
   }
 }

@@ -110,3 +110,25 @@ A pass requires all of the following:
 A fail-open Claude answer fails this check.
 
 Accounting in this preflight is client-reported (`total_cost_usd`, `modelUsage`) with router cost unpriced. It is not a wire-level reconciliation. The transparent accounting adapter through `startProxy({upstreamURL})` remains the next step before a full comparison. The Claude Code `--max-budget-usd` threshold (default $0.50) is a stop threshold, not a billing cap.
+
+## First end-to-end routing preflight: failed twice over
+
+`runs/jev-route-20260922-121832` (stock launcher, Claude Code 2.1.280, isolated) failed with $0 client cost.
+
+1. **Anthropic authentication.** Every Messages request through Jev's proxy returned 401 `authentication_failed`. Claude Code retried 10 times over 182 s, then produced a synthetic error answer. The supplied Anthropic key was rejected. No tokens were billed.
+2. **Silent client incompatibility, which a valid key would not fix.** Stderr shows 11 `rewrite jev-router -> claude-opus-5` lines and **no** Jev decision. Claude Code 2.1.278 and 2.1.280 send the user prompt followed by a trailing `role: "system"` message carrying environment context. Pinned Jev's `newTurnPrompt()` only routes when the *last* message is `user`, so it extracts no prompt, never calls TypeSafe, and rewrites every request to its default opus tier without logging a failure.
+
+The offline probe (`python3 -m modelpilot.jev_compat --claude <cli>`) reproduced this. It uses real Claude Code, Jev's real `startProxy()`, a loopback fake Messages API and a fake router, with no keys, network or cost:
+
+| Claude Code | Last message role | Jev prompt extracted | Router called |
+| --- | --- | --- | --- |
+| 2.1.101 (Jev's documented test version) | user | yes | yes (routed to `claude-sonnet-5`) |
+| 2.1.278 | system | no | no |
+| 2.1.280 | system | no | no |
+
+The probe uses Jev's exported harness hook, not the stock launcher, so it is a compatibility diagnostic only. **Stock pinned Jev with current Claude Code does not route**: it behaves as a fixed opus-tier arm. Reporting that as Jev routing would be wrong. The baseline choices are:
+- stock Jev on Claude Code 2.1.101, with all arms on that version
+- a separately labeled compatibility-patched Jev variant on the current client
+- a later upstream Jev revision, re-pinned after inspection
+
+`jev_route_check` now accepts `--claude` and reports this failure mode with an explicit hint.
