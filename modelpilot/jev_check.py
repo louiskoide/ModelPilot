@@ -33,12 +33,16 @@ def main():
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     pin = json.loads((root / 'configs/jev-baseline.json').read_text())
-    jev = (args.jev_root or root.parent.parent / 'work/jev-router-baseline').resolve()
+    # Repo-local work/ first; the second path is the original handoff machine's layout.
+    candidates = [args.jev_root] if args.jev_root else [root / 'work/jev-router-baseline', root.parent.parent / 'work/jev-router-baseline']
+    jev = next((c for c in candidates if (c / '.git').exists()), candidates[0]).resolve()
     if not args.live:
         print('Plan: one TypeSafe routing decision; ' + ('15-second diagnostic, no retries' if args.diagnostic else 'stock three-second deadline, one retry possible') + '; no Claude/model requests. Router cost is unpriced. Add --live; key prompted privately if absent.')
         return
     if not shutil.which('node'):
         raise SystemExit('Node >=20.12 is required.')
+    if not (jev / '.git').exists():
+        raise SystemExit(f'No Jev checkout at {jev}. Clone the pinned commit there (see docs/jev-baseline-setup.md) or pass --jev-root.')
     revision = subprocess.run(['git', '-C', str(jev), 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip()
     dirty = subprocess.run(['git', '-C', str(jev), 'status', '--porcelain', '--untracked-files=no'], capture_output=True, text=True, check=True).stdout.strip()
     if revision != pin['commit'] or dirty:

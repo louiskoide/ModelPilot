@@ -57,7 +57,7 @@ python3 -m modelpilot.jev_check --live
 
 The helper uses JEV_API_KEY/TYPESAFE_API_KEY from the current Terminal, or prompts invisibly. It checks the pinned clean checkout and installed SDK, uses a temporary HOME/TMPDIR, and passes no Anthropic credentials. One synthetic scoring decision offers only the previously tested Opus/Sonnet 4.6 models. Upstream may retry once. TypeSafe cost remains unpriced; this is not a free-call claim. No Claude process or provider generation runs.
 
-Success requires an offered model, valid confidence and an actual saved request/response; null/fallback is a failure. The saved evidence is under `runs/jev-preflight-*`. This validates credential/scoring access only, not stock model discovery, CLI compatibility, provider access or end-to-end routing. Those remain the subsequent integration gate. Override the checkout path with `--jev-root` when moving the project.
+Success requires an offered model, valid confidence and an actual saved request/response; null/fallback is a failure. The saved evidence is under `runs/jev-preflight-*`. This validates credential/scoring access only, not stock model discovery, CLI compatibility, provider access or end-to-end routing. Those remain the subsequent integration gate. By default the helper uses `work/jev-router-baseline` inside the ModelPilot root, falling back to the original handoff layout (`../../work/jev-router-baseline`). Override the checkout path with `--jev-root` when moving the project.
 
 ## First live preflight: deadline failure
 
