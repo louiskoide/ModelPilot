@@ -11,5 +11,16 @@
     "claude_version": "2.1.280 (fresh clone; 2.1.278 on original machine)",
     "live_preflight": "stock_deadline_passed_20260922-120150",
     "end_to_end_routing": "failed_20260922-121832: anthropic 401; stock Jev does not route Claude Code >=2.1.278 (trailing system message); routes on 2.1.101 offline"
+  },
+  "compat_variant": {
+    "label": "jev-compat-patched",
+    "checkout": "work/jev-router-compat",
+    "patch": "patches/jev-trailing-system-message.patch",
+    "patch_sha256": "86d3da9069870b35a2cd1c0b405e14bec96cdf959c95343b824aa99d7ca1845a",
+    "reason": "Claude Code >=2.1.278 appends a trailing system-role message; stock newTurnPrompt() then never routes",
+    "upstream_tests": "66/66 (65 upstream + 1 patch test)",
+    "offline_probe": "routes on 2.1.280 with stable continuation",
+    "live_route_check": "not_run",
+    "stock_jev_equivalent": false
   }
 }

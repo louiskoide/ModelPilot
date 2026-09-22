@@ -7,6 +7,7 @@ each response. Billable: Anthropic generation plus one or more TypeSafe decision
 """
 import argparse
 import getpass
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,21 @@ REWRITE = re.compile(r'^\[jev\] (\w+) rewrite jev-router -> (\S+)$', re.M)
 SERVED = re.compile(r'^\[jev\] (\d{3}) served by (\S+)$', re.M)
 FAILURES = ('routing failed', 'no-jev', 'could not read Claude model catalog', 'passthrough, could not process body',
             'upstream error', 'no JEV_API_KEY found')
+
+
+PATCH = 'patches/jev-trailing-system-message.patch'
+
+
+def git_diff(checkout):
+    return subprocess.run(['git', '-C', str(checkout), '-c', 'color.ui=never', 'diff', '--no-ext-diff'],
+                          capture_output=True, check=True).stdout
+
+
+def verify_checkout(checkout, commit, patch=None):
+    """Pinned commit plus exactly the given patch (or nothing) in tracked files."""
+    revision = subprocess.run(['git', '-C', str(checkout), 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip()
+    expected = Path(patch).read_bytes() if patch else b''
+    return revision == commit and git_diff(checkout) == expected
 
 
 def parse_events(stdout):
@@ -96,16 +112,19 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--live', action='store_true', help='Required: sends billable Anthropic and TypeSafe requests')
     parser.add_argument('--jev-root', type=Path)
+    parser.add_argument('--variant', choices=['stock', 'compat'], default='stock',
+                        help='compat: pinned Jev plus the ModelPilot trailing-system-message patch (separately labeled)')
     parser.add_argument('--claude', type=Path, help='Claude Code executable (default: work/claude-client, then PATH)')
     parser.add_argument('--budget', type=float, default=.5, help='Claude Code stop threshold in USD; not a hard billing cap')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     pin = json.loads((root/'configs/jev-baseline.json').read_text())
-    jev = (args.jev_root or root/'work/jev-router-baseline').resolve()
+    jev = (args.jev_root or root/('work/jev-router-baseline' if args.variant == 'stock' else 'work/jev-router-compat')).resolve()
+    patch = root/PATCH if args.variant == 'compat' else None
     local = root/'work/claude-client/node_modules/.bin/claude'
     cli = args.claude.resolve() if args.claude else local if local.exists() else Path(shutil.which('claude') or '')
     if not args.live:
-        print(f'Plan: one Read-tool task through stock {jev.name} with the jev-router sentinel; Claude Code stop threshold '
+        print(f'Plan: one Read-tool task through the {args.variant} {jev.name} launcher with the jev-router sentinel; Claude Code stop threshold '
               f'${args.budget:.2f} (not a hard cap), max 5 turns, isolated HOME/config; TypeSafe cost unpriced. Add --live.')
         return
     if not (0 < args.budget <= 2):
@@ -114,17 +133,17 @@ def main():
         raise SystemExit('Node and the Claude Code CLI are required.')
     if not (jev/'.git').exists():
         raise SystemExit(f'No Jev checkout at {jev}; see docs/jev-baseline-setup.md.')
-    revision = subprocess.run(['git', '-C', str(jev), 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip()
-    dirty = subprocess.run(['git', '-C', str(jev), 'status', '--porcelain', '--untracked-files=no'], capture_output=True, text=True, check=True).stdout.strip()
-    if revision != pin['commit'] or dirty:
-        raise SystemExit('Jev checkout must match the pinned revision with no tracked modifications.')
+    if not verify_checkout(jev, pin['commit'], patch):
+        raise SystemExit('Jev checkout must be the pinned revision with ' + ('exactly ' + PATCH if patch else 'no tracked modifications')
+                         + ('; rebuild it with python3 -m modelpilot.jev_compat --prepare-compat' if patch else '') + '.')
+    revision = pin['commit']
     jev_key = os.environ.get('JEV_API_KEY') or os.environ.get('TYPESAFE_API_KEY') or getpass.getpass('TypeSafe/Jev API key (hidden): ').strip()
     anthropic_key = os.environ.get('ANTHROPIC_API_KEY') or getpass.getpass('Anthropic API key (hidden): ').strip()
     if not jev_key or any(c.isspace() for c in jev_key):
         raise SystemExit('Missing or malformed TypeSafe key. No requests sent.')
     if not anthropic_key.startswith('sk-ant-') or any(c.isspace() for c in anthropic_key):
         raise SystemExit('Anthropic key format is invalid. No requests sent.')
-    run = root/'runs'/('jev-route-'+time.strftime('%Y%m%d-%H%M%S'))
+    run = root/'runs'/('jev-route-'+args.variant+'-'+time.strftime('%Y%m%d-%H%M%S'))
     run.parent.mkdir(exist_ok=True)
     run.mkdir(mode=0o700)
     dirs = {name: run/name for name in ('home', 'tmp', 'config', 'fixture')}
@@ -134,7 +153,9 @@ def main():
     (dirs['fixture']/'sample.txt').write_text(token + '\n')
     prompt = 'Use the Read tool to read sample.txt in the current directory. Reply with exactly the token in that file.'
     env = child_env(os.environ, jev_key, anthropic_key, dirs['home'], dirs['tmp'], dirs['config'], cli.parent)
-    report = {'status': 'failed', 'baseline_commit': revision, 'stock_launcher': True, 'harness_patch': None,
+    report = {'status': 'failed', 'baseline_commit': revision, 'variant': 'stock' if patch is None else 'compat-patched',
+              'stock_launcher': True, 'baseline_eligible_as_stock_jev': patch is None,
+              'harness_patch': None if patch is None else {'path': PATCH, 'sha256': hashlib.sha256(patch.read_bytes()).hexdigest()},
               'router_cost_usd': None, 'cost_complete': False, 'budget_threshold_usd': args.budget,
               'scope': 'Single synthetic Read task; validates routing mechanics, not quality or savings.'}
     print(f'Running billable Jev routing preflight; results: {run}', flush=True)

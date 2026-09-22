@@ -15,15 +15,23 @@ for (const name of ['home', 'tmp', 'config', 'fixture']) mkdirSync(join(dir, nam
 writeFileSync(join(dir, 'fixture', 'sample.txt'), 'PROBE_TOKEN\n');
 
 const requests = [], routed = [];
-const frames = (model) => [
+const sample = join(resolve(dir), 'fixture', 'sample.txt');
+// First agent request gets a Read tool call, so the probe also exercises the tool continuation.
+const frames = (model, toolCall) => [
   { type: 'message_start', message: { id: 'msg_probe', type: 'message', role: 'assistant', model, content: [], stop_reason: null,
     usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } },
-  { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
-  { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'PROBE_TOKEN' } },
+  ...(toolCall ? [
+    { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_probe', name: 'Read', input: {} } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ file_path: sample }) } },
+  ] : [
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'PROBE_TOKEN' } },
+  ]),
   { type: 'content_block_stop', index: 0 },
-  { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+  { type: 'message_delta', delta: { stop_reason: toolCall ? 'tool_use' : 'end_turn' }, usage: { output_tokens: 1 } },
   { type: 'message_stop' },
 ].map((d) => `event: ${d.type}\ndata: ${JSON.stringify(d)}\n\n`).join('');
+const hasToolResult = (body) => body.messages.some((m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'tool_result'));
 
 const upstream = http.createServer((req, res) => {
   const chunks = [];
@@ -37,7 +45,7 @@ const upstream = http.createServer((req, res) => {
       requests.push({ url: req.url, model: body.model, tools: Array.isArray(body.tools) ? body.tools.length : 0,
         roles: body.messages.map((m) => m.role), last_role: last?.role,
         last_block_types: Array.isArray(last?.content) ? last.content.map((b) => b.type) : typeof last?.content,
-        jev_prompt_extracted: newTurnPrompt(body) !== null });
+        continuation: hasToolResult(body), jev_prompt_extracted: newTurnPrompt(body) !== null });
     }
     if (req.method === 'GET') {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -45,7 +53,7 @@ const upstream = http.createServer((req, res) => {
     }
     if (body?.stream) {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
-      return res.end(frames(body.model));
+      return res.end(frames(body.model, Array.isArray(body.tools) && body.tools.length > 0 && !hasToolResult(body)));
     }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ id: 'msg_probe', type: 'message', role: 'assistant', model: body?.model,
@@ -56,8 +64,9 @@ const upstream = http.createServer((req, res) => {
 await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
 
 const route = async ({ current, models }) => {
-  routed.push({ current, offered: models.map((m) => m.id) });
+  // Pick a non-default tier so an unrouted fall-through to opus cannot look like a pass.
   const choice = models.find((m) => m.tier === 'sonnet')?.id ?? models[0].id;
+  routed.push({ current, offered: models.map((m) => m.id), choice });
   return { choice, confidence: 0.9, request: { probe: true }, response: { probe: true }, metrics: null, ms: 0 };
 };
 const { port, close } = await startProxy({ upstreamURL: `http://127.0.0.1:${upstream.address().port}`, route });
@@ -83,8 +92,13 @@ child.on('exit', (code, signal) => {
   close();
   upstream.close();
   const agent = requests.filter((r) => r.tools > 0);
+  const chosen = routed[0]?.choice;
+  const continued = agent.some((r) => r.continuation);
   writeFileSync(out, JSON.stringify({
-    compatible: agent.length > 0 && routed.length > 0 && agent[0].jev_prompt_extracted,
+    // One decision for the turn; opening request and tool continuation both on the chosen model.
+    compatible: routed.length === 1 && agent.length >= 2 && continued && agent[0].jev_prompt_extracted
+      && agent.every((r) => r.model === chosen),
+    continuation_seen: continued, agent_models: agent.map((r) => r.model),
     client_exit: code, client_signal: signal, router_calls: routed.length, routed,
     first_agent_request: agent[0] ?? null, requests, stderr: stderr.slice(0, 2000),
   }, null, 2));

@@ -132,3 +132,33 @@ The probe uses Jev's exported harness hook, not the stock launcher, so it is a c
 - a later upstream Jev revision, re-pinned after inspection
 
 `jev_route_check` now accepts `--claude` and reports this failure mode with an explicit hint.
+
+## Decision: compatibility-patched Jev variant (September 22, 2026)
+
+The user chose a **separately labeled compatibility-patched Jev** running on current Claude Code for the comparison. The finding that stock pinned Jev does not route current Claude Code is reported alongside it.
+
+The patch is `patches/jev-trailing-system-message.patch`:
+- One functional line in `newTurnPrompt()`: the turn is the last *non-system* message (`findLast((m) => m?.role !== "system")`) instead of the last message.
+- One added upstream-style test.
+- Nothing else changes: no thresholds, tier mappings, model lists, timeouts or router calls. CRLF line endings are preserved, and `.gitattributes` keeps the patch byte-exact.
+
+Build and check:
+
+```sh
+python3 -m modelpilot.jev_compat --prepare-compat              # clone pinned checkout, apply patch, npm ci
+(cd work/jev-router-compat && npm test)                        # 66/66: 65 upstream + 1 patch test
+python3 -m modelpilot.jev_compat --jev-root work/jev-router-compat   # offline routing probe
+python3 -m modelpilot.jev_route_check --variant compat --live  # billable end-to-end check
+```
+
+The stock checkout `work/jev-router-baseline` stays untouched. `jev_route_check` refuses to run unless the checkout is the pinned commit plus byte-exactly the recorded patch (or, for stock, no changes). Its report labels the variant and the patch's SHA-256, and sets `baseline_eligible_as_stock_jev: false` for the variant.
+
+The offline probe now also returns a Read tool call, so it exercises the follow-up request after the tool result:
+
+| Jev | Claude Code | Router calls | Opening request / follow-up model |
+| --- | --- | --- | --- |
+| stock | 2.1.280 | 0 | claude-opus-5 / claude-opus-5 (default tier, no decision) |
+| stock | 2.1.101 | 1 | claude-sonnet-5 / claude-sonnet-5 |
+| compat-patched | 2.1.280 | 1 | claude-sonnet-5 / claude-sonnet-5 |
+
+The probe's fake router always picks sonnet, so an unrouted fall-through to opus cannot pass. These are loopback results with a fake API and router. The live check is still required.

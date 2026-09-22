@@ -1,6 +1,9 @@
 import json
+from pathlib import Path
+import subprocess
+import tempfile
 import unittest
-from modelpilot.jev_route_check import child_env, command, parse_events, validate
+from modelpilot.jev_route_check import child_env, command, git_diff, parse_events, validate, verify_checkout
 
 TOKEN = 'JEV_ROUTE_ABC'
 STDERR = '\n'.join([
@@ -73,6 +76,37 @@ class RouteCheckTests(unittest.TestCase):
 
     def test_parse_events_skips_noise(self):
         self.assertEqual(parse_events('noise\n' + json.dumps({'type': 'result'}) + '\n[1]\n'), [{'type': 'result'}])
+
+
+
+class CheckoutTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = Path(self.tmp.name)/'jev'
+        self.repo.mkdir()
+        git = lambda *a: subprocess.run(['git', '-C', str(self.repo), *a], check=True, capture_output=True)
+        git('init', '-q')
+        (self.repo/'proxy.mjs').write_bytes(b'const last = messages.at(-1);\r\n')
+        git('add', '.')
+        git('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'pin')
+        self.commit = subprocess.run(['git', '-C', str(self.repo), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_stock_requires_clean_pinned_checkout(self):
+        self.assertTrue(verify_checkout(self.repo, self.commit))
+        self.assertFalse(verify_checkout(self.repo, '0'*40))
+        (self.repo/'proxy.mjs').write_bytes(b'patched\r\n')
+        self.assertFalse(verify_checkout(self.repo, self.commit))
+
+    def test_variant_requires_exactly_the_recorded_patch(self):
+        (self.repo/'proxy.mjs').write_bytes(b'const last = messages.findLast(m => m.role !== "system");\r\n')
+        patch = Path(self.tmp.name)/'fix.patch'
+        patch.write_bytes(git_diff(self.repo))
+        self.assertTrue(verify_checkout(self.repo, self.commit, patch))
+        (self.repo/'proxy.mjs').write_bytes(b'something else\r\n')
+        self.assertFalse(verify_checkout(self.repo, self.commit, patch))
 
 
 if __name__ == '__main__': unittest.main()
