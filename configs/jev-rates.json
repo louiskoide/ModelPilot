@@ -1,0 +1,10 @@
+{
+  "source": "Claude API skill (bundled with Claude Code 2.1.280): model price table cached 2026-06-24 for input/output; cache multipliers from its prompt-caching reference (5m write 1.25x input, 1h write 2x input, read 0.1x input). Derived, not invoice-reconciled; confirm against the live pricing page before cost claims. The live wire-accounting check cross-checks totals against Claude Code's own cost.",
+  "retrieved": "2026-09-22",
+  "units": "USD per million tokens",
+  "rates": {
+    "claude-haiku-4-5-20251001": {"input": 1, "output": 5, "write_5m": 1.25, "write_1h": 2, "read": 0.1},
+    "claude-sonnet-5": {"input": 2, "output": 10, "write_5m": 2.5, "write_1h": 4, "read": 0.2},
+    "claude-opus-5": {"input": 5, "output": 25, "write_5m": 6.25, "write_1h": 10, "read": 0.5}
+  }
+}

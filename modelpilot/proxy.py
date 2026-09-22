@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import re
 import threading
 import time
 from urllib.parse import urlsplit
@@ -15,6 +16,37 @@ HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
        'te', 'trailer', 'transfer-encoding', 'upgrade', 'host', 'content-length'}
 MAX_BODY = 32 * 1024 * 1024
 MAX_EVENT = 1024 * 1024
+
+
+CHUNK_SIZE = re.compile(rb'[0-9A-Fa-f]{1,8}')
+
+
+def read_chunked(stream, limit=MAX_BODY):
+    """Strict chunked request body; None on any malformed framing or when over limit."""
+    body = b''
+    while True:
+        line = stream.readline(1026)
+        if not line.endswith(b'\r\n'):
+            return None
+        size = line[:-2].split(b';', 1)[0].strip()
+        if not CHUNK_SIZE.fullmatch(size):
+            return None
+        size = int(size, 16)
+        if size == 0:
+            break
+        if len(body) + size > limit:
+            return None
+        data = stream.read(size + 2)
+        if len(data) != size + 2 or not data.endswith(b'\r\n'):
+            return None
+        body += data[:-2]
+    for _ in range(64):  # trailers, discarded
+        line = stream.readline(8194)
+        if line == b'\r\n':
+            return body
+        if not line.endswith(b'\r\n'):
+            return None
+    return None
 
 
 def clean_headers(headers):
@@ -164,33 +196,89 @@ class ProxyHandler(BaseHTTPRequestHandler):
         super().setup()
         self.connection.settimeout(120)
 
+    def upstream_connection(self):
+        origin = self.server.upstream
+        if origin.scheme == 'https':
+            return http.client.HTTPSConnection(origin.hostname, context=tls_context(), timeout=120)
+        return http.client.HTTPConnection(origin.hostname, origin.port, timeout=120)
+
     def do_GET(self):
-        if self.path != '/health':
+        if self.path == '/health':
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok","mode":"dry-run"}')
+            return
+        path = urlsplit(self.path)
+        # Only the model catalog (Jev's discovery request) passes through; never billed.
+        if path.path != '/v1/models' or path.scheme or path.netloc:
             self.send_error(404)
             return
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b'{"status":"ok","mode":"dry-run"}')
+        row = {'started_unix': time.time(), 'kind': 'models', 'mode': 'dry-run', 'applied': False,
+               'http_status': None, 'status': 'transport_error', 'cost_usd': None}
+        start = time.monotonic()
+        sent_headers = False
+        conn = self.upstream_connection()
+        headers = {k: v for k, v in clean_headers(self.headers).items() if k.lower() != 'accept-encoding'}
+        headers['Accept-Encoding'] = 'identity'
+        try:
+            conn.request('GET', self.path, headers=headers)
+            response = conn.getresponse()
+            data = response.read(MAX_BODY + 1)
+            if len(data) > MAX_BODY:
+                raise ValueError('catalog too large')
+            row['http_status'] = response.status
+            self.send_response_only(response.status, response.reason)
+            for k, v in clean_headers(response.headers).items():
+                self.send_header(k, v)
+            self.send_header('Content-Length', str(len(data)))
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            sent_headers = True
+            self.wfile.write(data)
+            row['status'] = 'ok' if 200 <= response.status < 300 else 'upstream_error'
+        except (BrokenPipeError, ConnectionResetError):
+            row['status'] = 'connection_closed'
+        except Exception as e:
+            row['error_type'] = type(e).__name__
+            if not sent_headers:
+                self.send_error(502, 'Upstream connection failed')
+        finally:
+            conn.close()
+            self.close_connection = True
+            row['wall_seconds'] = time.monotonic()-start
+            self.server.record(row)
 
     def do_POST(self):
         path = urlsplit(self.path)
         if path.path not in ('/v1/messages', '/v1/messages/count_tokens') or path.scheme or path.netloc:
             self.send_error(404)
             return
-        if self.headers.get('Transfer-Encoding') or len(self.headers.get_all('Content-Length', [])) != 1:
-            self.send_error(411, 'One Content-Length required; chunked uploads unsupported')
-            return
-        try:
-            size = int(self.headers['Content-Length'])
-            if not 0 <= size <= MAX_BODY:
-                raise ValueError()
-        except ValueError:
-            self.send_error(413)
-            return
-        raw = self.rfile.read(size)
-        if len(raw) != size:
-            self.send_error(400)
-            return
+        encodings = self.headers.get_all('Transfer-Encoding', [])
+        lengths = self.headers.get_all('Content-Length', [])
+        if encodings:
+            # Jev's proxy uploads chunked. Anything ambiguous is refused, never forwarded.
+            if lengths or len(encodings) != 1 or encodings[0].strip().lower() != 'chunked':
+                self.send_error(400, 'Ambiguous or unsupported transfer encoding')
+                return
+            raw = read_chunked(self.rfile)
+            if raw is None:
+                self.send_error(400, 'Malformed or oversized chunked body')
+                return
+        else:
+            if len(lengths) != 1:
+                self.send_error(411, 'One Content-Length or a chunked body required')
+                return
+            try:
+                size = int(lengths[0])
+                if not 0 <= size <= MAX_BODY:
+                    raise ValueError()
+            except ValueError:
+                self.send_error(413)
+                return
+            raw = self.rfile.read(size)
+            if len(raw) != size:
+                self.send_error(400)
+                return
         try:
             request = json.loads(raw)
             if not isinstance(request, dict):
@@ -203,13 +291,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # Negotiate identity so usage inspection does not depend on client compression support.
         headers = {k: v for k, v in headers.items() if k.lower() != 'accept-encoding'}
         headers['Accept-Encoding'] = 'identity'
-        origin = self.server.upstream
-        if origin.scheme == 'https':
-            conn = http.client.HTTPSConnection(origin.hostname, context=tls_context(), timeout=120)
-        else:
-            conn = http.client.HTTPConnection(origin.hostname, origin.port, timeout=120)
+        conn = self.upstream_connection()
         start = time.monotonic()
-        row = {'started_unix': time.time(), 'mode': 'dry-run', 'applied': False,
+        tools = request.get('tools')
+        row = {'started_unix': time.time(), 'kind': 'messages', 'mode': 'dry-run', 'applied': False,
+               'tool_count': len(tools) if isinstance(tools, list) else 0,
                'request_sha256': hashlib.sha256(raw).hexdigest(),
                'model': request.get('model') if request.get('model') in self.server.rates else 'unknown',
                'stream': bool(request.get('stream')), 'http_status': None,
@@ -269,9 +355,10 @@ def main():
     parser.add_argument('--port', type=int, default=8787)
     parser.add_argument('--config', type=Path, default=Path('configs/m0.json'))
     parser.add_argument('--log', type=Path, default=Path('runs/proxy/observations.jsonl'))
+    parser.add_argument('--upstream', default='https://api.anthropic.com', help='Anthropic origin, or loopback HTTP for local tests')
     args = parser.parse_args()
     rates = json.loads(args.config.read_text())['rates']
-    with ProxyServer(('127.0.0.1', args.port), 'https://api.anthropic.com', args.log, rates) as server:
+    with ProxyServer(('127.0.0.1', args.port), args.upstream, args.log, rates) as server:
         print(f'Dry-run proxy on http://127.0.0.1:{server.server_port}; forwarded API calls remain billable', flush=True)
         try:
             server.serve_forever()

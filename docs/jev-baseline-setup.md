@@ -162,3 +162,34 @@ The offline probe now also returns a Read tool call, so it exercises the follow-
 | compat-patched | 2.1.280 | 1 | claude-sonnet-5 / claude-sonnet-5 |
 
 The probe's fake router always picks sonnet, so an unrouted fall-through to opus cannot pass. These are loopback results with a fake API and router. The live check is still required.
+
+## Wire-level accounting adapter (built test-first; offline pass, live not yet run)
+
+This measures Jev traffic with ModelPilot's own proxy. The chain is Claude Code → Jev's real proxy → ModelPilot `ProxyServer` → Anthropic. ModelPilot sits *behind* Jev, so it sees the real model Jev chose, not the `jev-router` placeholder.
+
+The tests were written and committed failing first (`42ecd88`), then the code below was written until they passed.
+
+- **Rates.** `configs/jev-rates.json` prices `claude-haiku-4-5-20251001`, `claude-sonnet-5` and `claude-opus-5`, in USD per million tokens:
+
+  | Model | Input | Output | 5m write | 1h write | Read |
+  | --- | --- | --- | --- | --- | --- |
+  | Haiku 4.5 | 1 | 5 | 1.25 | 2 | 0.1 |
+  | Sonnet 5 | 2 | 10 | 2.5 | 4 | 0.2 |
+  | Opus 5 | 5 | 25 | 6.25 | 10 | 0.5 |
+
+  They come from the Claude API skill's model table and its cache multipliers. They are derived rates and still need confirming against the live pricing page. The live check cross-checks them against Claude Code's own cost.
+- **Proxy.** Accepts strictly parsed chunked uploads (Jev's proxy sends bodies chunked), passes `GET /v1/models` through so Jev's catalog discovery still works, and labels rows. See `docs/m1.md`.
+- **Accounted launcher.** `modelpilot/jev_accounted_launch.mjs` is a harness that mirrors the pinned `bin/jev-claude.mjs` except for four differences, listed in its header:
+  1. It points Jev's proxy at ModelPilot's.
+  2. It loads no `.env` files.
+  3. It sets no status line and does no saved-model restore.
+  4. It refuses to start without a TypeSafe key, rather than running unrouted.
+
+  Its `--self-test` sends one placeholder request through Jev's real proxy and ModelPilot's proxy to a loopback fixture. It covers chunked upload, catalog discovery (the router is offered only the fixture's catalog model, so a fall-back to Jev's static list fails) and pricing.
+- **Route check.** `python3 -m modelpilot.jev_route_check --variant compat --accounting wire --live` adds `reconcile()`. A pass needs all of:
+  - every Messages row is HTTP 200 and priced
+  - every tool-bearing row uses the selected model; Claude Code helper calls without tools are listed separately
+  - ModelPilot's total equals the client's `total_cost_usd` within $0.000001
+
+  Router usage from `decisions.json` is recorded, and router cost stays unpriced. Reports label `accounting: wire` and `launcher: accounted-harness`.
+- **Offline probe.** `python3 -m modelpilot.jev_compat --jev-root work/jev-router-compat --accounting wire` ran real Claude Code 2.1.280 → patched Jev → ModelPilot proxy → fake API, with no keys and no cost. It **passed**: one catalog row, one routing decision, and both the opening request and the tool follow-up on `claude-sonnet-5` and priced, with 0 unpriced rows.

@@ -35,6 +35,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--claude', type=Path, help='Claude Code executable (default: claude on PATH)')
     parser.add_argument('--jev-root', type=Path)
+    parser.add_argument('--accounting', choices=['none', 'wire'], default='none',
+                        help='wire: route through ModelPilot\'s proxy behind Jev and check every request is priced')
     parser.add_argument('--prepare-compat', action='store_true', help='Build work/jev-router-compat from the pinned checkout and patch')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
@@ -52,8 +54,9 @@ def main():
     run = root/'runs'/('jev-compat-'+time.strftime('%Y%m%d-%H%M%S'))
     run.parent.mkdir(exist_ok=True)
     run.mkdir(mode=0o700)
+    wire = ['--wire', str(root), str(root/'configs/jev-rates.json')] if args.accounting == 'wire' else []
     subprocess.run(['node', str(root/'modelpilot/jev_compat_probe.mjs'), str(jev), str(cli.resolve()), str(run/'isolated'),
-                    str(run/'probe.json')], timeout=150, check=True)
+                    str(run/'probe.json')] + wire, timeout=150, check=True)
     probe = json.loads((run/'probe.json').read_text())
     first = probe.get('first_agent_request') or {}
     summary = {'client_version': version, 'jev_root': str(jev), 'compatible': probe['compatible'],
@@ -61,9 +64,27 @@ def main():
                'agent_models': probe['agent_models'], 'last_role': first.get('last_role'),
                'roles': first.get('roles'), 'jev_prompt_extracted': first.get('jev_prompt_extracted'),
                'network': 'loopback only', 'cost_usd': 0}
+    passed = probe['compatible']
+    if wire:
+        log = run/'isolated'/'observations.jsonl'
+        for _ in range(100):  # the proxy flushes each row; give the last one a moment after SIGINT
+            if log.exists():
+                break
+            time.sleep(.05)
+        rows = [json.loads(line) for line in log.read_text().splitlines() if line.strip()] if log.exists() else []
+        messages = [r for r in rows if r.get('kind') == 'messages']
+        chosen = (probe['routed'] or [{}])[0].get('choice')
+        routed = [r['model'] for r in messages if r.get('tool_count', 0) > 0]
+        summary['wire'] = {'catalog_rows': sum(r.get('kind') == 'models' for r in rows), 'messages_rows': len(messages),
+                           'routed_models': routed, 'helper_models': sorted({r['model'] for r in messages if not r.get('tool_count')}),
+                           'unpriced_requests': sum(r.get('cost_usd') is None for r in messages),
+                           'known_cost_usd': sum(r['cost_usd'] for r in messages if r.get('cost_usd') is not None)}
+        passed = (passed and summary['wire']['catalog_rows'] >= 1 and len(routed) >= 2 and set(routed) == {chosen}
+                  and summary['wire']['unpriced_requests'] == 0)
+    summary['passed'] = passed
     (run/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
     print(json.dumps(summary, indent=2))
-    if not probe['compatible']:
+    if not passed:
         raise SystemExit(1)
 
 

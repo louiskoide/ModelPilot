@@ -2,14 +2,18 @@
 // Real Claude Code -> Jev's real startProxy() -> local fake Messages API, with a fake router in
 // place of TypeSafe. Answers one question: does Jev extract a routable prompt from this client's
 // request shape? Uses Jev's exported harness hook, so this is a probe, not a stock-launcher result.
-// Usage: node jev_compat_probe.mjs <jev-root> <claude-cli> <isolated-dir> <out.json>
+// Usage: node jev_compat_probe.mjs <jev-root> <claude-cli> <isolated-dir> <out.json> [--wire <modelpilot-root> <rates.json>]
+// --wire inserts ModelPilot's real proxy between Jev's proxy and the fake API (accounting check).
 import http from 'node:http';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const [jevRoot, cli, dir, out] = process.argv.slice(2);
+const wireAt = process.argv.indexOf('--wire');
+const [mpRoot, ratesPath] = wireAt > 0 ? process.argv.slice(wireAt + 1, wireAt + 3) : [];
 const { startProxy, newTurnPrompt } = await import(pathToFileURL(resolve(jevRoot, 'src/proxy.mjs')));
 for (const name of ['home', 'tmp', 'config', 'fixture']) mkdirSync(join(dir, name), { recursive: true, mode: 0o700 });
 writeFileSync(join(dir, 'fixture', 'sample.txt'), 'PROBE_TOKEN\n');
@@ -69,7 +73,20 @@ const route = async ({ current, models }) => {
   routed.push({ current, offered: models.map((m) => m.id), choice });
   return { choice, confidence: 0.9, request: { probe: true }, response: { probe: true }, metrics: null, ms: 0 };
 };
-const { port, close } = await startProxy({ upstreamURL: `http://127.0.0.1:${upstream.address().port}`, route });
+let upstreamURL = `http://127.0.0.1:${upstream.address().port}`;
+let mp = null;
+if (mpRoot) {
+  // ModelPilot proxy behind Jev, forwarding to the fake API; it prints its port once listening.
+  mp = spawn('python3', ['-m', 'modelpilot.proxy', '--port', '0', '--upstream', upstreamURL, '--config', ratesPath,
+    '--log', join(resolve(dir), 'observations.jsonl')], { cwd: mpRoot, stdio: ['ignore', 'pipe', 'inherit'] });
+  let line = '';
+  while (!/http:\/\/127\.0\.0\.1:\d+/.test(line)) {
+    const [chunk] = await once(mp.stdout, 'data');
+    line += chunk;
+  }
+  upstreamURL = line.match(/http:\/\/127\.0\.0\.1:\d+/)[0];
+}
+const { port, close } = await startProxy({ upstreamURL, route });
 
 // Mirrors the stock launcher's autoModelEnv(); the key is a placeholder that never leaves loopback.
 const env = { PATH: process.env.PATH, HOME: join(dir, 'home'), TMPDIR: join(dir, 'tmp'), CLAUDE_CONFIG_DIR: join(dir, 'config'),
@@ -91,6 +108,7 @@ child.on('exit', (code, signal) => {
   clearTimeout(timer);
   close();
   upstream.close();
+  if (mp) mp.kill('SIGINT');
   const agent = requests.filter((r) => r.tools > 0);
   const chosen = routed[0]?.choice;
   const continued = agent.some((r) => r.continuation);

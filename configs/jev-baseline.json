@@ -21,6 +21,8 @@
     "upstream_tests": "66/66 (65 upstream + 1 patch test)",
     "offline_probe": "routes on 2.1.280 with stable continuation",
     "live_route_check": "not_run",
-    "stock_jev_equivalent": false
+    "stock_jev_equivalent": false,
+    "wire_accounting": "offline probe passed on 2.1.280 (catalog + 2 priced rows on selected model); live not run",
+    "rates": "configs/jev-rates.json"
   }
 }
