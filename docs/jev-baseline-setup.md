@@ -78,3 +78,35 @@ This changes only in-memory timeout settings in the diagnostic subprocess: 15 se
 ## Third live preflight: diagnostic pass
 
 `runs/jev-preflight-20260922-115951` (diagnostic mode, same setup) passed: TypeSafe returned a decision in 352 ms, choosing `claude-sonnet-4-6` from the two offered 4.6 models with confidence 0.98, with a saved request and response. This confirms that the credential works and that scoring is reachable. It is diagnostic only and not baseline-eligible. The response reports router usage (`jev-1.13.0`: 893 input, 100 output tokens) but no price. Router cost stays unpriced until TypeSafe's per-token rates are recorded. Provider calls were zero. The key used for this run was exposed outside the hidden prompt and should be treated as revoked. Next: the stock-deadline preflight with a fresh key, then stock model discovery, CLI compatibility and end-to-end routing through the pinned launcher.
+
+## Stock-deadline preflight: pass
+
+`runs/jev-preflight-20260922-120150` passed at the stock 1.5-second attempt timeout, 3-second deadline and one retry: `claude-sonnet-4-6` was chosen with confidence 0.98 in 393 ms. Router usage was reported as `jev-1.13.0` with 893 input and 100 output tokens. Provider calls were zero, and router cost remains unpriced. Run `115855` in between was another 401 and is preserved. **The credential and scoring gate is now passed.** The saved evidence contains no key material. The locally available Claude Code is 2.1.280 at `~/.local/bin/claude` (not the 2.1.278 used on the original machine). Its compatibility is part of the next gate.
+
+## End-to-end routing preflight (prepared, not yet run)
+
+```sh
+python3 -m modelpilot.jev_route_check          # plan only
+python3 -m modelpilot.jev_route_check --live   # billable
+```
+
+This runs one synthetic Read-tool task through the **unmodified** pinned launcher (`node bin/jev-claude.mjs`). There is no harness patch.
+
+Setup:
+- The child gets a fresh HOME, TMPDIR and `CLAUDE_CONFIG_DIR` inside the run directory, and an explicit environment. No inherited `ANTHROPIC_*` model, base URL or OAuth token reaches it. The user's `~/.jev-claude.env` and `~/.claude/settings.json` are not read.
+- No `--model` is passed, so the `jev-router` sentinel is used.
+- `JEV_DEBUG=1` makes the upstream proxy log each decision, each sentinel rewrite and the model the API reports serving.
+- Both keys are read from the Terminal or a hidden prompt, and they are redacted from saved output.
+
+A pass requires all of the following:
+- the task succeeds and the Read tool is used
+- exactly one Jev decision, whose saved TypeSafe request and response are in `decisions.json`
+- a valid confidence
+- every sentinel rewrite, covering both the opening request and the tool continuation, uses the selected model
+- a 200 response served by that model
+- the client's `modelUsage` includes that model
+- no fallback, catalog or upstream error markers
+
+A fail-open Claude answer fails this check.
+
+Accounting in this preflight is client-reported (`total_cost_usd`, `modelUsage`) with router cost unpriced. It is not a wire-level reconciliation. The transparent accounting adapter through `startProxy({upstreamURL})` remains the next step before a full comparison. The Claude Code `--max-budget-usd` threshold (default $0.50) is a stop threshold, not a billing cap.
