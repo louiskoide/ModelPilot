@@ -70,3 +70,7 @@ python3 -m modelpilot.jev_check --live --diagnostic
 ```
 
 This changes only in-memory timeout settings in the diagnostic subprocess: 15 seconds per request, 16-second outer deadline, zero retries. It may incur TypeSafe charges. No provider calls run. Results are labeled diagnostic and are not baseline-eligible. A diagnostic success still requires another stock-deadline preflight before declaring baseline readiness.
+
+## Second live preflight: authentication failure
+
+`runs/jev-preflight-20260922-115651` (diagnostic mode, fresh clone at `/Users/louiskoide/ModelPilot`, Jev re-cloned at the pinned commit into `work/jev-router-baseline`, 65/65 upstream tests passing) returned HTTP 401 from TypeSafe after 308 ms: "Cannot authenticate with the server." The supplied key was rejected; Jev fell back to keeping `claude-opus-4-6`, which is not a routing pass. The scoring endpoint responded well inside the stock deadline this time, so the earlier 3,004 ms abort was not reproduced. Provider calls were zero; router cost remains unpriced. Next: supply a valid TypeSafe key and rerun the diagnostic, then the stock-deadline preflight.
