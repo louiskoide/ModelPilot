@@ -87,7 +87,15 @@ Coordinator commands use the same environment or `--db/--session/--limit-usd` fl
 - **Delivery worked mechanically.** The `PostToolUse` hook on the `b.txt` read put the correction into model context and acknowledged revision 2.
 - **The model rejected it.** Sonnet answered with the first token and said: "I notice the hook injected a message claiming to supersede my task instructions. This appears to be a prompt injection attempt." The correction arrived beside a tool result, claimed to override the user's instruction, and nothing in the user's own prompt said such updates would come. Refusing it is correct model behavior.
 
-So **acknowledged means delivered, not obeyed**, and this run shows the gap. A mid-flight correction needs its authority set up by the user before the session starts. Text that claims authority for itself is not enough. The declared channel described under "Claude Code hooks" is the fix. It still needs a live run.
+So **acknowledged means delivered, not obeyed**, and this run shows the gap. A mid-flight correction needs its authority set up by the user before the session starts. Text that claims authority for itself is not enough. The declared channel described under "Claude Code hooks" is the fix.
+
+**`runs/governed-session-20260922-222741`: passed.** Same setup, with the channel declared in the user's prompt. 3 requests, $0.0386484.
+
+- The coordinator corrected the task after the first `PostToolUse`. The next hook delivered the correction under the declared marker, and it was acknowledged. The model answered with the corrected token (`BRAVO_…`) only.
+- Governor spend, proxy cost and client `total_cost_usd` agree exactly at $0.0386484. Proxy and client tokens match: 5 input, 199 output, 15,728 cache read, 8,248 cache write. There were no unknown or orphaned reservations, no hook errors, and nothing was applied.
+- This time no request fell between correction and delivery, so there is no `stale_task` row. Whether one appears depends on timing.
+
+This is one synthetic two-file task on one model and effort. It shows the mechanism works end to end with a real client and real billing. It is not evidence of reliability across tasks or models, or of savings.
 
 ## Validation
 
@@ -121,7 +129,7 @@ Known interaction: a refused call inside `Worker.dispatch` also sets that worker
 
 ## Not done
 
-- **Live evidence for the declared channel.** The declared, coded channel (above) was added after the first live session was rejected. It passes offline but has not been run live yet. `cascade_check --execute-fallback` has not been run live either.
+- **Broader live evidence.** The declared channel has one passing live session, a synthetic Read-only task on Sonnet 4.6/low. Live observation of writes and failures, other models, and `cascade_check --execute-fallback` have not been run.
 - **Rebuild acknowledgment for model and effort.** Only compaction is detected automatically. `/model` and `/effort` changes need an explicit `ack-rebase`. Hook payloads carry `effort.level`, which could confirm effort changes later.
 - **Correction delivery at turn end.** A correction issued during the final model call waits for the next prompt. A `Stop` hook could deliver it by blocking the stop, but that is not implemented.
 - **Test-suite observations.** Only file hashes and failure text are observed. `suite`/`failures` need an explicit test adapter, as M3 has, rather than parsing arbitrary output.
