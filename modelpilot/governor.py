@@ -9,7 +9,7 @@ from pathlib import Path
 import tempfile
 import time
 import uuid
-from .cache_probe import cost
+from .cache_probe import priced_usage
 from .m2 import State
 from .m4 import cascade, nonnegative, sha
 
@@ -110,8 +110,13 @@ class Governor:
     def policy(self):
         return self.recover()['policy']
 
-    def admit(self, request_id, estimate, task=None, revision=None, ttl=600):
-        """Reserve before dispatch. Work for a stale or terminal task revision is refused."""
+    def admit(self, request_id, estimate, task=None, revision=None, ttl=600, enforce=True):
+        """Reserve before dispatch. Work for a stale or terminal task revision is refused.
+
+        enforce=False is for observers that forward regardless (the dry-run proxy): the
+        decision is journaled as would-admit/would-refuse, but the reservation is always
+        recorded so that forwarded spend still counts.
+        """
         nonnegative(estimate, 'estimate')
         if not isinstance(request_id, str) or not request_id:
             raise ValueError('Request ID required')
@@ -137,13 +142,13 @@ class Governor:
                 elif policy['available_usd'] <= 0 or estimate > policy['available_usd']:
                     reason = 'insufficient_budget'
             admitted = reason == 'reserved'
-            if admitted:
+            if admitted or not enforce:
                 now = self.clock()
                 self.db.execute("INSERT INTO gov_reservations(session,request_id,task,revision,estimate,status,created,expires) "
                                 "VALUES(?,?,?,?,?,'pending',?,?)", (self.session, request_id, task, revision, estimate, now, now+ttl))
                 policy = self._policy()
-            result = {'request_id': request_id, 'admitted': admitted, 'reason': reason,
-                      'estimate_usd': estimate, 'policy': policy, 'applied': False}
+            result = {'request_id': request_id, 'admitted': admitted, 'reason': reason, 'enforced': enforce,
+                      'reserved': admitted or not enforce, 'estimate_usd': estimate, 'policy': policy, 'applied': False}
             self._journal('admit', result, task, revision)
         return result
 
@@ -305,17 +310,52 @@ def governed_transport(gov, inner, rates, estimate, ttl=600):
         except BaseException:
             gov.settle(request_id, None)
             raise
-        usage = response.get('usage') if isinstance(response, dict) else None
         actual = None
-        if (isinstance(usage, dict) and response.get('model') == request.get('model')
-                and not (usage.get('cache_creation_input_tokens') and 'cache_creation' not in usage)):
-            try:
-                actual = cost(usage, rates.get(request.get('model')), '5m')
-            except (ValueError, KeyError, TypeError):
-                pass
+        if isinstance(response, dict):
+            actual = priced_usage(request, response.get('model'), response.get('usage'), rates)
         gov.settle(request_id, actual)
         return response, provider_id
     return transport
+
+
+def reconcile_log(gov, log_path):
+    """Bring the governor up to date from a proxy log (JSON lines) after crashes or governor errors.
+
+    A row whose reservation is still open settles with the row's measured cost (None stays
+    unknown). A row the proxy could not reserve ('untracked') is recorded now, so its spend
+    counts. An orphan with no row at all, e.g. the proxy died mid-request, stays unknown.
+    """
+    rows = []
+    with open(log_path) as f:
+        for line in f:
+            if line.strip():
+                row = json.loads(line)
+                if row.get('governor_request_id'):
+                    rows.append(row)
+    settled = untracked = 0
+    for row in rows:
+        request_id = row['governor_request_id']
+        status = gov.db.execute('SELECT status FROM gov_reservations WHERE session=? AND request_id=?',
+                                (gov.session, request_id)).fetchone()
+        if status is None:
+            if row.get('governor_status') != 'untracked':
+                continue  # admitted elsewhere or foreign row: never invent a reservation
+            gov.admit(request_id, 0, enforce=False)
+            gov.settle(request_id, row.get('cost_usd'))
+            untracked += 1
+        elif status['status'] != 'settled' and row.get('cost_usd') is not None:
+            gov.settle(request_id, row['cost_usd'])
+            settled += 1
+        elif status['status'] == 'pending':
+            gov.settle(request_id, None)  # the proxy finished this request without a measured cost
+    policy = gov.policy()
+    ids = {row['governor_request_id'] for row in rows}
+    orphans = [r['request_id'] for r in gov.db.execute(
+        "SELECT request_id FROM gov_reservations WHERE session=? AND status='orphaned'", (gov.session,))]
+    unknown = gov.db.execute("SELECT COUNT(*) FROM gov_reservations WHERE session=? AND "
+                             "(status='orphaned' OR (status='settled' AND actual IS NULL))", (gov.session,)).fetchone()[0]
+    return {'rows': len(rows), 'settled': settled, 'untracked_recorded': untracked, 'still_unknown': unknown,
+            'orphans_without_rows': sum(o not in ids for o in orphans), 'policy': policy}
 
 
 def demo(path):

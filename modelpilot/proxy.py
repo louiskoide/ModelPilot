@@ -10,12 +10,15 @@ import re
 import threading
 import time
 from urllib.parse import urlsplit
-from .cache_probe import cost, tls_context
+import uuid
+from .cache_probe import priced_usage, tls_context
+from .governor import Governor
 
 HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
        'te', 'trailer', 'transfer-encoding', 'upgrade', 'host', 'content-length'}
 MAX_BODY = 32 * 1024 * 1024
 MAX_EVENT = 1024 * 1024
+PROVIDER_ID = re.compile(r'req_[A-Za-z0-9]{1,128}')
 
 
 CHUNK_SIZE = re.compile(rb'[0-9A-Fa-f]{1,8}')
@@ -113,21 +116,23 @@ class UsageObserver:
 def measured_cost(observer, request, rates):
     if not observer.complete or observer.invalid:
         return None
-    if observer.model != request.get('model'):
-        return None  # aliases/fallback need explicit rate mapping, not guessing
-    usage = observer.usage
-    # "not_available": the model has no data-residency option (e.g. Haiku 4.5), so standard pricing applies.
-    if usage.get('service_tier', 'standard') != 'standard' or usage.get('inference_geo', 'global') not in ('global', 'not_available'):
-        return None
-    if request.get('speed') == 'fast':
-        return None
-    # Missing TTL breakdown is ambiguous in real traffic; M0's single-TTL fallback is not used.
-    if usage.get('cache_creation_input_tokens', 0) and 'cache_creation' not in usage:
-        return None
-    try:
-        return cost(usage, rates.get(observer.model), '5m')
-    except (KeyError, TypeError, ValueError):
-        return None
+    return priced_usage(request, observer.model, observer.usage, rates)
+
+
+def reservation_estimate(raw, request, rates):
+    """Pessimistic pre-send reservation: uncached input at the dearest write rate plus full max_tokens.
+
+    Assumes about 3 request bytes per token. An estimate, not a bound (documents and
+    server-added tool prompts can exceed it); settlement always uses measured usage.
+    """
+    rate = rates.get(request.get('model'))
+    candidates = [rate] if rate else list(rates.values())
+    input_rate = max(max(r['input'], r['write_5m'], r['write_1h']) for r in candidates)
+    output_rate = max(r['output'] for r in candidates)
+    max_tokens = request.get('max_tokens')
+    if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 0:
+        max_tokens = 0
+    return (len(raw) / 3 * input_rate + max_tokens * output_rate) / 1e6
 
 
 def forecast(request, usage, rates):
@@ -158,7 +163,7 @@ def forecast(request, usage, rates):
 
 class ProxyServer(ThreadingHTTPServer):
     daemon_threads = True
-    def __init__(self, address, upstream, log_path, rates):
+    def __init__(self, address, upstream, log_path, rates, governor=None):
         parsed = urlsplit(upstream)
         if not ((parsed.scheme == 'https' and parsed.netloc == 'api.anthropic.com') or
                 (parsed.scheme == 'http' and parsed.hostname == '127.0.0.1')):
@@ -167,6 +172,15 @@ class ProxyServer(ThreadingHTTPServer):
             raise ValueError('Upstream must be an origin')
         self.upstream = parsed
         self.rates = rates
+        # Dry-run governor: {'db', 'session', 'limit_usd', 'task'}; opened per request (threads).
+        self.governor = dict(governor) if governor else None
+        if self.governor:
+            gov = self.open_governor()
+            try:
+                if self.governor.get('task') is not None:
+                    gov.state.get(self.governor['task'])  # raises for an unknown task
+            finally:
+                gov.close()
         self.log_lock = threading.Lock()
         log_path = Path(log_path)
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,6 +191,33 @@ class ProxyServer(ThreadingHTTPServer):
         except Exception:
             self.log.close()
             raise
+
+    def open_governor(self):
+        g = self.governor
+        return Governor(g['db'], g['session'], g['limit_usd'])
+
+    def admit(self, row, raw, request):
+        """Reserve under a fresh shared ID. Dry-run: the decision never blocks forwarding."""
+        request_id = row['governor_request_id'] = 'mp-' + uuid.uuid4().hex
+        gov = self.open_governor()
+        try:
+            task = self.governor.get('task')
+            # The client works from the revision it acknowledged; an undelivered correction is stale work.
+            revision = None if task is None else (gov.state.get(task)['ack_revision'] or -1)
+            decision = gov.admit(request_id, reservation_estimate(raw, request, self.rates), task, revision,
+                                 ttl=600, enforce=False)
+        finally:
+            gov.close()
+        row['governor'] = {k: decision[k] for k in ('admitted', 'reason', 'estimate_usd', 'enforced')}
+        row['governor_status'] = 'reserved'
+
+    def settle(self, row):
+        gov = self.open_governor()
+        try:
+            gov.settle(row['governor_request_id'], row['cost_usd'])
+        finally:
+            gov.close()
+        row['governor_status'] = 'settled'
 
     def record(self, row):
         with self.log_lock:
@@ -301,12 +342,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
                'model': request.get('model') if request.get('model') in self.server.rates else 'unknown',
                'stream': bool(request.get('stream')), 'http_status': None,
                'status': 'transport_error', 'cost_usd': None}
+        governed = self.server.governor is not None and path.path == '/v1/messages'  # count_tokens is free
+        if governed:
+            try:
+                self.server.admit(row, raw, request)
+            except Exception as e:
+                # Never block traffic; reconcile_log() later records this row's spend.
+                row.update(governor_status='untracked', governor_error=type(e).__name__)
         sent_headers = False
         observer = UsageObserver(bool(request.get('stream')))
         try:
             conn.request('POST', self.path, body=raw, headers=headers)
             response = conn.getresponse()
             row['http_status'] = response.status
+            provider_id = response.headers.get('request-id', '')
+            if PROVIDER_ID.fullmatch(provider_id):
+                row['provider_request_id'] = provider_id
             self.send_response_only(response.status, response.reason)
             for k, v in clean_headers(response.headers).items():
                 self.send_header(k, v)
@@ -348,6 +399,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
             conn.close()
             self.close_connection = True
             row['wall_seconds'] = time.monotonic()-start
+            if governed and row.get('governor_status') == 'reserved':
+                try:
+                    self.server.settle(row)
+                except Exception as e:
+                    row.update(governor_status='settle_failed', governor_error=type(e).__name__)
             self.server.record(row)
 
 
@@ -357,9 +413,19 @@ def main():
     parser.add_argument('--config', type=Path, default=Path('configs/m0.json'))
     parser.add_argument('--log', type=Path, default=Path('runs/proxy/observations.jsonl'))
     parser.add_argument('--upstream', default='https://api.anthropic.com', help='Anthropic origin, or loopback HTTP for local tests')
+    parser.add_argument('--governor-db', type=Path, help='Record dry-run reservations/settlements in this ledger database')
+    parser.add_argument('--governor-session')
+    parser.add_argument('--governor-limit-usd', type=float)
+    parser.add_argument('--governor-task', help='Ledger task whose acknowledged revision fences requests')
     args = parser.parse_args()
+    governor = None
+    if args.governor_db:
+        if not args.governor_session or args.governor_limit_usd is None:
+            parser.error('--governor-db needs --governor-session and --governor-limit-usd')
+        governor = {'db': args.governor_db, 'session': args.governor_session,
+                    'limit_usd': args.governor_limit_usd, 'task': args.governor_task}
     rates = json.loads(args.config.read_text())['rates']
-    with ProxyServer(('127.0.0.1', args.port), args.upstream, args.log, rates) as server:
+    with ProxyServer(('127.0.0.1', args.port), args.upstream, args.log, rates, governor) as server:
         print(f'Dry-run proxy on http://127.0.0.1:{server.server_port}; forwarded API calls remain billable', flush=True)
         try:
             server.serve_forever()
