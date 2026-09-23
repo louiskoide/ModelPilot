@@ -1,6 +1,35 @@
 # M6 benchmark plan: repository tasks, graders and arms (items 3–4)
 
-Status: plan written September 22, 2026. Nothing here is built yet. Item 3 is the task corpus and harness. Item 4 runs the arms. The ModelPilot arm's behavior is proposed in `docs/m6-modelpilot-policy.md`.
+Status: plan written September 22, 2026. Phases 3a and 3b are built and validated offline (see "Progress"). Nothing has been run against the API. Item 3 is the task corpus and harness. Item 4 runs the arms. The ModelPilot arm's behavior is proposed in `docs/m6-modelpilot-policy.md`.
+
+## Progress
+
+**3a (done, $0).** `modelpilot/bench_tasks.py` mines candidate commits, builds history-free checkouts, grades, and validates. Five tasks from two MIT repositories are in `bench/tasks/`:
+
+| Task | Type | Hidden test that fails on base |
+| --- | --- | --- |
+| `mi-last-reversed-none` | bug fix | `LastTests.test_reversed_is_none` |
+| `mi-sample-strict-counts` | bug fix | `SampleTests.test_error_cases` |
+| `mi-is-sorted-lt-only` | feature | `IsSortedTests.test_basic` |
+| `tomli-loads-typeerror` | bug fix | `TestError.test_type_error` |
+| `tomli-hex-escape` | feature | `TestData.test_valid` |
+
+`python3 -m modelpilot.bench_tasks validate` checks the following and writes `runs/bench-validate-*.json`:
+- each base fails exactly its fix commit's new test, with a real test failure (a usage error or crash doesn't count);
+- each reference passes 3 times out of 3;
+- each base's own suite passes.
+
+Grading takes about 0.2 s for tomli and 4–14 s for more-itertools.
+
+**Python constraint.** This Mac has only Python 3.9. more-itertools required ≥3.10 from 2025-10-07, so its tasks come from the 3.9 era, and each task records `requires_python`. Broadening the corpus needs a newer interpreter. Installing one is the user's decision (about 5 GB of disk is free).
+
+**3b (done, $0).** `modelpilot/bench.py` runs task × arm × trial in a seeded random order. Each trial gets a history-free checkout, isolated HOME/TMPDIR/config, and identical tools (`Read,Edit,Write,Bash,Glob,Grep`), turn limit and stop threshold. It uses wire accounting through the proxy and the shared grader without credentials. It keeps only `trial.json`, `agent.diff`, client output and proxy rows. Fixed arms run. The Jev and ModelPilot arms are registered but refuse to run until their launchers exist (item 4). The offline test drives the real 2.1.280 client with a fake key against the scripted fixture on a synthetic repository:
+- an agent that applies the fix passes, with tokens and dollars matching between proxy and client;
+- an idle agent fails on exactly the hidden test.
+
+`python3 -m modelpilot.bench --tasks … --arms …` prints the plan. `--live` is billable.
+
+Next: 3c live pilot (2 tasks × fixed Sonnet 5 and Opus 5 × 1 trial, about $2–5), which needs the user's key.
 
 ## Question
 
