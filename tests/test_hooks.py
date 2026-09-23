@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from modelpilot.governor import Governor
-from modelpilot.hooks import handle
+from modelpilot.hooks import channel_declaration, handle
 
 FIXTURES = Path(__file__).parent/'fixtures'/'hooks-2.1.280'
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +32,7 @@ class HookTests(unittest.TestCase):
         self.gov = Governor(self.db, 's', 1)
         self.task = self.gov.state.create('t', 'Report the first token')['id']
         self.rev = self.gov.state.claim(self.task, 1, 'client', seconds=3600)['revision']
+        self.code = self.gov.declare_channel()
         self.env = {'MODELPILOT_DB': str(self.db), 'MODELPILOT_SESSION': 's', 'MODELPILOT_LIMIT_USD': '1',
                     'MODELPILOT_TASK': self.task, 'MODELPILOT_OWNER': 'client'}
 
@@ -61,10 +62,36 @@ class HookTests(unittest.TestCase):
         self.assertEqual(output['hookSpecificOutput']['hookEventName'], 'PostToolUse')
         self.assertIn('Report the SECOND token instead', self.context(output))
         self.assertIn(f'revision {self.rev+1}', self.context(output))
+        self.assertTrue(self.context(output).startswith(f'[ModelPilot ledger update, code {self.code}]'))
+        self.assertNotIn('supersede', self.context(output).lower())  # no self-asserted authority
         self.assertEqual(self.gov.state.get(self.task)['ack_revision'], self.rev+1)
         self.assertIsNone(self.context(self.run_hook('PostToolUse-Read')))
         delivered = self.gov.journal('deliver_correction')
         self.assertEqual([e['payload']['revision'] for e in delivered], [self.rev+1])
+
+    def test_channel_is_declared_once_per_session_and_kept_out_of_the_environment(self):
+        self.assertEqual(self.gov.declare_channel(), self.code)  # stable for the session
+        self.assertRegex(self.code, r'^[0-9A-F]{16}$')
+        self.assertNotIn(self.code, json.dumps(self.env))
+        declaration = channel_declaration(self.task, self.code)
+        self.assertIn(f'[ModelPilot ledger update, code {self.code}]', declaration)
+        self.assertIn(self.task, declaration)
+        self.assertNotIn(self.code, json.dumps(self.gov.journal()))  # the journal never holds the code
+
+    def test_undeclared_channel_delivers_nothing_and_tells_the_user(self):
+        other = Governor(self.db, 'undeclared', 1)
+        try:
+            task = other.state.create('t', 'x')['id']
+            rev = other.state.claim(task, 1, 'client', seconds=3600)['revision']
+            other.state.correct(task, rev, 'Unannounced change')
+            env = dict(self.env, MODELPILOT_SESSION='undeclared', MODELPILOT_TASK=task)
+            data = payload('PostToolUse-Read', self.work)
+            output = handle('PostToolUse', data, env, clock=lambda: self.now[0])
+            self.assertIsNone(self.context(output))
+            self.assertIn('no declared correction channel', output['systemMessage'])
+            self.assertIsNone(other.state.get(task)['ack_revision'])
+        finally:
+            other.close()
 
     def test_correction_is_delivered_on_prompt_submit(self):
         self.gov.state.correct(self.task, self.rev, 'Use the new plan')
@@ -107,6 +134,7 @@ class HookTests(unittest.TestCase):
         self.gov.state.cancel(self.task, self.rev)
         output = self.run_hook('PostToolUse-Read')
         self.assertIn('cancelled', self.context(output))
+        self.assertIn(self.code, self.context(output))
         self.assertIsNone(self.context(self.run_hook('PostToolUse-Read')))
 
     def test_expired_lease_delivers_nothing_and_tells_the_user(self):

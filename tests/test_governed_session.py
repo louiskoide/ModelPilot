@@ -42,6 +42,9 @@ class OfflineGovernedSessionTests(unittest.TestCase):
                              files={'a.txt': 'ALPHA. Next read b.txt.\n', 'b.txt': 'BRAVO\n'},
                              tools='Read,Write,Bash', limit_usd=5)
         bodies = [json.loads(b) for b in self.upstream.bodies]
+        code = report['correction']['channel_code']
+        self.assertIn(f'code {code}'.encode(), self.upstream.bodies[0])  # declared in the user's prompt
+        self.assertIn(f'[ModelPilot ledger update, code {code}]'.encode(), self.upstream.bodies[-1])
         carrying = [i for i, b in enumerate(self.upstream.bodies) if b'CORRECTION_MARKER' in b]
         self.assertTrue(carrying, 'correction never reached a model request')
         self.assertEqual(carrying[-1], len(bodies)-1)  # still in context for the final answer
