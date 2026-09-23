@@ -1,0 +1,38 @@
+{
+ "id": "packaging-ranges-unbounded",
+ "repo": "packaging",
+ "url": "https://github.com/pypa/packaging",
+ "license": "Apache-2.0",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "4840c3a6817fbd0831f7e520c9a55367472a4a08",
+ "reference": "55cbf1b9426f44455fa1a9e0836f1fc082cc8452",
+ "hidden_tests": [
+  "tests/test_ranges.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_ranges.py"
+ ],
+ "instruction": "In packaging's internal version-range model (packaging/_ranges.py), an unbounded end is represented by a LowerBound or UpperBound whose version is None, but its inclusive flag is still honored, so LowerBound(None, True) and LowerBound(None, False) are two different values that sort above each other and are not equal. An unbounded end must have exactly one spelling: when the version is None, inclusive must always be False, so LowerBound(None, True) == LowerBound(None, False) == NEG_INF with the same hash (and likewise UpperBound(None, ...) == POS_INF). Document it and add tests.",
+ "source": "https://github.com/pypa/packaging/commit/55cbf1b9426f44455fa1a9e0836f1fc082cc8452",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

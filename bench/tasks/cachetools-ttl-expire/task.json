@@ -1,0 +1,38 @@
+{
+ "id": "cachetools-ttl-expire",
+ "repo": "cachetools",
+ "url": "https://github.com/tkem/cachetools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "feature",
+ "base": "726b0111e06f655c332ea4765a89d4669719649b",
+ "reference": "bb4b37cfc76ba42707db59a90220bf724393d263",
+ "hidden_tests": [
+  "tests/test_ttl.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_ttl.py"
+ ],
+ "instruction": "cachetools.TTLCache.expire(time=None) removes expired items but returns None. Make it return an iterable of the (key, value) pairs it removed, in expiry order (empty when nothing expired), so callers can act on evicted entries. This must also work when the cache's timer returns datetime objects. Document it and add tests.",
+ "source": "https://github.com/tkem/cachetools/commit/bb4b37cfc76ba42707db59a90220bf724393d263",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

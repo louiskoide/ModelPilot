@@ -1,0 +1,48 @@
+{
+ "id": "humanize-fractional",
+ "repo": "humanize",
+ "url": "https://github.com/python-humanize/humanize",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--ignore",
+  "tests/test_benchmarks.py",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "e1a5c7c9efe9f82edc89a2df8c2b599516a87dcb",
+ "reference": "08cf2c3026cfd7c553e397e1d91ea069eb2a4978",
+ "hidden_tests": [
+  "tests/test_number.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--ignore",
+  "tests/test_benchmarks.py",
+  "tests/test_number.py"
+ ],
+ "instruction": "humanize.fractional() produces degenerate output when the fractional part reduces to a whole number, for example output with '0/1' or '2 1/1' for inputs such as 0, 0.0 or 2.9999999. When the fraction rounds to a whole number, fold it into the integer part: fractional(0) == '0', fractional(2.9999999) == '3', fractional(0.9999999) == '1' and fractional(-2.9999999) == '-3'. Add tests.",
+ "source": "https://github.com/python-humanize/humanize/commit/08cf2c3026cfd7c553e397e1d91ea069eb2a4978",
+ "setup_files": {
+  "src/humanize/_version.py": "__version__ = version = '0.0.0'\n__version_tuple__ = version_tuple = (0, 0, 0)\n"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change",
+ "excluded_tests": {
+  "tests/test_benchmarks.py": "performance benchmarks needing the pytest-codspeed benchmark fixture; not correctness tests"
+ }
+}

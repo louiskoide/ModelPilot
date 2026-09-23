@@ -1,0 +1,48 @@
+{
+ "id": "humanize-intword-carry",
+ "repo": "humanize",
+ "url": "https://github.com/python-humanize/humanize",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--ignore",
+  "tests/test_benchmarks.py",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "f971127ce7e7770d3ff5be05cfc484bdf9302e04",
+ "reference": "ca892b368a535a79cc5e2181d052245b94fd6652",
+ "hidden_tests": [
+  "tests/test_number.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--ignore",
+  "tests/test_benchmarks.py",
+  "tests/test_number.py"
+ ],
+ "instruction": "humanize.intword() fails to carry to the next unit for very large numbers when rounding reaches the next power: for example intword(10**24 - 1) returns '1000.0 sextillion' instead of '1.0 septillion'. For values that round up to exactly the next power, the result must move to the next unit for every unit name, not only for small magnitudes. Add tests covering each unit boundary.",
+ "source": "https://github.com/python-humanize/humanize/commit/ca892b368a535a79cc5e2181d052245b94fd6652",
+ "setup_files": {
+  "src/humanize/_version.py": "__version__ = version = '0.0.0'\n__version_tuple__ = version_tuple = (0, 0, 0)\n"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change",
+ "excluded_tests": {
+  "tests/test_benchmarks.py": "performance benchmarks needing the pytest-codspeed benchmark fixture; not correctness tests"
+ }
+}

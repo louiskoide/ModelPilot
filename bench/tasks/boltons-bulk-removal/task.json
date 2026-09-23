@@ -1,0 +1,47 @@
+{
+ "id": "boltons-bulk-removal",
+ "repo": "boltons",
+ "url": "https://github.com/mahmoud/boltons",
+ "license": "BSD-3-Clause",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--deselect",
+  "tests/test_socketutils.py::test_socketutils_netstring",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "efff866a3b66fdafc817894390742e1d8bc025e5",
+ "reference": "e00c10a809525027b8167fbb7ac233cfc25a01f5",
+ "hidden_tests": [
+  "tests/test_listutils.py",
+  "tests/test_setutils.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--deselect",
+  "tests/test_socketutils.py::test_socketutils_netstring",
+  "tests/test_listutils.py",
+  "tests/test_setutils.py"
+ ],
+ "instruction": "boltons.listutils.BarrelList (a list stored as several sublists) misbehaves at its bounds once it has more than one sublist: bl[len(bl)] returns an element instead of raising IndexError; insert() at an index at or past the end, or before the start, does not clamp to append or prepend the way list.insert does; and pop() can fail after the last sublist has been emptied. Make BarrelList behave exactly like a plain list for indexing, insert and pop at and beyond both ends, without leaving empty sublists behind. IndexedSet.difference_update() and intersection_update() must stay correct for large bulk removals and should not degrade to repeated per-item compaction. Add tests.",
+ "source": "https://github.com/mahmoud/boltons/commit/e00c10a809525027b8167fbb7ac233cfc25a01f5",
+ "excluded_tests": {
+  "tests/test_socketutils.py::test_socketutils_netstring": "socket timing self-test fails in this environment on the reference commit; unrelated to any task"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

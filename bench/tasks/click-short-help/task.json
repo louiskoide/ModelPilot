@@ -1,0 +1,41 @@
+{
+ "id": "click-short-help",
+ "repo": "click",
+ "url": "https://github.com/pallets/click",
+ "license": "BSD-3-Clause",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "6d5bac5c712195cbfa9666ba0ecbf0573cdea356",
+ "reference": "f67c2bb6c2f055c1c7a57cd46c3697fc26a7742e",
+ "hidden_tests": [
+  "tests/test_utils/test_make_default_short_help.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_utils/test_make_default_short_help.py"
+ ],
+ "instruction": "click's automatic short help (the text shown for a command in its group's help, made from the first sentence of the help text and limited to 45 characters by default) handles periods and truncation badly. A period ends a sentence only when it ends the text, or when the next word does not start with a lowercase letter; otherwise it is part of an abbreviation (so 'Weigh apples vs. pears.' is one sentence, and '123 567 9. aaaa bbb' does not end at '9.'). When the chosen text is longer than the limit, shorten it at a word boundary and end it with '...', never splitting a word (including hyphenated words); if not even one word fits, return just '...'. A limit smaller than 3 still returns '...', and text that already fits is returned unchanged. Only the first paragraph is considered, whitespace is collapsed, and a leading \\b no-rewrap marker is ignored, as today. Fix it and add tests.",
+ "source": "https://github.com/pallets/click/commit/f67c2bb6c2f055c1c7a57cd46c3697fc26a7742e",
+ "setup_files": {
+  "src/click-8.5.1.dev.dist-info/METADATA": "Metadata-Version: 2.1\nName: click\nVersion: 8.5.1.dev\n"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

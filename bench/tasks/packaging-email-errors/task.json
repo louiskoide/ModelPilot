@@ -1,0 +1,39 @@
+{
+ "id": "packaging-email-errors",
+ "repo": "packaging",
+ "url": "https://github.com/pypa/packaging",
+ "license": "Apache-2.0",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "5b583e309996a085ad3b5b045f3bf50a09c11b58",
+ "reference": "206834025040aca6f8a2fdfc4039dbfa2a9861a6",
+ "hidden_tests": [
+  "tests/test_metadata.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_metadata.py"
+ ],
+ "instruction": "packaging.metadata.Metadata.from_email(data, validate=True) raises for unparsed or unknown fields before validating the fields it did parse, so users see only some of the problems. Report everything in one ExceptionGroup with the message 'invalid or unparsed metadata', containing one InvalidMetadata per problem: unparsed or unknown fields together with validation errors of the parsed fields (for example an unknown header and an invalid Version together). A required field that is already reported as unparsed (for example a duplicated Name header) must not be reported a second time as missing. The raised group must not carry another exception as its __context__. Valid metadata still returns a Metadata object. Add tests.",
+ "source": "https://github.com/pypa/packaging/commit/206834025040aca6f8a2fdfc4039dbfa2a9861a6",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change",
+ "notes": "The reference failed once in its first 3 grades under 4-way parallel validation (failing tests not recorded then) and passed the next 11 (3 in revalidation, 8 in a parallel stress run). Watch for grader failures on this task."
+}

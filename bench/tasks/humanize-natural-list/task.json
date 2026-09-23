@@ -1,0 +1,48 @@
+{
+ "id": "humanize-natural-list",
+ "repo": "humanize",
+ "url": "https://github.com/python-humanize/humanize",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--ignore",
+  "tests/test_benchmarks.py",
+  "tests"
+ ],
+ "type": "feature",
+ "base": "bada0f88b4d115b96d94db1fe73b20579e84fc14",
+ "reference": "ffdf407fdfe1a5738159b989eb2df190ed780448",
+ "hidden_tests": [
+  "tests/test_lists.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--ignore",
+  "tests/test_benchmarks.py",
+  "tests/test_lists.py"
+ ],
+ "instruction": "humanize.natural_list() only works with lists. Accept any iterable, including tuples, dict key views, generators and ranges, producing the same output as for the equivalent list (for example natural_list(range(1, 4)) == '1, 2 and 3' and natural_list(('one',)) == 'one'), and update its type hints and docstring. Add tests.",
+ "source": "https://github.com/python-humanize/humanize/commit/ffdf407fdfe1a5738159b989eb2df190ed780448",
+ "setup_files": {
+  "src/humanize/_version.py": "__version__ = version = '0.0.0'\n__version_tuple__ = version_tuple = (0, 0, 0)\n"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change",
+ "excluded_tests": {
+  "tests/test_benchmarks.py": "performance benchmarks needing the pytest-codspeed benchmark fixture; not correctness tests"
+ }
+}

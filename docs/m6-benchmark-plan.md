@@ -1,6 +1,6 @@
 # M6 benchmark plan: repository tasks, graders and arms (items 3–4)
 
-Status: plan written September 22, 2026. Phases 3a and 3b are built and validated offline, and the 3c live pilot passed on September 23 (see "Progress"). Item 3 is the task corpus and harness. Item 4 runs the arms. The ModelPilot arm's behavior is proposed in `docs/m6-modelpilot-policy.md`.
+Status: plan written September 22, 2026. Phases 3a–3d are done: 40 validated tasks, a repository split, and a hash-locked final set. The 3c live pilot passed on September 23 (see "Progress"). Item 3 is the task corpus and harness. Item 4 runs the arms. The ModelPilot arm's behavior is proposed in `docs/m6-modelpilot-policy.md`.
 
 ## Progress
 
@@ -43,7 +43,26 @@ Grading takes about 0.2 s for tomli and 4–14 s for more-itertools.
 - **The tasks were easy.** All four trials passed, so these two tasks don't separate the arms. The corpus needs harder tasks.
 - **Cost estimate revised.** About $0.12–0.19 per trial puts 4b (25 tasks × 6 arms × 3 trials = 450 trials) at roughly $55–90 plus Jev overhead, well below the first guess, as long as harder tasks don't cost much more.
 
-Next: 3d, the full corpus. It needs a newer Python for more candidates and a bias toward harder tasks (larger fixes, several files).
+**3d (done, $0): 40 validated tasks, split locked.** Tasks come from 8 permissively licensed repositories, 32 bug fixes and 8 features, favoring larger fixes than 3a:
+
+| Split | Repositories (tasks) |
+| --- | --- |
+| Tuning (16) | more-itertools (6), tomli (4), cachetools (4), parse (2) |
+| Final (24) | click (6), packaging (6), boltons (6), humanize (6) |
+
+The split is by repository. Both pilot tasks are in tuning. `bench/splits.json` records every task's spec hash, and the final set is hash-locked. `bench.py` refuses final tasks without `--final` and refuses to run if a final spec changed since the lock. A test checks the lock against the committed specs.
+
+**Environment.** Python 3.12.14 (Homebrew) in the ignored venv `work/bench/py312`, with pinned test dependencies in `bench/environment.json`. The agent's `python3`/`pip`/`pytest` and the grader are this one interpreter. The agent gets the grader's `PYTHONPATH`, as an editable install would provide. `--live` refuses to run while that venv's site-packages is writable, so an agent's `pip install` can't change what later trials import. Lock it with `chmod -R a-w work/bench/py312/lib/python3.12/site-packages`.
+
+**Per-task adjustments,** each recorded in the spec:
+- click and humanize get `setup_files` standing in for what `pip install -e .` generates: stub install metadata for click, `_version.py` for humanize. They're in every tree and never in the agent's diff.
+- boltons excludes `test_socketutils_netstring`, a socket-timing self-test that fails here even on the reference.
+- humanize excludes `tests/test_benchmarks.py`, performance benchmarks that need pytest-codspeed.
+- parse clears `addopts`, whose coverage options need pytest-cov.
+
+**Validation rules.** A timeout or collection crash never counts as the expected failure, so boltons' `daterange` task was dropped: its bug is an infinite loop, so the hidden tests hang. It was replaced by `boltons-isoparse-fraction`. `packaging-email-errors` failed once in 14 reference grades under parallel load and is flagged in its spec. Instructions were written from each fix commit, its issue and its hidden tests. They describe behavior, not the change, and include any exact messages or examples the tests check.
+
+Next: M0 replication on the 5 family and the Jev/ModelPilot launchers (item 4). A tuning run on the fixed arms is possible now.
 
 ## Question
 

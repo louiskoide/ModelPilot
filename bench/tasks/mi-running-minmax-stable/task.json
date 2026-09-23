@@ -1,0 +1,36 @@
+{
+ "id": "mi-running-minmax-stable",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "bug_fix",
+ "base": "cb75bb9c55f7ed3e77ce599097e1ba8da411746d",
+ "reference": "d992be0de9383ddcaae3a24866a2d96b52132b07",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "instruction": "more_itertools.running_min() and running_max() (in more_itertools/recipes.py) should be stable in the same way as the built-in min() and max(): when several values in the current window compare equal, min()/max() return the one that appears first, but running_min/running_max currently report the most recent one. Make every yielded value the same object that min()/max() would return for that window. For example, with data = [0, 0.0, Fraction(0)] and maxlen=2 the yielded values should have types int, int, float. Add tests for both functions.",
+ "source": "https://github.com/more-itertools/more-itertools/commit/d992be0de9383ddcaae3a24866a2d96b52132b07",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

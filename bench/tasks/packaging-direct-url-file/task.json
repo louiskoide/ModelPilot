@@ -1,0 +1,38 @@
+{
+ "id": "packaging-direct-url-file",
+ "repo": "packaging",
+ "url": "https://github.com/pypa/packaging",
+ "license": "Apache-2.0",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "d3e7f5d96da0c27103324cb9fb349b54e753a877",
+ "reference": "a0661b5f5c8838af81c5098b2a564e62852decb4",
+ "hidden_tests": [
+  "tests/test_direct_url.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_direct_url.py"
+ ],
+ "instruction": "packaging.direct_url accepts a direct URL with dir_info whenever its scheme is file, even when the URL does not point to an absolute local path, for example 'file:relative', 'file:./relative', 'file:', 'file://relative' or 'file://localhost'. When dir_info is present the URL must be an absolute file URL; otherwise raise DirectUrlValidationError with a message matching 'File URL must be absolute when dir_info is present'. Absolute file URLs, including 'file://localhost/home/myproject' and a scheme in any letter case, must still be accepted. Add tests.",
+ "source": "https://github.com/pypa/packaging/commit/a0661b5f5c8838af81c5098b2a564e62852decb4",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

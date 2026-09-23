@@ -1,0 +1,41 @@
+{
+ "id": "click-argument-help-record",
+ "repo": "click",
+ "url": "https://github.com/pallets/click",
+ "license": "BSD-3-Clause",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "f25f697a439acc2b0d84aa8f5413330f4e2e75cf",
+ "reference": "05f6fd0df4ecbd104eb7a229f9f185c2484dee69",
+ "hidden_tests": [
+  "tests/test_arguments.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_arguments.py"
+ ],
+ "instruction": "click.Argument.get_help_record(ctx) returns None when the argument has no help text, so callers must special-case it. It should always return a (metavar, help) tuple, with an empty string when help is None or empty: for click.Argument(['src']) it returns ('SRC', ''), and with help='Source path' it returns ('SRC', 'Source path'). Update the help output code that relied on None, document the change, and add tests.",
+ "source": "https://github.com/pallets/click/commit/05f6fd0df4ecbd104eb7a229f9f185c2484dee69",
+ "setup_files": {
+  "src/click-8.5.1.dev.dist-info/METADATA": "Metadata-Version: 2.1\nName: click\nVersion: 8.5.1.dev\n"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

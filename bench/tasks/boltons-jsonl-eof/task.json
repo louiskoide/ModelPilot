@@ -1,0 +1,45 @@
+{
+ "id": "boltons-jsonl-eof",
+ "repo": "boltons",
+ "url": "https://github.com/mahmoud/boltons",
+ "license": "BSD-3-Clause",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--deselect",
+  "tests/test_socketutils.py::test_socketutils_netstring",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "435774ef8b10c1355bf77483a837945034011754",
+ "reference": "f1034b07ddf71f4d9285134a47a4ade16fe40789",
+ "hidden_tests": [
+  "tests/test_jsonutils.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--deselect",
+  "tests/test_socketutils.py::test_socketutils_netstring",
+  "tests/test_jsonutils.py"
+ ],
+ "instruction": "boltons.jsonutils.JSONLIterator can loop forever. When the starting position given by rel_seek lands inside the last line of a file that has no trailing newline, aligning to the next line never reaches a newline and keeps reading empty strings at end of file; it should stop and simply yield nothing more. A negative rel_seek is also normalized wrongly (-0.3 is treated as 1.3 instead of 0.7), which lands past the end of the file and hits the same loop; rel_seek=-0.5 should iterate the last half of the file as documented. Fix both and add tests.",
+ "source": "https://github.com/mahmoud/boltons/commit/f1034b07ddf71f4d9285134a47a4ade16fe40789",
+ "excluded_tests": {
+  "tests/test_socketutils.py::test_socketutils_netstring": "socket timing self-test fails in this environment on the reference commit; unrelated to any task"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

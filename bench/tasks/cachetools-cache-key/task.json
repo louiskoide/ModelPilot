@@ -1,0 +1,38 @@
+{
+ "id": "cachetools-cache-key",
+ "repo": "cachetools",
+ "url": "https://github.com/tkem/cachetools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "98ec79ff8be24ce1346d6a96602f11ccbda4f76f",
+ "reference": "18e5930ced2cf107c273b81d949dbab8ce3f48e1",
+ "hidden_tests": [
+  "tests/test_cachedmethod.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_cachedmethod.py"
+ ],
+ "instruction": "Methods decorated with @cachetools.cachedmethod expose a cache_key attribute. Accessed through an instance (obj.method.cache_key), it currently has to be called with the instance passed again as the first argument. It should be bound to the instance, like the method itself: obj.method.cache_key(*args, **kwargs) must return exactly the key the decorator uses for obj.method(*args, **kwargs), for example keys.methodkey(obj, 42) for obj.method.cache_key(42) with the default key. This applies with and without lock, condition and info options. Fix it, document it and add tests.",
+ "source": "https://github.com/tkem/cachetools/commit/18e5930ced2cf107c273b81d949dbab8ce3f48e1",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

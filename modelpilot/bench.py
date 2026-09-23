@@ -91,6 +91,10 @@ def run_trial(task, arm_id, trial_dir, cli, key, upstream, price_table, *, pytho
     env = client_env(os.environ, key, dirs, cli, {})
     # The agent's python3/pip/pytest are the grader's interpreter, not whatever the system has.
     env['PATH'] = os.pathsep.join([str(Path(python).parent), env['PATH']])
+    # Same import paths as the grader, as an editable install would give a developer.
+    paths = bench_tasks.test_env_paths(task, work)
+    if paths:
+        env['PYTHONPATH'] = os.pathsep.join(paths)
     env['ANTHROPIC_BASE_URL'] = f'http://127.0.0.1:{proxy.server_port}'
     command = [str(cli), '-p', PREAMBLE + task['instruction'], '--model', arm['model'],
                '--output-format', 'stream-json', '--verbose', '--max-turns', str(max_turns),
@@ -192,12 +196,20 @@ def main():
     parser.add_argument('--budget', type=float, default=1.0, help='Per-trial client stop threshold, not a billing cap')
     parser.add_argument('--claude', type=Path)
     parser.add_argument('--live', action='store_true', help='Required to send billable requests')
+    parser.add_argument('--final', action='store_true', help='Allow final-split tasks (only for the frozen evaluation)')
     args = parser.parse_args()
     tasks = [t for i in args.tasks.split(',') for t in bench_tasks.load(i)]
     arms = args.arms.split(',')
     unknown = [a for a in arms if a not in ARMS]
     if len(tasks) != len(args.tasks.split(',')) or unknown:
         raise SystemExit(f'Unknown task or arm. Arms: {", ".join(ARMS)}')
+    if bench_tasks.SPLITS.exists():
+        final = [t['id'] for t in tasks if bench_tasks.split_of(t['id']) == 'final']
+        if final and not args.final:
+            raise SystemExit(f'Final-split tasks {final} need --final: they are reserved for the frozen evaluation.')
+        changed = bench_tasks.check_lock(bench_tasks.load())
+        if final and changed:
+            raise SystemExit(f'Final task specs changed since the lock: {changed}. Not running.')
     blocked = [a for a in arms if ARMS[a]['kind'] not in RUNNABLE]
     if blocked:
         raise SystemExit(f'Not runnable yet: {", ".join(blocked)} (launchers arrive with work item 4).')
@@ -214,6 +226,11 @@ def main():
     cli = args.claude or Path(shutil.which('claude') or '')
     if not cli.name or not cli.exists():
         raise SystemExit('Claude Code CLI not found; pass --claude.')
+    writable = bench_tasks.writable_site_packages(bench_tasks.interpreter())
+    if writable:
+        # An agent's `pip install` would otherwise change what every later trial imports.
+        raise SystemExit(f'Benchmark site-packages is writable ({writable[0]}). Lock it first: '
+                         f'chmod -R a-w {writable[0]}')
     key = os.environ.get('ANTHROPIC_API_KEY') or getpass.getpass('Anthropic API key (hidden): ').strip()
     problem = check_anthropic_key(key)
     if problem:

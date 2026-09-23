@@ -1,0 +1,38 @@
+{
+ "id": "packaging-marker-parens",
+ "repo": "packaging",
+ "url": "https://github.com/pypa/packaging",
+ "license": "Apache-2.0",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "c4fb81ff6eba16fdd24d50e9d9d002fdbece6dd4",
+ "reference": "0a85b41e24c9b55b83f05ae696d73e8294a5b094",
+ "hidden_tests": [
+  "tests/test_markers.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_markers.py"
+ ],
+ "instruction": "str() of a packaging.markers.Marker drops the parentheses of a nested group when the group is written with redundant double parentheses, which can change the meaning of the marker. For example, str(Marker('python_version < \"3.10\" and ((sys_platform == \"linux\" or sys_platform == \"darwin\"))')) loses the parentheses around the or-group, so Marker(str(m)) evaluates differently from m. Serialize markers so that every group keeps the parentheses its and/or precedence needs, and Marker(str(m)) always evaluates the same as m, while a redundant outer wrapper still produces no extra parentheses. Add tests.",
+ "source": "https://github.com/pypa/packaging/commit/0a85b41e24c9b55b83f05ae696d73e8294a5b094",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

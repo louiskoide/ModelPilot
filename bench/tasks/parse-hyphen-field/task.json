@@ -1,0 +1,43 @@
+{
+ "id": "parse-hyphen-field",
+ "repo": "parse",
+ "url": "https://github.com/r1chardj0n3s/parse",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "-o",
+  "addopts=",
+  "tests"
+ ],
+ "type": "feature",
+ "base": "e0c19dcf7b8192630fcf4692c771860585b669e8",
+ "reference": "9c9ec7fe886c195a369446ec5f2a57930b627f8a",
+ "hidden_tests": [
+  "tests/test_parse.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "-o",
+  "addopts=",
+  "tests/test_parse.py"
+ ],
+ "instruction": "Named fields containing a hyphen, such as '/local/sub/{user-id}/duration', are not recognised by parse. Allow hyphens in field names. Results must be available under the original name (result['user-id']). Regex group names cannot contain '-', so map it the same way '.' and '[]' are already mapped, including the existing collision handling: for the template '/foo/{user-id}/{user_id}/{user.id}/bar/' Parser(template).named_fields must be ['user_id', 'user__id', 'user___id'], and parsing '/foo/1/2/3/bar/' gives result['user-id'] == '1', result['user_id'] == '2' and result['user.id'] == '3'. Add tests.",
+ "source": "https://github.com/r1chardj0n3s/parse/commit/9c9ec7fe886c195a369446ec5f2a57930b627f8a",
+ "notes": "addopts cleared: the repo .pytest.ini requests pytest-cov coverage options, which are not part of the benchmark environment",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

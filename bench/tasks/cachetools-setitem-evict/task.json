@@ -1,0 +1,38 @@
+{
+ "id": "cachetools-setitem-evict",
+ "repo": "cachetools",
+ "url": "https://github.com/tkem/cachetools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "16e88894ef7d79b25a68f5a3b5411ed881342725",
+ "reference": "39b31bc9b63abe98497409945e9d382d8918c8fb",
+ "hidden_tests": [
+  "tests/__init__.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "instruction": "With getsizeof set, assigning a larger value to a key that is already in a cache evicts other entries even when the updated cache would still fit within maxsize. For example, with Cache(maxsize=10, getsizeof=lambda x: x), cache[3] = 3; cache[4] = 4; cache[4] = 7 should keep both keys (currsize 10), but key 3 is evicted. The new size of an existing key should only need room for the difference from its old size. This affects every cache class built on Cache. Replacing with the same size or a smaller size must keep working, and if eviction happens to remove the key being updated, the assignment must still store the new value correctly. Add tests.",
+ "source": "https://github.com/tkem/cachetools/commit/39b31bc9b63abe98497409945e9d382d8918c8fb",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

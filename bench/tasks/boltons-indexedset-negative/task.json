@@ -1,0 +1,45 @@
+{
+ "id": "boltons-indexedset-negative",
+ "repo": "boltons",
+ "url": "https://github.com/mahmoud/boltons",
+ "license": "BSD-3-Clause",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--deselect",
+  "tests/test_socketutils.py::test_socketutils_netstring",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "609cabe932a1ea1423b24568644945abb1b8bb84",
+ "reference": "d0a284fc7ef1aebceb54798600d73be4eeb76ed8",
+ "hidden_tests": [
+  "tests/test_setutils.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--deselect",
+  "tests/test_socketutils.py::test_socketutils_netstring",
+  "tests/test_setutils.py"
+ ],
+ "instruction": "boltons.setutils.IndexedSet wraps out-of-range negative indexes around instead of raising IndexError once items have been removed: on a 9-item set x, x[-10] returns an item and x.pop(-15) silently removes a middle item. Indexing and pop must behave like a list: valid negative indexes work, and any index outside -len..len-1 raises IndexError (as does indexing an empty IndexedSet), including after removals that leave several gaps in the internal storage. Add tests.",
+ "source": "https://github.com/mahmoud/boltons/commit/d0a284fc7ef1aebceb54798600d73be4eeb76ed8",
+ "excluded_tests": {
+  "tests/test_socketutils.py::test_socketutils_netstring": "socket timing self-test fails in this environment on the reference commit; unrelated to any task"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

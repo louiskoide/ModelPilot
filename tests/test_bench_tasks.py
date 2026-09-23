@@ -5,7 +5,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from modelpilot.bench_tasks import candidates, clean_env, grade, parse_results, run_tests, validate, workspace
+from modelpilot import bench_tasks
+from modelpilot.bench_tasks import (candidates, check_lock, clean_env, grade, make_splits, parse_results,
+                                     run_tests, validate, workspace)
 
 ENV = {'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@t', 'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@t'}
 BUGGY = 'def last(items):\n    return items[0]\n'
@@ -117,6 +119,10 @@ class ParseResultTests(unittest.TestCase):
         collection = ('ERROR tests/test_b.py\n!!! Interrupted: 1 error during collection !!!\n1 error in 0.20s\n')
         self.assertEqual(parse_results(PYTEST, 2, collection), (1, True, ['tests/test_b.py']))
 
+    def test_colored_pytest_output_is_parsed(self):
+        colored = '\x1b[31mFAILED\x1b[0m tests/t.py::x\n\x1b[31m1 failed\x1b[0m, \x1b[32m2 passed\x1b[0m in 0.1s\n'
+        self.assertEqual(parse_results(PYTEST, 1, colored), (3, True, ['tests/t.py::x']))
+
     def test_pytest_usage_errors_and_empty_runs_are_not_failures(self):
         self.assertEqual(parse_results(PYTEST, 4, 'ERROR: usage: pytest [options]\n')[:2], (0, False))
         self.assertEqual(parse_results(PYTEST, 5, 'no tests ran in 0.01s\n')[:2], (0, False))
@@ -129,6 +135,31 @@ class ParseResultTests(unittest.TestCase):
         env = clean_env('/opt/bench/venv/bin/python')
         self.assertTrue(env['PATH'].startswith('/opt/bench/venv/bin' + os.pathsep))
         self.assertFalse(any(k.startswith('ANTHROPIC') for k in env))
+
+
+
+class SplitTests(unittest.TestCase):
+    TASKS = [{'id': 'a1', 'repo': 'a'}, {'id': 'a2', 'repo': 'a'}, {'id': 'b1', 'repo': 'b'}]
+
+    def test_split_is_by_repository_and_locks_the_final_set(self):
+        splits = make_splits(self.TASKS, final_repos=('b',))
+        self.assertEqual((sorted(splits['tuning']), sorted(splits['final'])), (['a1', 'a2'], ['b1']))
+        self.assertEqual(check_lock(self.TASKS, splits), [])
+        edited = [dict(t, instruction='changed') if t['id'] == 'b1' else t for t in self.TASKS]
+        self.assertEqual(check_lock(edited, splits), ['b1'])
+        tuned = [dict(t, instruction='changed') if t['id'] == 'a1' else t for t in self.TASKS]
+        self.assertEqual(check_lock(tuned, splits), [])  # tuning tasks may still be edited
+
+    @unittest.skipUnless(bench_tasks.SPLITS.exists(), 'no committed split yet')
+    def test_committed_split_covers_every_task_and_final_specs_are_unchanged(self):
+        splits = json.loads(bench_tasks.SPLITS.read_text())
+        tasks = bench_tasks.load()
+        self.assertEqual(sorted(list(splits['tuning']) + list(splits['final'])), sorted(t['id'] for t in tasks))
+        self.assertFalse(set(splits['tuning']) & set(splits['final']))
+        repos = {split: {t['repo'] for t in tasks if t['id'] in splits[split]} for split in ('tuning', 'final')}
+        self.assertFalse(repos['tuning'] & repos['final'])
+        self.assertEqual(check_lock(tasks, splits), [], 'a final task spec changed after the lock')
+        self.assertTrue(all(t['instruction'] != 'TODO' for t in tasks))
 
 
 if __name__ == '__main__': unittest.main()

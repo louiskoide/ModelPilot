@@ -1,0 +1,48 @@
+{
+ "id": "humanize-nonfinite-delta",
+ "repo": "humanize",
+ "url": "https://github.com/python-humanize/humanize",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--ignore",
+  "tests/test_benchmarks.py",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "08cf2c3026cfd7c553e397e1d91ea069eb2a4978",
+ "reference": "b48b37b187682ccc55b28ed1b7cfaa853dbca72f",
+ "hidden_tests": [
+  "tests/test_time.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--ignore",
+  "tests/test_benchmarks.py",
+  "tests/test_time.py"
+ ],
+ "instruction": "humanize.naturaldelta() raises OverflowError for float('inf') and float('-inf') while float('nan') is returned unchanged as a string. Return non-finite floats unchanged as their string form ('inf', '-inf', 'nan'). A finite value that is too large for a timedelta (for example 1e30) must still raise OverflowError, as documented. Add tests.",
+ "source": "https://github.com/python-humanize/humanize/commit/b48b37b187682ccc55b28ed1b7cfaa853dbca72f",
+ "setup_files": {
+  "src/humanize/_version.py": "__version__ = version = '0.0.0'\n__version_tuple__ = version_tuple = (0, 0, 0)\n"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change",
+ "excluded_tests": {
+  "tests/test_benchmarks.py": "performance benchmarks needing the pytest-codspeed benchmark fixture; not correctness tests"
+ }
+}

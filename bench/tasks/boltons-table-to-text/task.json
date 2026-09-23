@@ -1,0 +1,45 @@
+{
+ "id": "boltons-table-to-text",
+ "repo": "boltons",
+ "url": "https://github.com/mahmoud/boltons",
+ "license": "BSD-3-Clause",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--deselect",
+  "tests/test_socketutils.py::test_socketutils_netstring",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "e66cade323f5c11cebb4bd0f099e634b245adccd",
+ "reference": "eb659013fbe4f355561fbead2116868366ba6e26",
+ "hidden_tests": [
+  "tests/test_tableutils.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--deselect",
+  "tests/test_socketutils.py::test_socketutils_netstring",
+  "tests/test_tableutils.py"
+ ],
+ "instruction": "boltons.tableutils.Table.to_text() crashes on degenerate tables: Table([[]]).to_text() raises ValueError (it should return ''); None or other non-string header values raise AttributeError (they should render the same way as data cells, so a None header shows as 'None'); and a table with fewer headers than columns raises IndexError (short header rows should be padded with None to the table width, as to_html does). When there are no headers, to_text() should render no header row and no separator line at all (Table([[], [1]]).to_text() == '1'), matching to_html. Add tests.",
+ "source": "https://github.com/mahmoud/boltons/commit/eb659013fbe4f355561fbead2116868366ba6e26",
+ "excluded_tests": {
+  "tests/test_socketutils.py::test_socketutils_netstring": "socket timing self-test fails in this environment on the reference commit; unrelated to any task"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

@@ -1,0 +1,41 @@
+{
+ "id": "click-sentinel-copy",
+ "repo": "click",
+ "url": "https://github.com/pallets/click",
+ "license": "BSD-3-Clause",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "420c8fb44eeadb537cae69d2fee3796e808558dd",
+ "reference": "f58ca3e81424a35626c8a475eb59ab95589008ce",
+ "hidden_tests": [
+  "tests/test_utils/test_sentinel.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_utils/test_sentinel.py"
+ ],
+ "instruction": "The members of click's internal Sentinel enum (click._utils.Sentinel, for example UNSET) are meant to be singletons compared by identity, but copy.copy(), copy.deepcopy() and a pickle round-trip either fail or produce a different object. Make all three return the very same member for every Sentinel member, so structures that contain sentinels can be copied and pickled safely. Add tests.",
+ "source": "https://github.com/pallets/click/commit/f58ca3e81424a35626c8a475eb59ab95589008ce",
+ "setup_files": {
+  "src/click-8.5.0.dist-info/METADATA": "Metadata-Version: 2.1\nName: click\nVersion: 8.5.0\n"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

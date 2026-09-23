@@ -1,0 +1,41 @@
+{
+ "id": "click-style-colors",
+ "repo": "click",
+ "url": "https://github.com/pallets/click",
+ "license": "BSD-3-Clause",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "7925a3410d7098c28cfca3b2baa6c852666bbd14",
+ "reference": "07c909f23f0f83b5ca137c167b9a134d66201f67",
+ "hidden_tests": [
+  "tests/test_utils/test_style.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_utils/test_style.py"
+ ],
+ "instruction": "click.style() handles color arguments inconsistently. The 256-color index 0 is silently ignored because fg/bg are checked for truthiness, so style('x y', fg=0) emits no color code; it should emit '\\x1b[38;5;0m' (and '\\x1b[48;5;0m' for bg=0). Invalid colors should be rejected with ValueError('Unknown color ...') instead of a TypeError or silently wrong output: unknown names, ints outside 0-255, booleans, and RGB tuples or lists that do not have exactly three ints between 0 and 255. Valid names, 0-255 indexes and (r, g, b) tuples or lists keep working as before, including 'reset' and the bright_* names for both fg and bg. Fix it, document the change and add tests.",
+ "source": "https://github.com/pallets/click/commit/07c909f23f0f83b5ca137c167b9a134d66201f67",
+ "setup_files": {
+  "src/click-8.5.0.dev.dist-info/METADATA": "Metadata-Version: 2.1\nName: click\nVersion: 8.5.0.dev\n"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}
