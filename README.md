@@ -32,7 +32,7 @@ For measured runs, set `ANTHROPIC_API_KEY` in your environment, verify the model
 | M4 | Cascade and economically justified shadow caches | Dry-run planner + bounded live draft checks passed; execution pending |
 | M5 | Rebase coalescing, budgets, offline threshold learning | Offline control prototype tested; integration and real calibration pending |
 | M6 | Fixed model/effort and jev-router comparisons: cost, pass rate, wall time | Fixed-baseline live smoke passed; governor and jev-router comparisons pending |
-| Governor | Durable integration of ledger, verifier, budget and rebase controls | Dry-run surface + multi-process/crash-recovery tests; client/proxy wiring pending |
+| Governor | Durable integration of ledger, verifier, budget and rebase controls | Dry-run surface wired offline to the proxy, Claude Code hooks and gated fallbacks; live governed session pending |
 
 Persistent workers need versioned task corrections and stale-result rejection. Rebase triggers include explicit user/goal-boundary compaction. The selected jev-router baseline is gargpratyush/jev-router, pinned in `configs/jev-baseline.json`; see [setup requirements](docs/jev-baseline-setup.md).
 
@@ -52,6 +52,6 @@ M6 paired baseline harness and remaining evaluation work: [M6 guide](docs/m6.md)
 
 M6 measured smoke comparison: [results](docs/m6-results.md).
 
-Durable dry-run governor surface and its limits: [governor guide](docs/governor.md).
+Durable dry-run governor surface, its proxy/hook/fallback wiring and its limits: [governor guide](docs/governor.md).
 
 Claude Code handoff: [CLAUDE.md](CLAUDE.md).
