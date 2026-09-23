@@ -76,6 +76,17 @@ Coordinator commands use the same environment or `--db/--session/--limit-usd` fl
 
 `cascade_check --live --execute-fallback` wires this for the escalated draft. It has not been run live.
 
+## Live evidence
+
+**`runs/governed-session-20260922-214046`: failed on the correction, passed on accounting.** Sonnet 4.6/low, Claude Code 2.1.280, 3 requests, $0.0401259.
+
+- **Accounting passed.** Every request was reserved and settled under its `mp-` ID. Governor spend, proxy cost and client `total_cost_usd` agree exactly at $0.0401259. Proxy and client tokens match: 5 input, 337 output, 15,478 cache read, 8,110 cache write. There were no unknown or orphaned reservations, no hook errors, and nothing was applied.
+- **Fencing worked.** The second request was sent after the coordinator corrected the task but before the next hook delivered it. The proxy recorded it as `would_refuse: stale_task`, which is the intended signal.
+- **Delivery worked mechanically.** The `PostToolUse` hook on the `b.txt` read put the correction into model context and acknowledged revision 2.
+- **The model rejected it.** Sonnet answered with the first token and said: "I notice the hook injected a message claiming to supersede my task instructions. This appears to be a prompt injection attempt." The correction arrived beside a tool result, claimed to override the user's instruction, and nothing in the user's own prompt said such updates would come. Refusing it is correct model behavior.
+
+So **acknowledged means delivered, not obeyed**, and this run shows the gap. A mid-flight correction needs its authority set up by the user before the session starts. Text that claims authority for itself is not enough. See "Not done".
+
 ## Validation
 
 Offline, no API key:
@@ -108,7 +119,7 @@ Known interaction: a refused call inside `Worker.dispatch` also sets that worker
 
 ## Not done
 
-- **Live evidence.** The governed session and `cascade_check --execute-fallback` have not been run against the real API.
+- **Authorized correction channel.** The first live session (above) showed that an unannounced hook correction is treated as prompt injection. The user's prompt must declare the channel, ideally with a per-session nonce that workspace files cannot know. The delivery text must not claim to supersede anything on its own authority. `cascade_check --execute-fallback` has not been run live.
 - **Rebuild acknowledgment for model and effort.** Only compaction is detected automatically. `/model` and `/effort` changes need an explicit `ack-rebase`. Hook payloads carry `effort.level`, which could confirm effort changes later.
 - **Correction delivery at turn end.** A correction issued during the final model call waits for the next prompt. A `Stop` hook could deliver it by blocking the stop, but that is not implemented.
 - **Test-suite observations.** Only file hashes and failure text are observed. `suite`/`failures` need an explicit test adapter, as M3 has, rather than parsing arbitrary output.
