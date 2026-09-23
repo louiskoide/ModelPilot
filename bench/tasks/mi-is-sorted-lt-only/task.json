@@ -1,0 +1,35 @@
+{
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.8",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "id": "mi-is-sorted-lt-only",
+ "type": "feature",
+ "base": "b2b3bf6ddc5cb652201545ba191d07400c4e89cf",
+ "reference": "e733192454b73bbea8645e4dcbee95b13eba714c",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "instruction": "more_itertools.is_sorted() should require only the less-than operator (`<`) on the items, or on their keys when key= is given, the same as the built-in sorted(). Today it fails for objects that define only __lt__. Make it work for every combination of reverse= and strict=, returning the same answer as comparing the input with sorted(). Update the tests accordingly.",
+ "source": "https://github.com/more-itertools/more-itertools/commit/e733192454b73bbea8645e4dcbee95b13eba714c (issue #916)"
+}

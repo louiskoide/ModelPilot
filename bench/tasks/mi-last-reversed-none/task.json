@@ -1,0 +1,35 @@
+{
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.9",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "id": "mi-last-reversed-none",
+ "type": "bug_fix",
+ "base": "c834d6e4a0c4280b7b7750cb0de8dd8acb3d4c2c",
+ "reference": "cca32949f12d473fd823e37a5530c30d2faa1332",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "instruction": "more_itertools.last() fails for an iterable whose class sets `__reversed__ = None`, which is the standard way to mark a class as not reversible. For such an object, last() should return the final item produced by normal iteration, just as it does for other non-reversible iterables. Fix last() and add a regression test.",
+ "source": "https://github.com/more-itertools/more-itertools/commit/cca32949f12d473fd823e37a5530c30d2faa1332 (issue #1001)"
+}
