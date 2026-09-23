@@ -1,0 +1,9 @@
+{
+ "session_id": "a6057f69-5692-4bbe-a913-f25e69527856",
+ "transcript_path": "{config}/projects/fixture/session.jsonl",
+ "cwd": "{cwd}",
+ "prompt_id": "b4ad376c-4ff7-40bc-8bf5-de9370766fb0",
+ "permission_mode": "default",
+ "hook_event_name": "UserPromptSubmit",
+ "prompt": "Write a.txt, run the failing command, then read a.txt."
+}

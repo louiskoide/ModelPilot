@@ -33,6 +33,40 @@ def response_for(request):
     return 200, 'text/event-stream', data
 
 
+def scripted_response(request, script):
+    """Drive a real client offline: step N answers after N tool results in the conversation.
+
+    Each step is {'tool': name, 'input': {...}} (a tool_use turn) or {'text': ...}.
+    Steps past the end repeat the last one.
+    """
+    results = sum(1 for m in request.get('messages', []) if m.get('role') == 'user' and isinstance(m.get('content'), list)
+                  for b in m['content'] if isinstance(b, dict) and b.get('type') == 'tool_result')
+    step = script[min(results, len(script)-1)]
+    usage = dict(USAGE, cache_read_input_tokens=0, input_tokens=100)
+    if 'tool' in step:
+        block = {'type': 'tool_use', 'id': f'toolu_fixture{results}', 'name': step['tool'], 'input': {}}
+        deltas = [{'type': 'input_json_delta', 'partial_json': json.dumps(step['input'])}]
+        stop = 'tool_use'
+    else:
+        block = {'type': 'text', 'text': ''}
+        deltas = [{'type': 'text_delta', 'text': step['text']}]
+        stop = 'end_turn'
+    start = {'type': 'message', 'id': f'msg_fixture{results}', 'role': 'assistant', 'model': request['model'],
+             'content': [], 'stop_reason': None, 'stop_sequence': None, 'usage': dict(usage, output_tokens=1)}
+    events = ([{'type': 'message_start', 'message': start},
+               {'type': 'content_block_start', 'index': 0, 'content_block': block}] +
+              [{'type': 'content_block_delta', 'index': 0, 'delta': d} for d in deltas] +
+              [{'type': 'content_block_stop', 'index': 0},
+               {'type': 'message_delta', 'delta': {'stop_reason': stop, 'stop_sequence': None}, 'usage': {'output_tokens': 4}},
+               {'type': 'message_stop'}])
+    if not request.get('stream'):
+        message = dict(start, content=[dict(block, input=step['input']) if 'tool' in step else dict(block, text=step['text'])],
+                       stop_reason=stop, usage=dict(usage, output_tokens=4))
+        return 200, 'application/json', json.dumps(message).encode()
+    data = b''.join(b'event: ' + e['type'].encode() + b'\r\ndata: ' + json.dumps(e).encode() + b'\r\n\r\n' for e in events)
+    return 200, 'text/event-stream', data
+
+
 class FixtureHandler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     def log_message(self, *_):
@@ -63,8 +97,16 @@ class FixtureHandler(BaseHTTPRequestHandler):
             self.server.received[:] = self.server.received[-32:]
             self.server.count += 1
             request_id = f'req_fixture{self.server.count}'
+            if self.server.keep_bodies:
+                self.server.bodies.append(raw)
         request = json.loads(raw)
-        status, content_type, data = response_for(request)
+        script = self.server.script
+        # Only the tool-bearing conversation follows the script; side requests get plain text.
+        if script and request.get('tools') and self.path.split('?', 1)[0] == '/v1/messages':
+            time.sleep(self.server.delay)
+            status, content_type, data = scripted_response(request, script)
+        else:
+            status, content_type, data = response_for(request)
         self.send_response(status)
         self.send_header('Content-Type', content_type)
         self.send_header('Transfer-Encoding', 'chunked')
@@ -89,5 +131,9 @@ def fixture_server():
     server = ThreadingHTTPServer(('127.0.0.1', 0), FixtureHandler)
     server.received = []
     server.count = 0
+    server.script = None  # set to a scripted_response() step list to drive a real client
+    server.delay = 0  # seconds before each scripted reply
+    server.keep_bodies = False  # tests that must see what reached the model set this
+    server.bodies = []
     server.lock = threading.Lock()
     return server

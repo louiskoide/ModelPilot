@@ -1,0 +1,26 @@
+{
+ "session_id": "a6057f69-5692-4bbe-a913-f25e69527856",
+ "transcript_path": "{config}/projects/fixture/session.jsonl",
+ "cwd": "{cwd}",
+ "prompt_id": "b4ad376c-4ff7-40bc-8bf5-de9370766fb0",
+ "permission_mode": "default",
+ "effort": {
+  "level": "high"
+ },
+ "hook_event_name": "PostToolUse",
+ "tool_name": "Write",
+ "tool_input": {
+  "file_path": "{cwd}/a.txt",
+  "content": "TOKEN_A\n"
+ },
+ "tool_response": {
+  "type": "create",
+  "filePath": "{cwd}/a.txt",
+  "content": "TOKEN_A\n",
+  "structuredPatch": [],
+  "originalFile": null,
+  "userModified": false
+ },
+ "tool_use_id": "toolu_fixture0",
+ "duration_ms": 2
+}

@@ -1,0 +1,7 @@
+{
+ "session_id": "a6057f69-5692-4bbe-a913-f25e69527856",
+ "transcript_path": "{config}/projects/fixture/session.jsonl",
+ "cwd": "{cwd}",
+ "hook_event_name": "SessionStart",
+ "source": "startup"
+}
