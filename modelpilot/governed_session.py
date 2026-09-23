@@ -18,7 +18,7 @@ import threading
 import time
 import uuid
 from .governor import Governor, reconcile_log
-from .hooks import EVENTS
+from .hooks import EVENTS, channel_declaration
 from .jev_route_check import TOKEN_FIELDS, check_anthropic_key, parse_events
 from .proxy import ProxyServer
 
@@ -80,6 +80,7 @@ def run_session(run, cli, key, upstream, rates, *, prompt, instruction, correcti
     gov = Governor(db, session, limit_usd)
     task = gov.state.create('governed session', instruction)['id']
     revision = gov.state.claim(task, 1, OWNER, seconds=3600)['revision']
+    code = gov.declare_channel()
     gov.close()
     proxy = ProxyServer(('127.0.0.1', 0), upstream, run/'observations.jsonl', rates,
                         governor={'db': db, 'session': session, 'limit_usd': limit_usd, 'task': task})
@@ -91,13 +92,15 @@ def run_session(run, cli, key, upstream, rates, *, prompt, instruction, correcti
                'MODELPILOT_TASK': task, 'MODELPILOT_OWNER': OWNER, 'MODELPILOT_HOOK_ERRORS': str(run/'hook-errors.jsonl')}
     env = client_env(os.environ, key, dirs, cli, binding)
     env['ANTHROPIC_BASE_URL'] = f'http://127.0.0.1:{proxy.server_port}'
-    done, correction_record = threading.Event(), {'issued': False}
+    done, correction_record = threading.Event(), {'issued': False, 'channel_code': code}
     coordinator = None
     if correction:
         coordinator = threading.Thread(target=correct_after_first_tool, daemon=True,
                                        args=(db, session, limit_usd, task, correction, done, correction_record))
         coordinator.start()
-    command = [str(cli), '-p', f'Task instruction: {instruction}\n\n{prompt}', '--model', model, '--effort', effort,
+    # The prompt is the user's: it declares the correction channel before any update can arrive.
+    user_prompt = f'{channel_declaration(task, code)}\n\nTask instruction: {instruction}\n\n{prompt}'
+    command = [str(cli), '-p', user_prompt, '--model', model, '--effort', effort,
                '--output-format', 'stream-json', '--verbose', '--max-turns', str(max_turns),
                '--max-budget-usd', f'{budget_usd:.2f}', '--no-session-persistence', '--setting-sources', '',
                '--settings', str(settings), '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',

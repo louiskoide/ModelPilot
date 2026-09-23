@@ -6,6 +6,7 @@ worker dispatcher or Claude Code hook) owns any real model/effort/context change
 import argparse
 import json
 from pathlib import Path
+import secrets
 import tempfile
 import time
 import uuid
@@ -32,6 +33,8 @@ CREATE TABLE IF NOT EXISTS gov_changes(
 CREATE TABLE IF NOT EXISTS gov_plans(
   id TEXT PRIMARY KEY, session TEXT NOT NULL, revision INTEGER NOT NULL, trigger TEXT NOT NULL,
   changes TEXT NOT NULL, status TEXT NOT NULL, created REAL NOT NULL, acknowledged REAL);
+CREATE TABLE IF NOT EXISTS gov_channels(
+  session TEXT PRIMARY KEY, code TEXT NOT NULL, created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS gov_decisions(
   seq INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, kind TEXT NOT NULL,
   task TEXT, revision INTEGER, payload TEXT NOT NULL, created REAL NOT NULL);
@@ -283,6 +286,24 @@ class Governor:
             elif row['status'] == 'superseded':
                 raise ValueError('Rebase plan was superseded; plan again')
         return {'plan_id': plan_id, 'status': 'acknowledged', 'pending': self.pending_changes()}
+
+    def declare_channel(self):
+        """Per-session code marking coordinator updates the user's prompt has declared.
+
+        Kept in the ledger, not the environment, so commands the model runs do not inherit it.
+        It stops forged updates in files or tool output; it cannot stop hostile code running as
+        the same OS user, which can read the ledger.
+        """
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            self.db.execute('INSERT OR IGNORE INTO gov_channels VALUES(?,?,?)',
+                            (self.session, secrets.token_hex(8).upper(), self.clock()))
+            self._journal('declare_channel', {'applied': False})
+        return self.channel_code()
+
+    def channel_code(self):
+        row = self.db.execute('SELECT code FROM gov_channels WHERE session=?', (self.session,)).fetchone()
+        return row['code'] if row else None
 
     def outstanding_plans(self):
         rows = self.db.execute("SELECT id,revision,changes FROM gov_plans WHERE session=? AND status='planned' ORDER BY created",
