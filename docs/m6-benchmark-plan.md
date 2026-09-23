@@ -1,6 +1,6 @@
 # M6 benchmark plan: repository tasks, graders and arms (items 3–4)
 
-Status: plan written September 22, 2026. Phases 3a and 3b are built and validated offline (see "Progress"). Nothing has been run against the API. Item 3 is the task corpus and harness. Item 4 runs the arms. The ModelPilot arm's behavior is proposed in `docs/m6-modelpilot-policy.md`.
+Status: plan written September 22, 2026. Phases 3a and 3b are built and validated offline, and the 3c live pilot passed on September 23 (see "Progress"). Item 3 is the task corpus and harness. Item 4 runs the arms. The ModelPilot arm's behavior is proposed in `docs/m6-modelpilot-policy.md`.
 
 ## Progress
 
@@ -29,7 +29,21 @@ Grading takes about 0.2 s for tomli and 4–14 s for more-itertools.
 
 `python3 -m modelpilot.bench --tasks … --arms …` prints the plan. `--live` is billable.
 
-Next: 3c live pilot (2 tasks × fixed Sonnet 5 and Opus 5 × 1 trial, about $2–5), which needs the user's key.
+**3c live pilot (passed): `runs/bench-20260923-070044`.** Claude Code 2.1.280, Python 3.9.6, seed 0, 2 tasks × fixed Sonnet 5 and Opus 5 × 1 trial. Total $0.626 against an estimate of $2–5.
+
+| Task | Arm | Result | Requests | Cache read / write tokens | Output tokens | Cost | Wall |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| mi-last-reversed-none | Opus 5 | pass | 6 | 47,426 / 11,556 | 2,009 | $0.1462 | 52.0 s |
+| mi-last-reversed-none | Sonnet 5 | pass | 14 | 269,566 / 15,572 | 3,203 | $0.1249 | 54.5 s |
+| tomli-loads-typeerror | Opus 5 | pass | 9 | 101,048 / 11,202 | 2,584 | $0.1852 | 38.9 s |
+| tomli-loads-typeerror | Sonnet 5 | pass | 16 | 332,130 / 28,000 | 3,329 | $0.1698 | 63.0 s |
+
+- **The harness works live.** Every request returned 200, and proxy and client agree exactly on tokens and dollars in all four trials. Each run stayed on its fixed model, and there are no unknown costs.
+- **Observation (2 tasks, 1 trial: not evidence).** Sonnet 5 costs 40% as much per token, but it used about twice as many requests and 3–6× as many cache-read tokens, so it cost only 8–15% less per task. It was not faster. This is the effect the policy's context-hygiene lever targets: re-reading the growing context dominates cost. The price gap alone did not.
+- **The tasks were easy.** All four trials passed, so these two tasks don't separate the arms. The corpus needs harder tasks.
+- **Cost estimate revised.** About $0.12–0.19 per trial puts 4b (25 tasks × 6 arms × 3 trials = 450 trials) at roughly $55–90 plus Jev overhead, well below the first guess, as long as harder tasks don't cost much more.
+
+Next: 3d, the full corpus. It needs a newer Python for more candidates and a bias toward harder tasks (larger fixes, several files).
 
 ## Question
 
