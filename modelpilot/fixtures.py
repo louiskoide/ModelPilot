@@ -61,12 +61,15 @@ class FixtureHandler(BaseHTTPRequestHandler):
                                          'accept_encoding': self.headers.get('accept-encoding')})
             # Bounded memory during overnight requests.
             self.server.received[:] = self.server.received[-32:]
+            self.server.count += 1
+            request_id = f'req_fixture{self.server.count}'
         request = json.loads(raw)
         status, content_type, data = response_for(request)
         self.send_response(status)
         self.send_header('Content-Type', content_type)
         self.send_header('Transfer-Encoding', 'chunked')
         self.send_header('retry-after', '1')
+        self.send_header('request-id', request_id)
         self.end_headers()
         try:
             # Split SSE/JSON in arbitrary places; first fragment arrives before a pause.
@@ -85,5 +88,6 @@ class FixtureHandler(BaseHTTPRequestHandler):
 def fixture_server():
     server = ThreadingHTTPServer(('127.0.0.1', 0), FixtureHandler)
     server.received = []
+    server.count = 0
     server.lock = threading.Lock()
     return server

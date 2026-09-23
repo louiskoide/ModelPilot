@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+from modelpilot.governor import Governor, reconcile_log
 from modelpilot.proxy import ProxyServer, UsageObserver, forecast, measured_cost
 from modelpilot.fixtures import CATALOG, fixture_server, response_for, USAGE
 
@@ -125,6 +126,146 @@ class ProxyTests(unittest.TestCase):
         row = json.loads(self.log.read_text())
         self.assertFalse(row['usage_complete'])
         self.assertIsNone(row['cost_usd'])
+
+
+class GovernedProxyTests(unittest.TestCase):
+    """Dry-run governor wiring: every billable proxy request is reserved and settled under one shared ID."""
+    call = ProxyTests.call
+    rows = lambda self, count=1: JevAccountingProxyTests.rows(self, count)
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db = Path(self.temp.name)/'state.db'
+        self.upstream = fixture_server()
+        self.servers = []
+        self.start(self.upstream)
+
+    def start(self, server):
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.servers.append((server, thread))
+
+    def govern(self, limit=1, task=None):
+        self.log = Path(self.temp.name)/f'log{len(self.servers)}.jsonl'
+        settings = {'db': self.db, 'session': 's', 'limit_usd': limit, 'task': task}
+        self.proxy = ProxyServer(('127.0.0.1', 0), f'http://127.0.0.1:{self.upstream.server_port}', self.log, RATES, governor=settings)
+        self.start(self.proxy)
+        return Governor(self.db, 's', limit)
+
+    def tearDown(self):
+        for server, thread in reversed(self.servers):
+            server.shutdown()
+            server.server_close()
+            thread.join()
+        self.temp.cleanup()
+
+    def test_streamed_request_settles_its_logged_cost_under_the_shared_id(self):
+        gov = self.govern()
+        try:
+            request, _, _, data, _ = self.call(True)
+            self.assertEqual(data, response_for(request)[2])
+            row = self.rows()[-1]
+            self.assertTrue(row['governor_request_id'].startswith('mp-'))
+            self.assertEqual(row['governor_status'], 'settled')
+            self.assertEqual(row['provider_request_id'], 'req_fixture1')
+            self.assertEqual((row['governor']['admitted'], row['governor']['enforced']), (True, False))
+            settle = gov.journal('settle')[-1]['payload']
+            self.assertEqual(settle['request_id'], row['governor_request_id'])
+            self.assertAlmostEqual(settle['actual_usd'], row['cost_usd'])
+            policy = gov.policy()
+            self.assertAlmostEqual(policy['spent_usd'], .007525)
+            self.assertEqual((policy['reserved_usd'], policy['cost_complete']), (0, True))
+            self.assertNotIn('PRIVATE', self.log.read_text())
+        finally:
+            gov.close()
+
+    def test_http_and_stream_errors_settle_as_unknown(self):
+        for metadata in ({'test_error': True}, {'test_stream_error': True}):
+            self.db = Path(self.temp.name)/f'{len(self.servers)}.db'
+            gov = self.govern()
+            try:
+                self.call(bool(metadata.get('test_stream_error')), **metadata)
+                row = self.rows()[-1]
+                self.assertIsNone(row['cost_usd'])
+                self.assertEqual(row['governor_status'], 'settled')
+                policy = gov.policy()
+                self.assertEqual((policy['mode'], policy['cost_complete']), ('halt', False))
+            finally:
+                gov.close()
+
+    def test_would_refuse_is_still_forwarded_and_counted(self):
+        state = Governor(self.db, 's', .0001)
+        task = state.state.create('t', 'old')['id']
+        rev = state.state.claim(task, 1, 'client')['revision']
+        state.state.correct(task, rev, 'new instruction not yet delivered')
+        state.close()
+        gov = self.govern(limit=.0001, task=task)
+        try:
+            request, _, response, data, _ = self.call()
+            self.assertEqual((response.status, data), (200, response_for(request)[2]))
+            row = self.rows()[-1]
+            self.assertEqual((row['governor']['admitted'], row['governor']['reason']), (False, 'stale_task'))
+            admit = gov.journal('admit')[-1]['payload']
+            self.assertEqual((admit['enforced'], admit['reserved'], admit['applied']), (False, True, False))
+            self.assertAlmostEqual(gov.policy()['spent_usd'], .007525)
+        finally:
+            gov.close()
+
+    def test_free_endpoints_are_not_admitted(self):
+        gov = self.govern()
+        try:
+            conn = http.client.HTTPConnection('127.0.0.1', self.proxy.server_port, timeout=5)
+            conn.request('POST', '/v1/messages/count_tokens', json.dumps({'model': 'claude-opus-4-6', 'messages': []}),
+                         {'Content-Type': 'application/json'})
+            conn.getresponse().read()
+            conn.close()
+            conn = http.client.HTTPConnection('127.0.0.1', self.proxy.server_port, timeout=5)
+            conn.request('GET', '/v1/models')
+            conn.getresponse().read()
+            conn.close()
+            rows = self.rows(2)
+            self.assertTrue(all('governor_request_id' not in r for r in rows))
+            self.assertEqual(gov.journal('admit'), [])
+        finally:
+            gov.close()
+
+    def test_concurrent_requests_are_all_settled(self):
+        gov = self.govern()
+        try:
+            threads = [threading.Thread(target=self.call, kwargs={'stream': i % 2 == 0}) for i in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            rows = self.rows(8)
+            self.assertEqual(len(rows), 8)
+            settled = {e['payload']['request_id']: e['payload']['actual_usd'] for e in gov.journal('settle')}
+            self.assertEqual(set(settled), {r['governor_request_id'] for r in rows})
+            self.assertAlmostEqual(gov.policy()['spent_usd'], sum(r['cost_usd'] for r in rows))
+            self.assertEqual(gov.policy()['reserved_usd'], 0)
+        finally:
+            gov.close()
+
+    def test_governor_failure_never_blocks_traffic_and_log_reconciles(self):
+        gov = self.govern()
+        try:
+            self.proxy.governor['limit_usd'] = 2  # the session was recorded with 1: every open now raises
+            request, _, response, data, _ = self.call()
+            self.assertEqual((response.status, data), (200, response_for(request)[2]))
+            row = self.rows()[-1]
+            self.assertEqual((row['governor_status'], row['governor_error']), ('untracked', 'ValueError'))
+            self.assertEqual(gov.journal('admit'), [])
+            result = reconcile_log(gov, self.log)
+            self.assertEqual((result['untracked_recorded'], result['still_unknown']), (1, 0))
+            self.assertAlmostEqual(gov.policy()['spent_usd'], row['cost_usd'])
+            self.assertEqual(reconcile_log(gov, self.log)['untracked_recorded'], 0)  # idempotent
+        finally:
+            gov.close()
+
+    def test_unknown_task_is_refused_at_startup(self):
+        with self.assertRaises(ValueError):
+            ProxyServer(('127.0.0.1', 0), f'http://127.0.0.1:{self.upstream.server_port}', Path(self.temp.name)/'x.jsonl',
+                        RATES, governor={'db': self.db, 'session': 's', 'limit_usd': 1, 'task': 'missing'})
 
 
 class JevAccountingProxyTests(unittest.TestCase):

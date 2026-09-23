@@ -4,7 +4,8 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
-from modelpilot.governor import BudgetRefused, Governor, demo, governed_transport
+import json
+from modelpilot.governor import BudgetRefused, Governor, demo, governed_transport, reconcile_log
 from modelpilot.m4 import sha
 from modelpilot.workers import Worker
 
@@ -69,6 +70,43 @@ class GovernorTests(unittest.TestCase):
         self.assertTrue(policy['cost_complete'])
         self.assertAlmostEqual(policy['spent_usd'], .12)
         self.assertTrue(self.gov.journal('settle')[-1]['payload']['reconciled'])
+
+    def test_unenforced_admission_always_reserves_and_journals_would_refuse(self):
+        result = self.gov.admit('big', 5, enforce=False)
+        self.assertEqual((result['admitted'], result['reason'], result['reserved'], result['enforced']),
+                         (False, 'insufficient_budget', True, False))
+        self.assertEqual(self.gov.policy()['reserved_usd'], 5)
+        self.gov.settle('big', .2)
+        self.assertAlmostEqual(self.gov.policy()['spent_usd'], .2)
+        with self.assertRaises(ValueError): self.gov.admit('big', .1, enforce=False)
+        stale = self.gov.admit('stale', .1, self.task, self.rev+1, enforce=False)
+        self.assertEqual((stale['reason'], stale['reserved']), ('stale_task', True))
+        enforced = self.gov.admit('refused', 5)
+        self.assertEqual((enforced['reserved'], enforced['enforced']), (False, True))
+        self.assertTrue(all(e['payload']['applied'] is False for e in self.gov.journal('admit')))
+
+    def test_reconcile_log_settles_orphans_and_records_untracked_rows(self):
+        self.gov.admit('seen', .1, ttl=30, enforce=False)
+        self.gov.admit('lost', .1, ttl=30, enforce=False)
+        self.gov.admit('done', .1, enforce=False)
+        self.gov.settle('done', .03)
+        self.now[0] += 31
+        self.assertEqual(self.gov.policy()['mode'], 'halt')
+        rows = [{'kind': 'models', 'cost_usd': None},
+                {'governor_request_id': 'seen', 'governor_status': 'settle_failed', 'cost_usd': .05},
+                {'governor_request_id': 'done', 'governor_status': 'settled', 'cost_usd': .03},
+                {'governor_request_id': 'untracked-1', 'governor_status': 'untracked', 'cost_usd': .01},
+                {'governor_request_id': 'untracked-2', 'governor_status': 'untracked', 'cost_usd': None}]
+        log = Path(self.tmp.name)/'log.jsonl'
+        log.write_text(''.join(json.dumps(r)+'\n' for r in rows))
+        result = reconcile_log(self.gov, log)
+        self.assertEqual(result, {'rows': 4, 'settled': 1, 'untracked_recorded': 2, 'still_unknown': 2,
+                                  'orphans_without_rows': 1, 'policy': result['policy']})
+        policy = self.gov.policy()
+        self.assertAlmostEqual(policy['spent_usd'], .09)
+        self.assertFalse(policy['cost_complete'])  # 'lost' has no row; untracked-2 is unknown
+        again = reconcile_log(self.gov, log)
+        self.assertEqual((again['settled'], again['untracked_recorded']), (0, 0))
 
     def test_unknown_settlement_halts(self):
         self.gov.admit('a', .1)
@@ -212,7 +250,8 @@ class TransportTests(unittest.TestCase):
         with self.assertRaises(OSError): self.wrap(boom)({'model': 'test-model'}, {})
         self.assertEqual(self.gov.policy()['mode'], 'halt')
         for response in (lambda: reply(model='alias'),
-                         lambda: reply(usage=dict(USAGE, cache_creation_input_tokens=5))):
+                         lambda: reply(usage=dict(USAGE, cache_creation_input_tokens=5)),
+                         lambda: reply(usage=dict(USAGE, service_tier='priority'))):
             gov = Governor(self.root/f'{len(self.calls)}.db', 's', 1)
             try:
                 governed_transport(gov, lambda r, c: response(), RATES, .001)({'model': 'test-model'}, {})
