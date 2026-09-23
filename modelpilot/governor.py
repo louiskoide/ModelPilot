@@ -284,6 +284,22 @@ class Governor:
                 raise ValueError('Rebase plan was superseded; plan again')
         return {'plan_id': plan_id, 'status': 'acknowledged', 'pending': self.pending_changes()}
 
+    def outstanding_plans(self):
+        rows = self.db.execute("SELECT id,revision,changes FROM gov_plans WHERE session=? AND status='planned' ORDER BY created",
+                               (self.session,)).fetchall()
+        return [{'plan_id': r['id'], 'revision': r['revision'], 'kinds': sorted(c['kind'] for c in json.loads(r['changes']))}
+                for r in rows]
+
+    def note(self, kind, payload, task=None, revision=None):
+        """Journal an integration event (hook delivery, client state). Never an applied action."""
+        with self.db:
+            self._journal(kind, dict(payload, applied=False), task, revision)
+
+    def last_note(self, kind):
+        row = self.db.execute('SELECT payload,created FROM gov_decisions WHERE session=? AND kind=? ORDER BY seq DESC LIMIT 1',
+                              (self.session, kind)).fetchone()
+        return None if row is None else dict(json.loads(row['payload']), created=row['created'])
+
     def journal(self, kind=None):
         query = 'SELECT seq,kind,task,revision,payload,created FROM gov_decisions WHERE session=?'
         args = [self.session]
