@@ -1,10 +1,11 @@
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
-from modelpilot.bench_tasks import candidates, grade, run_tests, validate, workspace
+from modelpilot.bench_tasks import candidates, clean_env, grade, parse_results, run_tests, validate, workspace
 
 ENV = {'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@t', 'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@t'}
 BUGGY = 'def last(items):\n    return items[0]\n'
@@ -102,6 +103,32 @@ class BenchTaskTests(unittest.TestCase):
             self.assertEqual(spec['id'], path.parent.name)
             self.assertNotEqual(spec['base'], spec['reference'])
             self.assertIn(spec['license'], ('MIT', 'BSD-2-Clause', 'BSD-3-Clause', 'Apache-2.0'))
+
+
+PYTEST = ['{python}', '-m', 'pytest', '-q']
+
+
+class ParseResultTests(unittest.TestCase):
+    def test_pytest_failures_passes_and_collection_errors(self):
+        failed = ('..F.\n=== short test summary info ===\nFAILED tests/test_a.py::test_x - AssertionError\n'
+                  'took in 3s of setup\n1 failed, 3 passed in 0.12s\n')
+        self.assertEqual(parse_results(PYTEST, 1, failed), (4, True, ['tests/test_a.py::test_x']))
+        self.assertEqual(parse_results(PYTEST, 0, '....\n4 passed, 1 skipped in 0.05s\n'), (5, False, []))
+        collection = ('ERROR tests/test_b.py\n!!! Interrupted: 1 error during collection !!!\n1 error in 0.20s\n')
+        self.assertEqual(parse_results(PYTEST, 2, collection), (1, True, ['tests/test_b.py']))
+
+    def test_pytest_usage_errors_and_empty_runs_are_not_failures(self):
+        self.assertEqual(parse_results(PYTEST, 4, 'ERROR: usage: pytest [options]\n')[:2], (0, False))
+        self.assertEqual(parse_results(PYTEST, 5, 'no tests ran in 0.01s\n')[:2], (0, False))
+
+    def test_unittest_output(self):
+        output = 'FAIL: test_x (tests.test_a.T)\n---\nRan 3 tests in 0.1s\n\nFAILED (failures=1)\n'
+        self.assertEqual(parse_results(['{python}', '-m', 'unittest'], 1, output), (3, True, ['test_x (tests.test_a.T)']))
+
+    def test_interpreter_directory_leads_path(self):
+        env = clean_env('/opt/bench/venv/bin/python')
+        self.assertTrue(env['PATH'].startswith('/opt/bench/venv/bin' + os.pathsep))
+        self.assertFalse(any(k.startswith('ANTHROPIC') for k in env))
 
 
 if __name__ == '__main__': unittest.main()

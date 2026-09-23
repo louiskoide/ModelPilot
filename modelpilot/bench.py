@@ -72,9 +72,10 @@ def accounting(rows, final):
             'first_byte_seconds': [r.get('first_byte_seconds') for r in messages]}
 
 
-def run_trial(task, arm_id, trial_dir, cli, key, upstream, price_table, *, python=sys.executable,
+def run_trial(task, arm_id, trial_dir, cli, key, upstream, price_table, *, python=None,
               max_turns=30, budget_usd=1.0, timeout=900):
     arm = ARMS[arm_id]
+    python = python or bench_tasks.interpreter()
     if arm['kind'] not in RUNNABLE:
         raise NotImplementedError(f'{arm_id}: launcher not implemented yet (CLAUDE.md work item 4)')
     trial_dir = Path(trial_dir)
@@ -88,12 +89,15 @@ def run_trial(task, arm_id, trial_dir, cli, key, upstream, price_table, *, pytho
     thread = threading.Thread(target=proxy.serve_forever, daemon=True)
     thread.start()
     env = client_env(os.environ, key, dirs, cli, {})
+    # The agent's python3/pip/pytest are the grader's interpreter, not whatever the system has.
+    env['PATH'] = os.pathsep.join([str(Path(python).parent), env['PATH']])
     env['ANTHROPIC_BASE_URL'] = f'http://127.0.0.1:{proxy.server_port}'
     command = [str(cli), '-p', PREAMBLE + task['instruction'], '--model', arm['model'],
                '--output-format', 'stream-json', '--verbose', '--max-turns', str(max_turns),
                '--max-budget-usd', f'{budget_usd:.2f}', '--no-session-persistence', '--setting-sources', '',
                '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--tools', TOOLS, '--allowedTools', TOOLS]
     record = {'task': task['id'], 'arm': arm_id, 'model': arm['model'], 'spec_sha256': bench_tasks.spec_hash(task),
+              'python': python_version(python),
               'limits': {'max_turns': max_turns, 'budget_usd': budget_usd, 'timeout_s': timeout, 'tools': TOOLS}}
     stdout = stderr = ''
     started = time.monotonic()
@@ -133,6 +137,11 @@ def run_trial(task, arm_id, trial_dir, cli, key, upstream, price_table, *, pytho
     return record
 
 
+def python_version(python):
+    return subprocess.run([python, '-c', 'import sys; print(sys.version.split()[0])'], capture_output=True,
+                          text=True, check=True).stdout.strip()
+
+
 def summarize(records, arms):
     out = []
     for arm in arms:
@@ -157,7 +166,7 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
     version = subprocess.run([str(cli), '--version'], capture_output=True, text=True, timeout=30).stdout.strip()
     manifest = {'seed': seed, 'order': order, 'arms': {a: ARMS[a] for a in arms}, 'trials': trials,
                 'tasks': {t['id']: bench_tasks.spec_hash(t) for t in tasks}, 'client_version': version,
-                'python': sys.version.split()[0], 'limits': limits, 'preamble': PREAMBLE, 'tools': TOOLS,
+                'python': python_version(limits.get('python') or bench_tasks.interpreter()), 'limits': limits, 'preamble': PREAMBLE, 'tools': TOOLS,
                 'note': 'Stop thresholds are not billing caps. No retries.'}
     with (out/'manifest.json').open('x') as f:
         json.dump(manifest, f, indent=2)

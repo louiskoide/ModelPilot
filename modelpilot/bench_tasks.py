@@ -29,6 +29,13 @@ REQUIRED = ('id', 'repo', 'url', 'license', 'base', 'reference', 'instruction', 
             'test_dir', 'hidden_tests', 'hidden_command', 'suite_command', 'source')
 TYPES = ('bug_fix', 'feature', 'question')
 TIMEOUT = 120
+VENV = ROOT/'work'/'bench'/'py312'
+
+
+def interpreter():
+    """Benchmark Python: the local 3.12 venv when present (agent and grader share it), else this one."""
+    candidate = VENV/'bin'/'python'
+    return str(candidate) if candidate.exists() else sys.executable
 
 
 def git(repo, *args, text=True):
@@ -90,12 +97,37 @@ def workspace(task, repo, destination):
     return destination
 
 
-def clean_env():
-    """Test environment without provider credentials or user Python settings."""
+def clean_env(python=None):
+    """Test environment without provider credentials or user Python settings.
+
+    With python given, its directory leads PATH so `python3`/`pytest` resolve to it.
+    """
     keep = ('PATH', 'LANG', 'LC_ALL', 'HOME', 'TMPDIR', 'SYSTEMROOT')
     env = {k: v for k, v in os.environ.items() if k in keep}
     env.update(PYTHONDONTWRITEBYTECODE='1', PYTHONHASHSEED='0')
+    if python:
+        env['PATH'] = os.pathsep.join([str(Path(python).parent), env.get('PATH', '/usr/bin:/bin')])
     return env
+
+
+def parse_results(command, code, output):
+    """Tests run, whether they genuinely failed, and failing test IDs, for unittest or pytest.
+
+    A usage error, crash, empty collection or timeout is not a test failure: it proves nothing
+    about the task. A pytest collection error counts, because hidden tests that import a
+    missing name fail that way (unittest reports the same case as an ERROR).
+    """
+    if any('pytest' in part for part in command):
+        summaries = re.findall(r'^[=\s]*((?:\d+ \w+(?:, )?)+) in [\d.]+s\b', output, re.M)
+        counts = {kind: int(n) for n, kind in re.findall(r'(\d+) (\w+)', summaries[-1])} if summaries else {}
+        run = sum(v for k, v in counts.items() if k != 'deselected')
+        failed = counts.get('failed', 0) + counts.get('error', 0) + counts.get('errors', 0)
+        collection = code == 2 and 'error during collection' in output
+        ids = re.findall(r'^(?:FAILED|ERROR) (\S+)', output, re.M)
+        return run, (code == 1 and failed > 0) or collection, sorted(set(ids))
+    ran = re.search(r'^Ran (\d+) tests?', output, re.M)
+    return (int(ran.group(1)) if ran else 0, code == 1 and bool(ran) and bool(re.search(r'^FAILED \(', output, re.M)),
+            sorted(set(re.findall(r'^(?:FAIL|ERROR): (\S+ \([^)]*\))', output, re.M))))
 
 
 def python_satisfies(python, minimum):
@@ -107,7 +139,7 @@ def python_satisfies(python, minimum):
 
 
 def run_tests(command, tree, python, pythonpath=None):
-    env = clean_env()
+    env = clean_env(python)
     if pythonpath:
         env['PYTHONPATH'] = str(Path(tree)/pythonpath)
     argv = [python if part == '{python}' else part for part in command]
@@ -117,11 +149,9 @@ def run_tests(command, tree, python, pythonpath=None):
         code, output = result.returncode, result.stdout + result.stderr
     except subprocess.TimeoutExpired:
         code, output = None, 'timeout'
-    ran = re.search(r'^Ran (\d+) tests?', output, re.M)
-    return {'exit_code': code, 'seconds': round(time.monotonic() - started, 3), 'tests_run': int(ran.group(1)) if ran else 0,
-            # A usage error, crash or timeout is not a test failure: it proves nothing about the task.
-            'tests_failed': code == 1 and bool(ran) and bool(re.search(r'^FAILED \(', output, re.M)),
-            'failing_tests': sorted(set(re.findall(r'^(?:FAIL|ERROR): (\S+ \([^)]*\))', output, re.M))),
+    run, failed, ids = parse_results(command, code, output)
+    return {'exit_code': code, 'seconds': round(time.monotonic() - started, 3), 'tests_run': run,
+            'tests_failed': failed, 'failing_tests': ids,
             'output_tail': output[-2000:], 'output_sha256': hashlib.sha256(output.encode()).hexdigest()}
 
 
@@ -193,7 +223,7 @@ def main():
     mine.add_argument('--since', default='2019-01-01')
     check = commands.add_parser('validate', help='Validate committed task specs against their repositories')
     check.add_argument('--task')
-    check.add_argument('--python', default=sys.executable)
+    check.add_argument('--python', default=interpreter())
     args = parser.parse_args()
     if args.command == 'mine':
         for c in candidates(args.repo, args.source, args.tests, args.max_source_lines, args.since):
