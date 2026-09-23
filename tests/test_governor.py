@@ -5,7 +5,7 @@ import tempfile
 import time
 import unittest
 import json
-from modelpilot.governor import BudgetRefused, Governor, demo, governed_transport, reconcile_log
+from modelpilot.governor import BudgetRefused, Governor, demo, execute_fallback, governed_transport, reconcile_log
 from modelpilot.m4 import sha
 from modelpilot.workers import Worker
 
@@ -271,6 +271,90 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.gov.state.get(second)['status'], 'pending')  # released, not completed
         self.assertEqual([e['payload']['admitted'] for e in self.gov.journal('admit')], [True, False])
+
+
+class FallbackTests(unittest.TestCase):
+    """A would_escalate review runs one stronger-model request through enforced admission, then re-verifies it."""
+    TEXT = 'The verification token is ALPHA.'
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.gov = Governor(Path(self.tmp.name)/'state.db', 's', .05)
+        self.task = self.gov.state.create('t', 'find token')['id']
+        self.rev = self.gov.state.claim(self.task, 1, 'coordinator')['revision']
+        start = self.TEXT.index('ALPHA')
+        self.good = {'start': start, 'end': start+5, 'answer': 'ALPHA', 'source_sha256': sha(self.TEXT)}
+        self.evidence = {'revision': self.rev, 'text': self.TEXT, 'current_source_sha256': sha(self.TEXT)}
+        self.calls = []
+
+    def tearDown(self):
+        self.gov.close()
+        self.tmp.cleanup()
+
+    def escalated(self, fallback_estimate=.01, operation='read'):
+        decision = self.gov.review(self.task, operation, dict(self.good, answer='BETA'), self.evidence, self.rev, fallback_estimate)
+        self.assertEqual(decision['action'], 'would_escalate')
+        return decision
+
+    def run_fallback(self, decision, candidate=None, fail=False, during=None, allow=True):
+        def transport(request, config):
+            self.calls.append(request)
+            if during:
+                during()
+            if fail:
+                raise OSError('connection reset')
+            return reply(model='test-model', content=[{'type': 'text', 'text': json.dumps(candidate or self.good)}])
+        parse = lambda response: json.loads(response['content'][0]['text'])
+        return execute_fallback(self.gov, decision, self.evidence, lambda d: {'model': 'test-model', 'max_tokens': 64},
+                                parse, transport, RATES, allow_calls=allow)
+
+    def test_verified_fallback_is_accepted_and_settled(self):
+        result = self.run_fallback(self.escalated())
+        self.assertEqual((result['action'], result['fallback']['executed']), ('would_accept', True))
+        self.assertEqual(len(self.calls), 1)
+        self.assertAlmostEqual(self.gov.policy()['spent_usd'], .0045)
+        entry = self.gov.journal('fallback')[-1]['payload']
+        self.assertEqual((entry['executed'], entry['applied'], entry['final_action']), (True, False, 'would_accept'))
+
+    def test_unverified_fallback_defers_and_never_retries(self):
+        result = self.run_fallback(self.escalated(), candidate=dict(self.good, answer='GAMMA'))
+        self.assertEqual((result['action'], result['reason']), ('would_defer', 'fallback_not_verified'))
+        self.assertEqual(len(self.calls), 1)
+
+    def test_refused_admission_sends_nothing(self):
+        decision = self.escalated()
+        self.gov.admit('other', .045)  # leaves less than the fallback estimate
+        result = self.run_fallback(decision)
+        self.assertEqual((result['action'], result['reason']), ('would_defer', 'fallback_refused:insufficient_budget'))
+        self.assertEqual(self.calls, [])
+
+    def test_transport_error_settles_unknown_and_halts(self):
+        with self.assertRaises(OSError): self.run_fallback(self.escalated(), fail=True)
+        policy = self.gov.policy()
+        self.assertEqual((policy['mode'], policy['cost_complete']), ('halt', False))
+        self.assertTrue(self.gov.journal('fallback')[-1]['payload']['executed'])
+
+    def test_correction_before_admission_refuses_stale_work(self):
+        decision = self.escalated()
+        self.gov.state.correct(self.task, self.rev, 'find other token')
+        result = self.run_fallback(decision)
+        self.assertEqual(result['reason'], 'fallback_refused:stale_task')
+        self.assertEqual(self.calls, [])
+
+    def test_correction_during_the_call_rejects_the_late_result(self):
+        result = self.run_fallback(self.escalated(), during=lambda: self.gov.state.correct(self.task, self.rev, 'changed'))
+        self.assertEqual(result['action'], 'reject_stale')
+        self.assertAlmostEqual(self.gov.policy()['spent_usd'], .0045)  # the call still cost money
+
+    def test_nothing_is_called_unless_allowed_affordable_and_verifiable(self):
+        decision = self.escalated()
+        self.assertEqual(self.run_fallback(decision, allow=False), decision)
+        unaffordable = self.gov.review(self.task, 'read', dict(self.good, answer='BETA'), self.evidence, self.rev, 1)
+        self.assertEqual(self.run_fallback(unaffordable)['action'], 'would_defer')
+        edit = self.gov.review(self.task, 'edit', {}, {}, self.rev, .01)
+        result = self.run_fallback(edit)
+        self.assertEqual((result['action'], result['reason']), ('would_defer', 'fallback_unverifiable_operation'))
+        self.assertEqual(self.calls, [])
 
 
 class ProcessTests(unittest.TestCase):
