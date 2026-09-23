@@ -334,6 +334,58 @@ def governed_transport(gov, inner, rates, estimate, ttl=600):
     return transport
 
 
+VERIFIABLE = ('read', 'test_report')
+
+
+def execute_fallback(gov, decision, evidence, build_request, parse_candidate, transport, rates,
+                     estimate=None, allow_calls=False, ttl=600):
+    """Run one stronger-model request for a would_escalate review, then verify its answer.
+
+    The caller must opt in with allow_calls. Admission is enforced and fenced on the reviewed
+    task revision. The fallback's answer is re-reviewed against the same host evidence, so an
+    unverified fallback defers (human review), never accepts. There is no second fallback.
+    Nothing is applied to a client: the caller decides what to do with an accepted answer.
+    """
+    if not allow_calls or decision.get('action') != 'would_escalate' or not decision.get('escalation_affordable'):
+        if allow_calls and decision.get('action') == 'would_escalate':
+            return dict(decision, action='would_defer', reason='escalation_unaffordable_or_cost_unknown')
+        return decision
+    task, revision, operation = decision['task'], decision['current_revision'], decision['operation']
+
+    def finish(result, **entry):
+        gov.note('fallback', dict(entry, task_revision=revision, final_action=result['action'],
+                                  reason=result['reason']), task, revision)
+        return result
+    if operation not in VERIFIABLE:
+        return finish(dict(decision, action='would_defer', reason='fallback_unverifiable_operation'), executed=False)
+    request_id = 'fallback-' + uuid.uuid4().hex
+    cost_estimate = decision['fallback_estimate_usd'] if estimate is None else estimate
+    admitted = gov.admit(request_id, cost_estimate, task, revision, ttl=ttl)
+    if not admitted['admitted']:
+        return finish(dict(decision, action='would_defer', reason='fallback_refused:' + admitted['reason']),
+                      executed=False, request_id=request_id)
+    request = build_request(decision)
+    try:
+        response, provider_id = transport(request, {})
+    except BaseException as error:
+        gov.settle(request_id, None)  # the provider may already have billed it
+        gov.note('fallback', {'executed': True, 'request_id': request_id, 'error_type': type(error).__name__,
+                              'task_revision': revision}, task, revision)
+        raise
+    actual = priced_usage(request, response.get('model'), response.get('usage'), rates) if isinstance(response, dict) else None
+    gov.settle(request_id, actual)
+    try:
+        candidate = parse_candidate(response)
+    except (KeyError, ValueError, TypeError, IndexError):
+        candidate = None
+    review = gov.review(task, operation, candidate if isinstance(candidate, dict) else {}, evidence, revision, 0)
+    if review['action'] not in ('would_accept', 'reject_stale'):
+        review = dict(review, action='would_defer', reason='fallback_not_verified', next_step='human_review')
+    review['fallback'] = {'executed': True, 'request_id': request_id, 'provider_request_id': provider_id,
+                          'cost_usd': actual, 'model': request.get('model')}
+    return finish(review, executed=True, request_id=request_id, actual_usd=actual)
+
+
 def reconcile_log(gov, log_path):
     """Bring the governor up to date from a proxy log (JSON lines) after crashes or governor errors.
 
