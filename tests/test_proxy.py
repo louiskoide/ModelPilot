@@ -6,8 +6,9 @@ import tempfile
 import threading
 import time
 import unittest
+from modelpilot.cache_probe import cost
 from modelpilot.governor import Governor, reconcile_log
-from modelpilot.proxy import ProxyServer, UsageObserver, forecast, measured_cost
+from modelpilot.proxy import ProxyServer, UsageObserver, forecast, logged_usage, measured_cost, request_effort
 from modelpilot.fixtures import CATALOG, fixture_server, response_for, USAGE
 
 RATES = {'claude-opus-4-6': dict(input=5, output=25, read=.5, write_5m=6.25, write_1h=10),
@@ -48,6 +49,27 @@ class ObserverTests(unittest.TestCase):
         self.assertAlmostEqual(one['switch_usd'], (14750*3.75+10*3+4*15)/1e6)
         self.assertFalse(result['applied'])
         self.assertEqual(result['action'], 'hold')
+
+
+class LoggedFieldTests(unittest.TestCase):
+    def test_rows_keep_numeric_counters_and_the_cache_write_split(self):
+        # The split lets a logged row be re-priced (e.g. cold-equivalent cost); strings never reach the log.
+        split = {'ephemeral_5m_input_tokens': 7, 'ephemeral_1h_input_tokens': 0}
+        usage = dict(USAGE, cache_creation_input_tokens=7, cache_creation=dict(split, note='free text'))
+        self.assertEqual(logged_usage(usage), {'input_tokens': 10, 'cache_creation_input_tokens': 7,
+                                               'cache_read_input_tokens': 14750, 'output_tokens': 4, 'cache_creation': split})
+        for bad in ({'ephemeral_5m_input_tokens': '7', 'ephemeral_1h_input_tokens': 0},
+                    {'ephemeral_5m_input_tokens': True, 'ephemeral_1h_input_tokens': 0},
+                    {'ephemeral_5m_input_tokens': 7}, 'text'):
+            self.assertNotIn('cache_creation', logged_usage(dict(USAGE, cache_creation=bad)))
+        self.assertAlmostEqual(cost(logged_usage(usage), RATES['claude-opus-4-6'], '1h'),
+                               cost(usage, RATES['claude-opus-4-6'], '1h'))  # the split wins over the fallback TTL
+
+    def test_effort_is_logged_only_as_a_short_string(self):
+        self.assertEqual(request_effort({'output_config': {'effort': 'high'}}), 'high')
+        for request in ({}, {'output_config': 'high'}, {'output_config': {'effort': 3}},
+                        {'output_config': {'effort': 'x' * 100}}):
+            self.assertIsNone(request_effort(request))
 
 
 class ProxyTests(unittest.TestCase):
@@ -105,6 +127,7 @@ class ProxyTests(unittest.TestCase):
         row = json.loads(text)
         self.assertAlmostEqual(row['cost_usd'], .007525)
         self.assertFalse(row['decision']['applied'])
+        self.assertIsNone(row['effort'])
 
     def test_sse_bytes_forwarded_before_completion(self):
         request, _, _, data, elapsed = self.call(True, slow=True)

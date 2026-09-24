@@ -5,8 +5,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from modelpilot import bench_tasks
-from modelpilot.bench_tasks import (candidates, check_lock, clean_env, grade, make_splits, parse_results,
+from modelpilot.bench_tasks import (candidates, check_lock, clean_env, grade, make_splits, parse_counts, parse_results,
                                      run_tests, validate, workspace)
 
 ENV = {'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@t', 'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@t'}
@@ -14,6 +15,9 @@ BUGGY = 'def last(items):\n    return items[0]\n'
 FIXED = 'def last(items):\n    return items[-1]\n'
 OLD_TEST = 'import unittest\nfrom pkg import last\n\nclass T(unittest.TestCase):\n    def test_one(self):\n        self.assertEqual(last([1]), 1)\n'
 NEW_TEST = OLD_TEST + '\n    def test_many(self):\n        self.assertEqual(last([1, 2]), 2)\n'
+# Still wrong, but skips the hidden case it gets wrong: "Ran 2 tests ... OK (skipped=1)".
+SKIPS_HARD_CASE = ('import unittest\n\ndef last(items):\n    if len(items) > 1:\n'
+                   '        raise unittest.SkipTest("not supported")\n    return items[0]\n')
 
 
 class BenchTaskTests(unittest.TestCase):
@@ -79,6 +83,34 @@ class BenchTaskTests(unittest.TestCase):
         result = grade(self.task, work, self.repo, sys.executable, self.root/'g2')
         self.assertEqual((result['passed'], result['reason']), (True, 'passed'))
 
+    def test_hidden_tests_the_agent_makes_skip_do_not_pass(self):
+        work = workspace(self.task, self.repo, self.root/'work')
+        (work/'pkg'/'__init__.py').write_text(SKIPS_HARD_CASE)
+        result = grade(self.task, work, self.repo, sys.executable, self.root/'g1', expected_hidden_passed=2)
+        self.assertEqual((result['passed'], result['reason']), (False, 'hidden_tests_not_run'))
+        self.assertEqual((result['hidden']['tests_passed'], result['hidden']['tests_skipped']), (1, 1))
+        (work/'pkg'/'__init__.py').write_text(FIXED)
+        result = grade(self.task, work, self.repo, sys.executable, self.root/'g2', expected_hidden_passed=2)
+        self.assertEqual((result['passed'], result['reason']), (True, 'passed'))
+
+    def test_a_hanging_tree_is_a_grader_timeout(self):
+        work = workspace(self.task, self.repo, self.root/'work')
+        (work/'pkg'/'__init__.py').write_text('import time\ntime.sleep(30)\n')
+        with mock.patch.object(bench_tasks, 'TIMEOUT', 1):
+            result = grade(self.task, work, self.repo, sys.executable, self.root/'g')
+        self.assertEqual((result['passed'], result['reason']), (False, 'grader_timeout'))
+
+    def test_grading_runs_with_its_own_home_and_tmp(self):
+        work = workspace(self.task, self.repo, self.root/'work')
+        with mock.patch.object(bench_tasks, 'run_tests', wraps=bench_tasks.run_tests) as spy:
+            grade(self.task, work, self.repo, sys.executable, self.root/'g')
+        self.assertEqual(spy.call_count, 2)
+        for call in spy.call_args_list:
+            for name in ('home', 'tmp'):
+                self.assertTrue(Path(call.kwargs[name]).is_relative_to(self.root/'g'), call.kwargs)
+        probe = ['{python}', '-c', 'import os; print(os.environ["HOME"], os.environ["TMPDIR"], os.environ["PYTHONNOUSERSITE"])']
+        self.assertIn('/h /t 1', run_tests(probe, work, sys.executable, home='/h', tmp='/t')['output_tail'])
+
     def test_usage_errors_are_not_counted_as_test_failures(self):
         work = workspace(self.task, self.repo, self.root/'work')
         broken = run_tests(['{python}', '-m', 'unittest', '-q', 'discover', '-s', 'tests'], work, sys.executable)
@@ -115,7 +147,7 @@ class ParseResultTests(unittest.TestCase):
         failed = ('..F.\n=== short test summary info ===\nFAILED tests/test_a.py::test_x - AssertionError\n'
                   'took in 3s of setup\n1 failed, 3 passed in 0.12s\n')
         self.assertEqual(parse_results(PYTEST, 1, failed), (4, True, ['tests/test_a.py::test_x']))
-        self.assertEqual(parse_results(PYTEST, 0, '....\n4 passed, 1 skipped in 0.05s\n'), (5, False, []))
+        self.assertEqual(parse_results(PYTEST, 0, '....\n4 passed, 1 skipped in 0.05s\n'), (4, False, []))  # skips never ran
         collection = ('ERROR tests/test_b.py\n!!! Interrupted: 1 error during collection !!!\n1 error in 0.20s\n')
         self.assertEqual(parse_results(PYTEST, 2, collection), (1, True, ['tests/test_b.py']))
 
@@ -130,6 +162,25 @@ class ParseResultTests(unittest.TestCase):
     def test_unittest_output(self):
         output = 'FAIL: test_x (tests.test_a.T)\n---\nRan 3 tests in 0.1s\n\nFAILED (failures=1)\n'
         self.assertEqual(parse_results(['{python}', '-m', 'unittest'], 1, output), (3, True, ['test_x (tests.test_a.T)']))
+
+    def test_skips_and_warnings_are_not_tests_run(self):
+        output = '....s\n4 passed, 1 skipped, 2 warnings in 0.05s\n'
+        self.assertEqual(parse_results(PYTEST, 0, output), (4, False, []))
+        self.assertEqual(parse_counts(PYTEST, output), {'passed': 4, 'skipped': 1})
+        self.assertEqual(parse_results(PYTEST, 0, '3 passed, 1 warning in 0.1s\n')[0], 3)
+        unittest_cmd = ['{python}', '-m', 'unittest']
+        skipped = 'Ran 2 tests in 0.000s\n\nOK (skipped=1)\n'
+        self.assertEqual(parse_results(unittest_cmd, 0, skipped), (1, False, []))
+        self.assertEqual(parse_counts(unittest_cmd, skipped), {'passed': 1, 'skipped': 1})
+        mixed = 'Ran 5 tests in 0.1s\n\nFAILED (failures=1, errors=1, skipped=1, expected failures=1)\n'
+        self.assertEqual(parse_results(unittest_cmd, 1, mixed)[0], 4)
+        self.assertEqual(parse_counts(unittest_cmd, mixed), {'passed': 1, 'skipped': 1})
+
+    def test_unittest_ids_are_the_same_on_every_python(self):
+        # Python 3.11+ appends the method name inside the parentheses.
+        for line in ('FAIL: test_x (tests.test_a.T)', 'FAIL: test_x (tests.test_a.T.test_x)'):
+            output = line + '\n---\nRan 1 test in 0.1s\n\nFAILED (failures=1)\n'
+            self.assertEqual(parse_results(['{python}', '-m', 'unittest'], 1, output)[2], ['test_x (tests.test_a.T)'])
 
     def test_interpreter_directory_leads_path(self):
         env = clean_env('/opt/bench/venv/bin/python')
