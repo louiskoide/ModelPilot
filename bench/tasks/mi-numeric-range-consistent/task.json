@@ -1,0 +1,36 @@
+{
+ "id": "mi-numeric-range-consistent",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "bug_fix",
+ "base": "2fe1b2eeb9d75f994113fe3ac76d14b6bcd6fb10",
+ "reference": "dc2664b4a7c66209485c9f5e359137bf4b365eb3",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "instruction": "more_itertools.numeric_range is internally inconsistent for float steps. It produces its items by repeated multiplication (start + i * step), but len(), membership (`in`), index() and count() are computed by dividing by the step, so with inexact floats they can disagree with the items it actually yields: a yielded item may be reported as not a member, index() may not find it, or len() may count one item too many or too few (try numeric_range(0.0, 1.0, 0.1), numeric_range(1.0, 0.0, -0.1) or numeric_range(-8.732, -13.532, -2.4)). Make len(), membership, index() and count() agree exactly with the items the range produces: list(r) must equal [r[i] for i in range(len(r))], every yielded item must be a member found by index() at its own position with count() 1, and values the range does not produce must not be members. Results for exact types (int, Fraction, Decimal) must not change. Add tests.",
+ "source": "https://github.com/more-itertools/more-itertools/commit/dc2664b4a7c66209485c9f5e359137bf4b365eb3",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

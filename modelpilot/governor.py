@@ -6,10 +6,11 @@ worker dispatcher or Claude Code hook) owns any real model/effort/context change
 import argparse
 import json
 from pathlib import Path
+import secrets
 import tempfile
 import time
 import uuid
-from .cache_probe import cost
+from .cache_probe import priced_usage
 from .m2 import State
 from .m4 import cascade, nonnegative, sha
 
@@ -32,6 +33,8 @@ CREATE TABLE IF NOT EXISTS gov_changes(
 CREATE TABLE IF NOT EXISTS gov_plans(
   id TEXT PRIMARY KEY, session TEXT NOT NULL, revision INTEGER NOT NULL, trigger TEXT NOT NULL,
   changes TEXT NOT NULL, status TEXT NOT NULL, created REAL NOT NULL, acknowledged REAL);
+CREATE TABLE IF NOT EXISTS gov_channels(
+  session TEXT PRIMARY KEY, code TEXT NOT NULL, created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS gov_decisions(
   seq INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, kind TEXT NOT NULL,
   task TEXT, revision INTEGER, payload TEXT NOT NULL, created REAL NOT NULL);
@@ -110,8 +113,13 @@ class Governor:
     def policy(self):
         return self.recover()['policy']
 
-    def admit(self, request_id, estimate, task=None, revision=None, ttl=600):
-        """Reserve before dispatch. Work for a stale or terminal task revision is refused."""
+    def admit(self, request_id, estimate, task=None, revision=None, ttl=600, enforce=True):
+        """Reserve before dispatch. Work for a stale or terminal task revision is refused.
+
+        enforce=False is for observers that forward regardless (the dry-run proxy): the
+        decision is journaled as would-admit/would-refuse, but the reservation is always
+        recorded so that forwarded spend still counts.
+        """
         nonnegative(estimate, 'estimate')
         if not isinstance(request_id, str) or not request_id:
             raise ValueError('Request ID required')
@@ -137,13 +145,13 @@ class Governor:
                 elif policy['available_usd'] <= 0 or estimate > policy['available_usd']:
                     reason = 'insufficient_budget'
             admitted = reason == 'reserved'
-            if admitted:
+            if admitted or not enforce:
                 now = self.clock()
                 self.db.execute("INSERT INTO gov_reservations(session,request_id,task,revision,estimate,status,created,expires) "
                                 "VALUES(?,?,?,?,?,'pending',?,?)", (self.session, request_id, task, revision, estimate, now, now+ttl))
                 policy = self._policy()
-            result = {'request_id': request_id, 'admitted': admitted, 'reason': reason,
-                      'estimate_usd': estimate, 'policy': policy, 'applied': False}
+            result = {'request_id': request_id, 'admitted': admitted, 'reason': reason, 'enforced': enforce,
+                      'reserved': admitted or not enforce, 'estimate_usd': estimate, 'policy': policy, 'applied': False}
             self._journal('admit', result, task, revision)
         return result
 
@@ -279,6 +287,40 @@ class Governor:
                 raise ValueError('Rebase plan was superseded; plan again')
         return {'plan_id': plan_id, 'status': 'acknowledged', 'pending': self.pending_changes()}
 
+    def declare_channel(self):
+        """Per-session code marking coordinator updates the user's prompt has declared.
+
+        Kept in the ledger, not the environment, so commands the model runs do not inherit it.
+        It stops forged updates in files or tool output; it cannot stop hostile code running as
+        the same OS user, which can read the ledger.
+        """
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            self.db.execute('INSERT OR IGNORE INTO gov_channels VALUES(?,?,?)',
+                            (self.session, secrets.token_hex(8).upper(), self.clock()))
+            self._journal('declare_channel', {'applied': False})
+        return self.channel_code()
+
+    def channel_code(self):
+        row = self.db.execute('SELECT code FROM gov_channels WHERE session=?', (self.session,)).fetchone()
+        return row['code'] if row else None
+
+    def outstanding_plans(self):
+        rows = self.db.execute("SELECT id,revision,changes FROM gov_plans WHERE session=? AND status='planned' ORDER BY created",
+                               (self.session,)).fetchall()
+        return [{'plan_id': r['id'], 'revision': r['revision'], 'kinds': sorted(c['kind'] for c in json.loads(r['changes']))}
+                for r in rows]
+
+    def note(self, kind, payload, task=None, revision=None):
+        """Journal an integration event (hook delivery, client state). Never an applied action."""
+        with self.db:
+            self._journal(kind, dict(payload, applied=False), task, revision)
+
+    def last_note(self, kind):
+        row = self.db.execute('SELECT payload,created FROM gov_decisions WHERE session=? AND kind=? ORDER BY seq DESC LIMIT 1',
+                              (self.session, kind)).fetchone()
+        return None if row is None else dict(json.loads(row['payload']), created=row['created'])
+
     def journal(self, kind=None):
         query = 'SELECT seq,kind,task,revision,payload,created FROM gov_decisions WHERE session=?'
         args = [self.session]
@@ -305,17 +347,104 @@ def governed_transport(gov, inner, rates, estimate, ttl=600):
         except BaseException:
             gov.settle(request_id, None)
             raise
-        usage = response.get('usage') if isinstance(response, dict) else None
         actual = None
-        if (isinstance(usage, dict) and response.get('model') == request.get('model')
-                and not (usage.get('cache_creation_input_tokens') and 'cache_creation' not in usage)):
-            try:
-                actual = cost(usage, rates.get(request.get('model')), '5m')
-            except (ValueError, KeyError, TypeError):
-                pass
+        if isinstance(response, dict):
+            actual = priced_usage(request, response.get('model'), response.get('usage'), rates)
         gov.settle(request_id, actual)
         return response, provider_id
     return transport
+
+
+VERIFIABLE = ('read', 'test_report')
+
+
+def execute_fallback(gov, decision, evidence, build_request, parse_candidate, transport, rates,
+                     estimate=None, allow_calls=False, ttl=600):
+    """Run one stronger-model request for a would_escalate review, then verify its answer.
+
+    The caller must opt in with allow_calls. Admission is enforced and fenced on the reviewed
+    task revision. The fallback's answer is re-reviewed against the same host evidence, so an
+    unverified fallback defers (human review), never accepts. There is no second fallback.
+    Nothing is applied to a client: the caller decides what to do with an accepted answer.
+    """
+    if not allow_calls or decision.get('action') != 'would_escalate' or not decision.get('escalation_affordable'):
+        if allow_calls and decision.get('action') == 'would_escalate':
+            return dict(decision, action='would_defer', reason='escalation_unaffordable_or_cost_unknown')
+        return decision
+    task, revision, operation = decision['task'], decision['current_revision'], decision['operation']
+
+    def finish(result, **entry):
+        gov.note('fallback', dict(entry, task_revision=revision, final_action=result['action'],
+                                  reason=result['reason']), task, revision)
+        return result
+    if operation not in VERIFIABLE:
+        return finish(dict(decision, action='would_defer', reason='fallback_unverifiable_operation'), executed=False)
+    request_id = 'fallback-' + uuid.uuid4().hex
+    cost_estimate = decision['fallback_estimate_usd'] if estimate is None else estimate
+    admitted = gov.admit(request_id, cost_estimate, task, revision, ttl=ttl)
+    if not admitted['admitted']:
+        return finish(dict(decision, action='would_defer', reason='fallback_refused:' + admitted['reason']),
+                      executed=False, request_id=request_id)
+    request = build_request(decision)
+    try:
+        response, provider_id = transport(request, {})
+    except BaseException as error:
+        gov.settle(request_id, None)  # the provider may already have billed it
+        gov.note('fallback', {'executed': True, 'request_id': request_id, 'error_type': type(error).__name__,
+                              'task_revision': revision}, task, revision)
+        raise
+    actual = priced_usage(request, response.get('model'), response.get('usage'), rates) if isinstance(response, dict) else None
+    gov.settle(request_id, actual)
+    try:
+        candidate = parse_candidate(response)
+    except (KeyError, ValueError, TypeError, IndexError):
+        candidate = None
+    review = gov.review(task, operation, candidate if isinstance(candidate, dict) else {}, evidence, revision, 0)
+    if review['action'] not in ('would_accept', 'reject_stale'):
+        review = dict(review, action='would_defer', reason='fallback_not_verified', next_step='human_review')
+    review['fallback'] = {'executed': True, 'request_id': request_id, 'provider_request_id': provider_id,
+                          'cost_usd': actual, 'model': request.get('model')}
+    return finish(review, executed=True, request_id=request_id, actual_usd=actual)
+
+
+def reconcile_log(gov, log_path):
+    """Bring the governor up to date from a proxy log (JSON lines) after crashes or governor errors.
+
+    A row whose reservation is still open settles with the row's measured cost (None stays
+    unknown). A row the proxy could not reserve ('untracked') is recorded now, so its spend
+    counts. An orphan with no row at all, e.g. the proxy died mid-request, stays unknown.
+    """
+    rows = []
+    with open(log_path) as f:
+        for line in f:
+            if line.strip():
+                row = json.loads(line)
+                if row.get('governor_request_id'):
+                    rows.append(row)
+    settled = untracked = 0
+    for row in rows:
+        request_id = row['governor_request_id']
+        status = gov.db.execute('SELECT status FROM gov_reservations WHERE session=? AND request_id=?',
+                                (gov.session, request_id)).fetchone()
+        if status is None:
+            if row.get('governor_status') != 'untracked':
+                continue  # admitted elsewhere or foreign row: never invent a reservation
+            gov.admit(request_id, 0, enforce=False)
+            gov.settle(request_id, row.get('cost_usd'))
+            untracked += 1
+        elif status['status'] != 'settled' and row.get('cost_usd') is not None:
+            gov.settle(request_id, row['cost_usd'])
+            settled += 1
+        elif status['status'] == 'pending':
+            gov.settle(request_id, None)  # the proxy finished this request without a measured cost
+    policy = gov.policy()
+    ids = {row['governor_request_id'] for row in rows}
+    orphans = [r['request_id'] for r in gov.db.execute(
+        "SELECT request_id FROM gov_reservations WHERE session=? AND status='orphaned'", (gov.session,))]
+    unknown = gov.db.execute("SELECT COUNT(*) FROM gov_reservations WHERE session=? AND "
+                             "(status='orphaned' OR (status='settled' AND actual IS NULL))", (gov.session,)).fetchone()[0]
+    return {'rows': len(rows), 'settled': settled, 'untracked_recorded': untracked, 'still_unknown': unknown,
+            'orphans_without_rows': sum(o not in ids for o in orphans), 'policy': policy}
 
 
 def demo(path):

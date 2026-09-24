@@ -1,0 +1,40 @@
+{
+ "id": "tomli-inline-table-newlines",
+ "repo": "tomli",
+ "url": "https://github.com/hukkin/tomli",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "feature",
+ "base": "38297f82cd0ef067f1afd2ffb8dfa73b65c398da",
+ "reference": "2a2aa62f1bc71b89b74d41dd2ab67b5dd24bc129",
+ "hidden_tests": [
+  "tests/data/valid/inline-table/empty-inline-table.json",
+  "tests/data/valid/inline-table/empty-inline-table.toml",
+  "tests/data/valid/inline-table/multiline-inline-table.json",
+  "tests/data/valid/inline-table/multiline-inline-table.toml",
+  "tests/test_data.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_data"
+ ],
+ "instruction": "TOML 1.1 allows inline tables to span multiple lines: newlines (and comments) are permitted between the braces and between key/value pairs, and a trailing comma after the last pair is allowed, for example `x = {\\n  a = 1,\\n  b = 2,\\n}`. Empty inline tables written over several lines must also parse. Add support for this in tomli's parser. The TOML-test suite cases for this feature are currently listed in tests/test_data.py as expected to fail; make them pass, remove them from that list, and add test data.",
+ "source": "https://github.com/hukkin/tomli/commit/2a2aa62f1bc71b89b74d41dd2ab67b5dd24bc129",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

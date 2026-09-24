@@ -110,3 +110,125 @@ A pass requires all of the following:
 A fail-open Claude answer fails this check.
 
 Accounting in this preflight is client-reported (`total_cost_usd`, `modelUsage`) with router cost unpriced. It is not a wire-level reconciliation. The transparent accounting adapter through `startProxy({upstreamURL})` remains the next step before a full comparison. The Claude Code `--max-budget-usd` threshold (default $0.50) is a stop threshold, not a billing cap.
+
+## First end-to-end routing preflight: failed twice over
+
+`runs/jev-route-20260922-121832` (stock launcher, Claude Code 2.1.280, isolated) failed with $0 client cost.
+
+1. **Anthropic authentication.** Every Messages request through Jev's proxy returned 401 `authentication_failed`. Claude Code retried 10 times over 182 s, then produced a synthetic error answer. The supplied Anthropic key was rejected. No tokens were billed.
+2. **Silent client incompatibility, which a valid key would not fix.** Stderr shows 11 `rewrite jev-router -> claude-opus-5` lines and **no** Jev decision. Claude Code 2.1.278 and 2.1.280 send the user prompt followed by a trailing `role: "system"` message carrying environment context. Pinned Jev's `newTurnPrompt()` only routes when the *last* message is `user`, so it extracts no prompt, never calls TypeSafe, and rewrites every request to its default opus tier without logging a failure.
+
+The offline probe (`python3 -m modelpilot.jev_compat --claude <cli>`) reproduced this. It uses real Claude Code, Jev's real `startProxy()`, a loopback fake Messages API and a fake router, with no keys, network or cost:
+
+| Claude Code | Last message role | Jev prompt extracted | Router called |
+| --- | --- | --- | --- |
+| 2.1.101 (Jev's documented test version) | user | yes | yes (routed to `claude-sonnet-5`) |
+| 2.1.278 | system | no | no |
+| 2.1.280 | system | no | no |
+
+The probe uses Jev's exported harness hook, not the stock launcher, so it is a compatibility diagnostic only. **Stock pinned Jev with current Claude Code does not route**: it behaves as a fixed opus-tier arm. Reporting that as Jev routing would be wrong. The baseline choices are:
+- stock Jev on Claude Code 2.1.101, with all arms on that version
+- a separately labeled compatibility-patched Jev variant on the current client
+- a later upstream Jev revision, re-pinned after inspection
+
+`jev_route_check` now accepts `--claude` and reports this failure mode with an explicit hint.
+
+## Decision: compatibility-patched Jev variant (September 22, 2026)
+
+The user chose a **separately labeled compatibility-patched Jev** running on current Claude Code for the comparison. The finding that stock pinned Jev does not route current Claude Code is reported alongside it.
+
+The patch is `patches/jev-trailing-system-message.patch`:
+- One functional line in `newTurnPrompt()`: the turn is the last *non-system* message (`findLast((m) => m?.role !== "system")`) instead of the last message.
+- One added upstream-style test.
+- Nothing else changes: no thresholds, tier mappings, model lists, timeouts or router calls. CRLF line endings are preserved, and `.gitattributes` keeps the patch byte-exact.
+
+Build and check:
+
+```sh
+python3 -m modelpilot.jev_compat --prepare-compat              # clone pinned checkout, apply patch, npm ci
+(cd work/jev-router-compat && npm test)                        # 66/66: 65 upstream + 1 patch test
+python3 -m modelpilot.jev_compat --jev-root work/jev-router-compat   # offline routing probe
+python3 -m modelpilot.jev_route_check --variant compat --live  # billable end-to-end check
+```
+
+The stock checkout `work/jev-router-baseline` stays untouched. `jev_route_check` refuses to run unless the checkout is the pinned commit plus byte-exactly the recorded patch (or, for stock, no changes). Its report labels the variant and the patch's SHA-256, and sets `baseline_eligible_as_stock_jev: false` for the variant.
+
+The offline probe now also returns a Read tool call, so it exercises the follow-up request after the tool result:
+
+| Jev | Claude Code | Router calls | Opening request / follow-up model |
+| --- | --- | --- | --- |
+| stock | 2.1.280 | 0 | claude-opus-5 / claude-opus-5 (default tier, no decision) |
+| stock | 2.1.101 | 1 | claude-sonnet-5 / claude-sonnet-5 |
+| compat-patched | 2.1.280 | 1 | claude-sonnet-5 / claude-sonnet-5 |
+
+The probe's fake router always picks sonnet, so an unrouted fall-through to opus cannot pass. These are loopback results with a fake API and router. The live check is still required.
+
+## Wire-level accounting adapter (built test-first; offline pass, live not yet run)
+
+This measures Jev traffic with ModelPilot's own proxy. The chain is Claude Code → Jev's real proxy → ModelPilot `ProxyServer` → Anthropic. ModelPilot sits *behind* Jev, so it sees the real model Jev chose, not the `jev-router` placeholder.
+
+The tests were written and committed failing first (`42ecd88`), then the code below was written until they passed.
+
+- **Rates.** `configs/jev-rates.json` prices `claude-haiku-4-5-20251001`, `claude-sonnet-5` and `claude-opus-5`, in USD per million tokens:
+
+  | Model | Input | Output | 5m write | 1h write | Read |
+  | --- | --- | --- | --- | --- | --- |
+  | Haiku 4.5 | 1 | 5 | 1.25 | 2 | 0.1 |
+  | Sonnet 5 | 2 | 10 | 2.5 | 4 | 0.2 |
+  | Opus 5 | 5 | 25 | 6.25 | 10 | 0.5 |
+
+  They come from the Claude API skill's model table and its cache multipliers. They are derived rates and still need confirming against the live pricing page. The live check cross-checks them against Claude Code's own cost.
+- **Proxy.** Accepts strictly parsed chunked uploads (Jev's proxy sends bodies chunked), passes `GET /v1/models` through so Jev's catalog discovery still works, and labels rows. See `docs/m1.md`.
+- **Accounted launcher.** `modelpilot/jev_accounted_launch.mjs` is a harness that mirrors the pinned `bin/jev-claude.mjs` except for four differences, listed in its header:
+  1. It points Jev's proxy at ModelPilot's.
+  2. It loads no `.env` files.
+  3. It sets no status line and does no saved-model restore.
+  4. It refuses to start without a TypeSafe key, rather than running unrouted.
+
+  Its `--self-test` sends one placeholder request through Jev's real proxy and ModelPilot's proxy to a loopback fixture. It covers chunked upload, catalog discovery (the router is offered only the fixture's catalog model, so a fall-back to Jev's static list fails) and pricing.
+- **Route check.** `python3 -m modelpilot.jev_route_check --variant compat --accounting wire --live` adds `reconcile()`. A pass needs all of:
+  - every Messages row is HTTP 200 and priced
+  - every tool-bearing row uses the selected model; Claude Code helper calls without tools are listed separately
+  - ModelPilot's total equals the client's `total_cost_usd` within $0.000001
+
+  Router usage from `decisions.json` is recorded, and router cost stays unpriced. Reports label `accounting: wire` and `launcher: accounted-harness`.
+- **Offline probe.** `python3 -m modelpilot.jev_compat --jev-root work/jev-router-compat --accounting wire` ran real Claude Code 2.1.280 → patched Jev → ModelPilot proxy → fake API, with no keys and no cost. It **passed**: one catalog row, one routing decision, and both the opening request and the tool follow-up on `claude-sonnet-5` and priced, with 0 unpriced rows.
+
+## Live compat runs: routing works, Anthropic key rejected
+
+Both `runs/jev-route-compat-20260922-133343` (client accounting) and `runs/jev-route-compat-wire-20260922-144020` (wire accounting) failed on **Anthropic authentication**. Every request returned 401 "API key is invalid", including the catalog GET in the wire run. Client cost was $0 and ModelPilot's proxy recorded 11 unpriced 401 rows. No provider tokens were billed, and no key text is in the evidence.
+
+**The patched Jev routed live for the first time.**
+- A genuine TypeSafe decision took 398 ms: `opus -> haiku (jev)`, p=0.99.
+- Every request was rewritten to `claude-haiku-4-5-20251001`.
+- ModelPilot's proxy sat behind Jev and saw the real routed model, one catalog request and every Messages request. The wire arrangement works end to end, up to the provider's auth check.
+
+Two problems surfaced, both now fixed:
+- **Client retry storm.** Claude Code retried each 401 ten times. Jev treats each retry as a new turn, so every run made 11 TypeSafe decisions. Router usage was about 1,016 input and 128 output tokens each, unpriced. Children now get `CLAUDE_CODE_MAX_RETRIES=0`, the setting's name confirmed in the 2.1.280 binary, which matches the project's no-automatic-retries rule.
+- **No early key check.** `check_anthropic_key` now makes a free `GET /v1/models?limit=1` before any TypeSafe or billable work and stops on a non-200. It also refuses Claude subscription OAuth tokens (`sk-ant-oat…`), which pass a plain `sk-ant-` prefix check but aren't API keys. A real-network check with a fake key returned the expected 401 message.
+
+## First successful live routed task (wire accounting), and what it corrected
+
+`runs/jev-route-compat-wire-20260922-151453`, patched Jev, Claude Code 2.1.280. **The task succeeded.**
+- TypeSafe chose `opus -> haiku` (p=0.99, 371 ms), and every request was rewritten to and served by `claude-haiku-4-5-20251001`.
+- The Read tool ran and the answer was correct, with 4.1 s wall time.
+- No key text is in the evidence.
+
+The run's own summary said "failed". That verdict came from three wrong assumptions in the check, not from Jev routing:
+
+1. **Client dollars are wrong for Jev.** Claude Code keys usage by the model it asked for (`jev-router`) and prices it with an unknown-model rate (`costBasis: "unknown"`, $0.025704, which works out to $4/$20 per MTok). Reconciliation now compares **token counts** instead. They matched exactly: 5,826 input and 120 output from both the proxy and the client. Dollars come from ModelPilot's rates for the served model: **$0.006426** for the successful requests.
+2. **`inference_geo: "not_available"`.** Haiku 4.5 has no data-residency option. The proxy had treated that as an unknown price tier; it is now priced at standard rates.
+3. **A reshaped resend is routed again.** Jev sent Claude Code's system-role message to Haiku, and Haiku rejected it with a 400. Claude Code then merged the environment text into the first user message and resent. That changed Jev's conversation key, so Jev made a second, identical decision.
+
+   An offline probe reproduced this exactly: a fake API that rejects system-role messages for Haiku, with real Claude Code in front of it. Same-model repeat decisions are now allowed and reported (`jev_decisions`, `extra_decisions`). Rejected requests are listed and leave provider cost **incomplete**; they are never assumed free.
+
+Replaying the saved evidence under the corrected rules (`replay-corrected-rules.json`, with the original summary unchanged) gives:
+- all routing checks passed
+- accounting matches
+- provider cost for successful requests $0.006426
+- cost incomplete, because of 1 rejected request
+- 2 Jev decisions, router usage recorded and unpriced
+
+**Open compatibility gap: Haiku 4.5 and, per the API reference, Sonnet 5 do not accept mid-conversation system messages.** Jev's `applyTier()` doesn't adapt them, so each session start routed to those tiers costs one rejected request plus one extra TypeSafe decision. Claude Code recovers without help. Whether to extend the compat patch is the user's decision.
+
+**Decision (September 22, 2026): measure the overhead, don't patch it.** The compat patch stays at one functional line. The rejected request and the extra TypeSafe decision count as real costs of running Jev with current Claude Code. Benchmark reports carry `rejected_requests`, `extra_decisions` and router usage per task. Provider cost stays marked incomplete while any request was rejected, until the billing of rejected 400s is confirmed, for example from Console usage.

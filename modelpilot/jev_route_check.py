@@ -7,20 +7,41 @@ each response. Billable: Anthropic generation plus one or more TypeSafe decision
 """
 import argparse
 import getpass
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
+import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
+from .cache_probe import NoRedirect, tls_context
+from .proxy import ProxyServer
 
 DECISION = re.compile(r'^\[jev\] (\w+) (\d+)ms p=([0-9.]+) (\w+) -> (\w+) \(([^)]*)\)', re.M)
 REWRITE = re.compile(r'^\[jev\] (\w+) rewrite jev-router -> (\S+)$', re.M)
 SERVED = re.compile(r'^\[jev\] (\d{3}) served by (\S+)$', re.M)
 FAILURES = ('routing failed', 'no-jev', 'could not read Claude model catalog', 'passthrough, could not process body',
             'upstream error', 'no JEV_API_KEY found')
+
+
+PATCH = 'patches/jev-trailing-system-message.patch'
+
+
+def git_diff(checkout):
+    return subprocess.run(['git', '-C', str(checkout), '-c', 'color.ui=never', 'diff', '--no-ext-diff'],
+                          capture_output=True, check=True).stdout
+
+
+def verify_checkout(checkout, commit, patch=None):
+    """Pinned commit plus exactly the given patch (or nothing) in tracked files."""
+    revision = subprocess.run(['git', '-C', str(checkout), 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip()
+    expected = Path(patch).read_bytes() if patch else b''
+    return revision == commit and git_diff(checkout) == expected
 
 
 def parse_events(stdout):
@@ -45,27 +66,110 @@ def validate(events, stderr, decisions, token):
     served = [model for status, model in SERVED.findall(stderr) if status == '200']
     failures = [f for f in FAILURES if f in stderr]
     usage_models = sorted((result.get('modelUsage') or {}).keys())
-    decision = decisions[0] if len(decisions) == 1 else {}
+    # A reshaped resend (after a 400) is a new conversation to Jev, so it routes again. Repeats are
+    # acceptable only when every decision picks the same model and each is logged and recorded.
+    models = {d.get('model') for d in decisions}
+    consistent = (bool(decisions) and len(models) == 1 and len(routed) == len(decisions)
+                  and all(isinstance((d.get('jev') or {}).get('request'), dict) for d in decisions))
+    decision = decisions[0] if consistent else {}
     selected = decision.get('model')
     jev = decision.get('jev') or {}
     checks = {
         'task_succeeded': result.get('subtype') == 'success' and not result.get('is_error') and token in str(result.get('result', '')),
         'read_tool_used': 'Read' in tools,
-        'one_jev_decision': len(routed) == 1 and len(decisions) == 1,
-        'decision_has_exchange': isinstance(jev.get('request'), dict) and bool(jev['request'])
-                                 and isinstance(jev.get('response'), dict) and bool(jev['response']),
-        'confidence_valid': type(decision.get('confidence')) in (int, float) and 0 <= decision['confidence'] <= 1,
+        'jev_decisions_consistent': consistent,
+        'decision_has_exchange': consistent and all(
+            isinstance((d.get('jev') or {}).get(k), dict) and bool(d['jev'][k]) for d in decisions for k in ('request', 'response')),
+        'confidence_valid': consistent and all(
+            type(d.get('confidence')) in (int, float) and 0 <= d['confidence'] <= 1 for d in decisions),
         # The turn's opening request and its tool continuation both carry the sentinel.
         'continuations_stay_on_selection': len(rewrites) >= 2 and set(rewrites) == {selected},
         'selected_model_served': bool(selected) and selected in served,
-        'selected_model_billed_by_client': bool(selected) and selected in usage_models,
+        # Claude Code keys usage by the model it asked for (the sentinel); wire mode checks the tokens.
+        'client_usage_reported': bool(usage_models),
         'no_fallback_or_errors': not failures,
     }
-    return {'passed': all(checks.values()), 'checks': checks, 'selected_model': selected,
+    hint = None
+    if rewrites and not routed:
+        hint = ('Sentinel rewritten without any Jev decision: Jev extracted no routable prompt from this client '
+                'request shape (run python3 -m modelpilot.jev_compat). This is silent fail-open, not routing.')
+    return {'passed': all(checks.values()), 'checks': checks, 'hint': hint, 'selected_model': selected,
+            'jev_decisions': len(decisions), 'extra_decisions': max(0, len(decisions) - 1),
             'reason': decision.get('reason'), 'confidence': decision.get('confidence'),
             'jev_ms': int(routed[0][1]) if routed else None, 'rewrites': rewrites, 'served_models': served,
             'fallback_markers': failures, 'tool_names': tools, 'client_cost_usd': result.get('total_cost_usd'),
             'client_model_usage': result.get('modelUsage'), 'num_turns': result.get('num_turns')}
+
+
+def catalog_status(url, headers):
+    request = urllib.request.Request(url, headers=headers, method='GET')
+    opener = urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(context=tls_context()))
+    try:
+        with opener.open(request, timeout=20) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+
+
+def check_anthropic_key(key, send=catalog_status):
+    """Free pre-check (model catalog, unbilled) so a bad key never reaches TypeSafe or a paid run.
+
+    Returns None when the key works, otherwise a reason. The key itself is never included.
+    """
+    if key.startswith('sk-ant-oat'):
+        return ('That is a Claude subscription OAuth token, not an API key. API cost comparison needs an '
+                'Anthropic Console API key (starts with sk-ant-api).')
+    if not key.startswith('sk-ant-') or any(c.isspace() for c in key):
+        return 'Anthropic key format is invalid.'
+    try:
+        status = send('https://api.anthropic.com/v1/models?limit=1', {'x-api-key': key, 'anthropic-version': '2023-06-01'})
+    except (OSError, ValueError) as error:
+        return f'Could not reach the Anthropic API to check the key ({type(error).__name__}).'
+    if status != 200:
+        return f'Anthropic rejected the key on a free catalog request (HTTP {status}). Check it in the Console.'
+    return None
+
+
+TOKEN_FIELDS = (('input_tokens', 'inputTokens'), ('output_tokens', 'outputTokens'),
+                ('cache_read_input_tokens', 'cacheReadInputTokens'), ('cache_creation_input_tokens', 'cacheCreationInputTokens'))
+
+
+def reconcile(rows, result, selected, decisions):
+    """Wire-level accounting: every successful request measured, priced and on the routed model.
+
+    Dollars come from ModelPilot's rates for the model actually served. Claude Code only knows the
+    jev-router sentinel and prices it with its own guess, so the client is reconciled by token counts.
+    Helper calls without tools are Claude Code's own and are listed separately. Rejected requests
+    are listed and leave cost incomplete: they are never assumed free. Router work stays unpriced.
+    """
+    messages = [r for r in rows if r.get('kind') == 'messages']
+    ok = [r for r in messages if r.get('http_status') == 200]
+    rejected = [{'http_status': r.get('http_status'), 'model': r.get('model')} for r in messages if r.get('http_status') != 200]
+    unpriced = sum(r.get('cost_usd') is None for r in ok)
+    routed = [r.get('model') for r in ok if r.get('tool_count', 0) > 0]
+    helpers = sorted({r.get('model') for r in ok if r.get('tool_count', 0) == 0})
+    mismatch = [r.get('model') for r in messages if r.get('tool_count', 0) > 0 and r.get('model') != selected]
+    proxy_tokens = {wire: sum((r.get('usage') or {}).get(wire, 0) for r in ok) for wire, _ in TOKEN_FIELDS}
+    usage = result.get('modelUsage') or {}
+    client_tokens = {wire: sum(m.get(name, 0) for m in usage.values() if isinstance(m, dict)) for wire, name in TOKEN_FIELDS}
+    tokens_match = bool(usage) and proxy_tokens == client_tokens
+    matches = bool(ok) and bool(routed) and not unpriced and not mismatch and tokens_match
+    router = [((d.get('jev') or {}).get('response') or {}).get('usage') for d in decisions]
+    return {'accounting_matches': matches, 'cost_complete': matches and not rejected,
+            'proxy_requests': len(messages), 'catalog_requests': sum(r.get('kind') == 'models' for r in rows),
+            'proxy_known_cost_usd': sum(r['cost_usd'] for r in ok if r.get('cost_usd') is not None),
+            'proxy_tokens': proxy_tokens, 'client_tokens': client_tokens, 'tokens_match': tokens_match,
+            'client_cost_usd': result.get('total_cost_usd'),
+            'client_cost_basis': 'sentinel_model_unknown_price' if 'jev-router' in usage else 'client_model_table',
+            'unpriced_requests': unpriced, 'rejected_requests': rejected, 'routed_models': routed,
+            'helper_models': helpers, 'routed_model_mismatch': mismatch,
+            'router_usage': [u for u in router if u], 'router_cost_usd': None}
+
+
+def arrangement(variant, accounting, patch_info):
+    return {'variant': 'stock' if variant == 'stock' else 'compat-patched', 'accounting': accounting,
+            'launcher': 'stock' if accounting == 'client' else 'accounted-harness',
+            'harness_patch': patch_info, 'baseline_eligible_as_stock_jev': variant == 'stock'}
 
 
 def child_env(base, jev_key, anthropic_key, home, tmp, config, cli_dir):
@@ -75,32 +179,42 @@ def child_env(base, jev_key, anthropic_key, home, tmp, config, cli_dir):
     node_dir = str(Path(shutil.which('node', path=base.get('PATH')) or 'node').parent)
     env.update(PATH=os.pathsep.join([str(cli_dir), node_dir, '/usr/bin', '/bin']), HOME=str(home), TMPDIR=str(tmp),
                CLAUDE_CONFIG_DIR=str(config), JEV_API_KEY=jev_key, ANTHROPIC_API_KEY=anthropic_key,
-               JEV_DEBUG='1', JEV_NO_STATUSLINE='1', DISABLE_AUTOUPDATER='1',
+               JEV_DEBUG='1', JEV_NO_STATUSLINE='1', DISABLE_AUTOUPDATER='1', CLAUDE_CODE_MAX_RETRIES='0',
                CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1')
     return env
 
 
-def command(jev, prompt, budget):
-    # No --model: a concrete model bypasses Jev. The launcher itself adds --add-dir for its checkout.
-    return ['node', str(jev/'bin/jev-claude.mjs'), '-p', prompt, '--output-format', 'stream-json', '--verbose',
-            '--max-turns', '5', '--max-budget-usd', f'{budget:.2f}', '--no-session-persistence',
-            '--setting-sources', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
-            '--tools', 'Read', '--allowedTools', 'Read']
+def command(jev, prompt, budget, proxy_url=None):
+    # No --model: a concrete model bypasses Jev. Either launcher adds --add-dir for the Jev checkout.
+    claude = ['-p', prompt, '--output-format', 'stream-json', '--verbose',
+              '--max-turns', '5', '--max-budget-usd', f'{budget:.2f}', '--no-session-persistence',
+              '--setting-sources', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
+              '--tools', 'Read', '--allowedTools', 'Read']
+    if proxy_url:
+        launcher = Path(__file__).resolve().parent/'jev_accounted_launch.mjs'
+        return ['node', str(launcher), str(jev), proxy_url, '--'] + claude
+    return ['node', str(jev/'bin/jev-claude.mjs')] + claude
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--live', action='store_true', help='Required: sends billable Anthropic and TypeSafe requests')
     parser.add_argument('--jev-root', type=Path)
+    parser.add_argument('--variant', choices=['stock', 'compat'], default='stock',
+                        help='compat: pinned Jev plus the ModelPilot trailing-system-message patch (separately labeled)')
+    parser.add_argument('--claude', type=Path, help='Claude Code executable (default: work/claude-client, then PATH)')
+    parser.add_argument('--accounting', choices=['client', 'wire'], default='client',
+                        help='wire: measure every request with ModelPilot\'s proxy behind Jev (accounted harness launcher)')
     parser.add_argument('--budget', type=float, default=.5, help='Claude Code stop threshold in USD; not a hard billing cap')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     pin = json.loads((root/'configs/jev-baseline.json').read_text())
-    jev = (args.jev_root or root/'work/jev-router-baseline').resolve()
+    jev = (args.jev_root or root/('work/jev-router-baseline' if args.variant == 'stock' else 'work/jev-router-compat')).resolve()
+    patch = root/PATCH if args.variant == 'compat' else None
     local = root/'work/claude-client/node_modules/.bin/claude'
-    cli = local if local.exists() else Path(shutil.which('claude') or '')
+    cli = args.claude.resolve() if args.claude else local if local.exists() else Path(shutil.which('claude') or '')
     if not args.live:
-        print(f'Plan: one Read-tool task through stock {jev.name} with the jev-router sentinel; Claude Code stop threshold '
+        print(f'Plan: one Read-tool task through the {args.variant} {jev.name} Jev ({args.accounting} accounting) with the jev-router sentinel; Claude Code stop threshold '
               f'${args.budget:.2f} (not a hard cap), max 5 turns, isolated HOME/config; TypeSafe cost unpriced. Add --live.')
         return
     if not (0 < args.budget <= 2):
@@ -109,17 +223,18 @@ def main():
         raise SystemExit('Node and the Claude Code CLI are required.')
     if not (jev/'.git').exists():
         raise SystemExit(f'No Jev checkout at {jev}; see docs/jev-baseline-setup.md.')
-    revision = subprocess.run(['git', '-C', str(jev), 'rev-parse', 'HEAD'], capture_output=True, text=True, check=True).stdout.strip()
-    dirty = subprocess.run(['git', '-C', str(jev), 'status', '--porcelain', '--untracked-files=no'], capture_output=True, text=True, check=True).stdout.strip()
-    if revision != pin['commit'] or dirty:
-        raise SystemExit('Jev checkout must match the pinned revision with no tracked modifications.')
+    if not verify_checkout(jev, pin['commit'], patch):
+        raise SystemExit('Jev checkout must be the pinned revision with ' + ('exactly ' + PATCH if patch else 'no tracked modifications')
+                         + ('; rebuild it with python3 -m modelpilot.jev_compat --prepare-compat' if patch else '') + '.')
+    revision = pin['commit']
     jev_key = os.environ.get('JEV_API_KEY') or os.environ.get('TYPESAFE_API_KEY') or getpass.getpass('TypeSafe/Jev API key (hidden): ').strip()
     anthropic_key = os.environ.get('ANTHROPIC_API_KEY') or getpass.getpass('Anthropic API key (hidden): ').strip()
     if not jev_key or any(c.isspace() for c in jev_key):
         raise SystemExit('Missing or malformed TypeSafe key. No requests sent.')
-    if not anthropic_key.startswith('sk-ant-') or any(c.isspace() for c in anthropic_key):
-        raise SystemExit('Anthropic key format is invalid. No requests sent.')
-    run = root/'runs'/('jev-route-'+time.strftime('%Y%m%d-%H%M%S'))
+    problem = check_anthropic_key(anthropic_key)
+    if problem:
+        raise SystemExit(problem + ' No TypeSafe or billable requests sent.')
+    run = root/'runs'/('jev-route-'+args.variant+('-wire' if args.accounting == 'wire' else '')+'-'+time.strftime('%Y%m%d-%H%M%S'))
     run.parent.mkdir(exist_ok=True)
     run.mkdir(mode=0o700)
     dirs = {name: run/name for name in ('home', 'tmp', 'config', 'fixture')}
@@ -129,15 +244,23 @@ def main():
     (dirs['fixture']/'sample.txt').write_text(token + '\n')
     prompt = 'Use the Read tool to read sample.txt in the current directory. Reply with exactly the token in that file.'
     env = child_env(os.environ, jev_key, anthropic_key, dirs['home'], dirs['tmp'], dirs['config'], cli.parent)
-    report = {'status': 'failed', 'baseline_commit': revision, 'stock_launcher': True, 'harness_patch': None,
+    patch_info = None if patch is None else {'path': PATCH, 'sha256': hashlib.sha256(patch.read_bytes()).hexdigest()}
+    report = {'status': 'failed', 'baseline_commit': revision, **arrangement(args.variant, args.accounting, patch_info),
               'router_cost_usd': None, 'cost_complete': False, 'budget_threshold_usd': args.budget,
               'scope': 'Single synthetic Read task; validates routing mechanics, not quality or savings.'}
+    proxy = thread = None
+    if args.accounting == 'wire':
+        rates = json.loads((root/'configs/jev-rates.json').read_text())['rates']
+        proxy = ProxyServer(('127.0.0.1', 0), 'https://api.anthropic.com', run/'observations.jsonl', rates)
+        thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+        thread.start()
+    proxy_url = f'http://127.0.0.1:{proxy.server_port}' if proxy else None
     print(f'Running billable Jev routing preflight; results: {run}', flush=True)
     started = time.monotonic()
     try:
         version = subprocess.run([str(cli), '--version'], env=env, cwd=dirs['fixture'], capture_output=True, text=True, timeout=30)
         report['client_version'] = version.stdout.strip()
-        result = subprocess.run(command(jev, prompt, args.budget), env=env, cwd=dirs['fixture'],
+        result = subprocess.run(command(jev, prompt, args.budget, proxy_url), env=env, cwd=dirs['fixture'],
                                 capture_output=True, text=True, timeout=300)
         report['wall_seconds'] = round(time.monotonic() - started, 3)
         stdout, stderr = result.stdout, result.stderr
@@ -160,6 +283,23 @@ def main():
         report['status'] = 'passed' if validation['passed'] and result.returncode == 0 else 'failed'
     except subprocess.TimeoutExpired:
         report['status'] = 'timeout'
+    finally:
+        if proxy:
+            proxy.shutdown()
+            thread.join()
+            proxy.server_close()
+    if proxy:
+        rows = [json.loads(line) for line in (run/'observations.jsonl').read_text().splitlines() if line.strip()]
+        final = next((e for e in reversed(parse_events((run/'stdout.jsonl').read_text())) if e.get('type') == 'result'), {}) \
+            if (run/'stdout.jsonl').exists() else {}
+        wire = reconcile(rows, final, report.get('selected_model'), json.loads((run/'decisions.json').read_text())
+                         if (run/'decisions.json').exists() else [])
+        report['wire'] = wire
+        # Provider (Anthropic) cost can be complete while router cost stays unpriced.
+        report['provider_cost_complete'] = wire['cost_complete']
+        report['provider_cost_usd'] = wire['proxy_known_cost_usd'] if wire['cost_complete'] else None
+        if not wire['accounting_matches']:
+            report['status'] = 'failed'
     (run/'summary.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report, indent=2))
     if report['status'] != 'passed':

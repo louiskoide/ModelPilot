@@ -1,0 +1,36 @@
+{
+ "id": "mi-one-falsy-exception",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "bug_fix",
+ "base": "9ed3dbb0ae527230cd156d91d0af305478558fba",
+ "reference": "def2dabea858b6ecb84ee0c52e6e07929f2c409c",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "instruction": "more_itertools.one() and only() accept custom exceptions through too_short= and too_long=. If the supplied exception instance is falsy (for example an Exception subclass whose __bool__ returns False), it is ignored and the default ValueError is raised instead. Always raise the caller's exception whenever one was supplied. Also, when too_long is supplied, do not build the default error message at all: building it calls repr() on items of the iterable, and that repr may itself raise and hide the requested exception. Add tests.",
+ "source": "https://github.com/more-itertools/more-itertools/commit/def2dabea858b6ecb84ee0c52e6e07929f2c409c",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

@@ -1,0 +1,38 @@
+{
+ "id": "cachetools-tlru-stale",
+ "repo": "cachetools",
+ "url": "https://github.com/tkem/cachetools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "978d34d40cdbf3b4cbfce104f3166032cc4ea028",
+ "reference": "c0fdf6abab38040947d6fe2e38c507401d5e2350",
+ "hidden_tests": [
+  "tests/test_tlru.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_tlru.py"
+ ],
+ "instruction": "In cachetools.TLRUCache, assigning to an existing key a value whose time-to-use is already expired (ttu returns a time that is not in the future) is silently ignored: the new value is not stored, but the previous value stays in the cache and keeps being returned. `cache[key] = value` must either store the value or remove the key. When the new value is already expired, the key must be removed: it must not be in the cache, get() returns None, and len() and currsize no longer count it. Add a test.",
+ "source": "https://github.com/tkem/cachetools/commit/c0fdf6abab38040947d6fe2e38c507401d5e2350",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

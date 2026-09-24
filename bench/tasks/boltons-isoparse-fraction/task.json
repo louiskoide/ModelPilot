@@ -1,0 +1,45 @@
+{
+ "id": "boltons-isoparse-fraction",
+ "repo": "boltons",
+ "url": "https://github.com/mahmoud/boltons",
+ "license": "BSD-3-Clause",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--deselect",
+  "tests/test_socketutils.py::test_socketutils_netstring",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "eb659013fbe4f355561fbead2116868366ba6e26",
+ "reference": "1f37cce42f8d3146342ccbd45492d3b3d9c52698",
+ "hidden_tests": [
+  "tests/test_timeutils.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--deselect",
+  "tests/test_socketutils.py::test_socketutils_netstring",
+  "tests/test_timeutils.py"
+ ],
+ "instruction": "boltons.timeutils.isoparse() treats the fractional-second digits as a literal number of microseconds, so '2020-01-02T03:04:05.851' (as produced by isoformat(timespec='milliseconds')) becomes 851 microseconds instead of 851000, which breaks round-trips the docstring promises. Scale the fraction to microseconds, including leading zeros ('.051' is 51000 microseconds and '.000001' is 1), so that isoparse(dt.isoformat(timespec=...)) == dt for the milliseconds and microseconds timespecs. Fractions with more than six digits (for example nanosecond timestamps) should be truncated to microsecond precision instead of raising: '.123456789' gives 123456. Document it and add tests.",
+ "source": "https://github.com/mahmoud/boltons/commit/1f37cce42f8d3146342ccbd45492d3b3d9c52698",
+ "excluded_tests": {
+  "tests/test_socketutils.py::test_socketutils_netstring": "socket timing self-test fails in this environment on the reference commit; unrelated to any task"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

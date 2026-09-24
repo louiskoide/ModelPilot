@@ -1,0 +1,38 @@
+diff --git a/src/proxy.mjs b/src/proxy.mjs
+index 622e7d9..e3bb63e 100644
+--- a/src/proxy.mjs
++++ b/src/proxy.mjs
+@@ -54,7 +54,9 @@ export function sanitizeSchema(node) {
+  */
+ export function newTurnPrompt(body) {
+   if (!Array.isArray(body?.tools) || body.tools.length === 0) return null; // auxiliary call
+-  const last = body?.messages?.[body.messages.length - 1];
++  // ModelPilot compat patch: Claude Code >=2.1.278 appends a trailing system-role message of
++  // environment context after the user turn, so the turn is the last non-system message.
++  const last = body?.messages?.findLast((m) => m?.role !== "system");
+   if (!last || last.role !== "user") return null;
+   let text;
+   if (typeof last.content === "string") {
+diff --git a/test/proxy.test.mjs b/test/proxy.test.mjs
+index 34b295c..48dbdcf 100644
+--- a/test/proxy.test.mjs
++++ b/test/proxy.test.mjs
+@@ -355,3 +355,18 @@ test("the key survives metadata that is not JSON", () => {
+   const body = { metadata: { user_id: "not-json" }, messages: [{ role: "user", content: "hi" }] };
+   assert.doesNotThrow(() => conversationKey(body));
+ });
++
++test("ModelPilot compat patch: a trailing system message does not hide the user turn", () => {
++  const body = withTools([
++    { role: "user", content: [{ type: "text", text: "fix the bug" }] },
++    { role: "system", content: [{ type: "text", text: "# Environment" }] },
++  ]);
++  assert.equal(newTurnPrompt(body), "fix the bug");
++  const continuation = withTools([
++    { role: "user", content: "fix the bug" },
++    { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }] },
++    { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "x" }] },
++    { role: "system", content: [{ type: "text", text: "# Environment" }] },
++  ]);
++  assert.equal(newTurnPrompt(continuation), null);
++});

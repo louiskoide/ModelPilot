@@ -1,0 +1,48 @@
+{
+ "id": "humanize-tz-naturalday",
+ "repo": "humanize",
+ "url": "https://github.com/python-humanize/humanize",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--ignore",
+  "tests/test_benchmarks.py",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "b172d67eac6a623db14020653cb311d29338d01f",
+ "reference": "a47a89ea9111a5eaba138c391e8a564134a15c60",
+ "hidden_tests": [
+  "tests/test_time.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--ignore",
+  "tests/test_benchmarks.py",
+  "tests/test_time.py"
+ ],
+ "instruction": "humanize.naturalday() and naturaldate() compare timezone-aware datetimes against today's date in the local timezone, so the result can be off by a day. For an aware datetime, determine 'today' in that value's own timezone. For example, at 2023-10-15 23:00 UTC, a value of 2023-10-16 06:00 UTC is 'tomorrow' in UTC but 'today' when expressed in UTC+11 or UTC+2. Naive datetimes and dates keep their current behavior. Add tests.",
+ "source": "https://github.com/python-humanize/humanize/commit/a47a89ea9111a5eaba138c391e8a564134a15c60",
+ "setup_files": {
+  "src/humanize/_version.py": "__version__ = version = '0.0.0'\n__version_tuple__ = version_tuple = (0, 0, 0)\n"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change",
+ "excluded_tests": {
+  "tests/test_benchmarks.py": "performance benchmarks needing the pytest-codspeed benchmark fixture; not correctness tests"
+ }
+}

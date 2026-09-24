@@ -1,0 +1,43 @@
+{
+ "id": "parse-decimal-grouping",
+ "repo": "parse",
+ "url": "https://github.com/r1chardj0n3s/parse",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "-o",
+  "addopts=",
+  "tests"
+ ],
+ "type": "feature",
+ "base": "d50f48c4dcabbeaf738061c186314a1433572ae0",
+ "reference": "35b9ffb355f94bc4cb781fbb3b0adff2232a5602",
+ "hidden_tests": [
+  "tests/test_parse.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "-o",
+  "addopts=",
+  "tests/test_parse.py"
+ ],
+ "instruction": "Python's format mini-language allows a grouping option between the width and the type, for example '{:,d}' and '{:_d}' as in format(1000000, ',d') == '1,000,000'. parse does not accept these: parse('a {:,d} b', 'a 1,000,000 b') should return 1000000 (and -1000000 for '-1,000,000'), and '{:_d}' should parse '1_000_000'. Add support for the ',' and '_' grouping options for integer fields and add tests.",
+ "source": "https://github.com/r1chardj0n3s/parse/commit/35b9ffb355f94bc4cb781fbb3b0adff2232a5602",
+ "notes": "addopts cleared: the repo .pytest.ini requests pytest-cov coverage options, which are not part of the benchmark environment",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

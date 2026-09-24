@@ -1,0 +1,48 @@
+{
+ "id": "humanize-metric-carry",
+ "repo": "humanize",
+ "url": "https://github.com/python-humanize/humanize",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--ignore",
+  "tests/test_benchmarks.py",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "c2c410c1521a3b1eb3efef52f3b06c2e42f7b92b",
+ "reference": "7574e0cc377d80db0d2756fc2c5e0b8799a6f8b4",
+ "hidden_tests": [
+  "tests/test_number.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--ignore",
+  "tests/test_benchmarks.py",
+  "tests/test_number.py"
+ ],
+ "instruction": "humanize.metric() does not carry to the next SI prefix when the rounded value reaches 1000, so metric(999.9, 'V') does not give '1.00 kV'. Carry to the next prefix whenever the rounded value reaches 1000, keeping the same precision, for example metric(999.99, 'V') == '1.00 kV', metric(999_999, 'V') == '1.00 MV' and metric(0.0009999, 'V') == '1.00 mV'. Add tests.",
+ "source": "https://github.com/python-humanize/humanize/commit/7574e0cc377d80db0d2756fc2c5e0b8799a6f8b4",
+ "setup_files": {
+  "src/humanize/_version.py": "__version__ = version = '0.0.0'\n__version_tuple__ = version_tuple = (0, 0, 0)\n"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change",
+ "excluded_tests": {
+  "tests/test_benchmarks.py": "performance benchmarks needing the pytest-codspeed benchmark fixture; not correctness tests"
+ }
+}

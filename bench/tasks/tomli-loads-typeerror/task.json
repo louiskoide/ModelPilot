@@ -1,0 +1,35 @@
+{
+ "repo": "tomli",
+ "url": "https://github.com/hukkin/tomli",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.8",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "id": "tomli-loads-typeerror",
+ "type": "bug_fix",
+ "base": "facdab0f5aacc5eb223753c42604d5de7bdaee9d",
+ "reference": "4e245a4bbbefed99e550e196095ea65c851cf31d",
+ "hidden_tests": [
+  "tests/test_error.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_error"
+ ],
+ "instruction": "Calling tomli.loads() with something other than a str (for example bytes, or a bool) currently fails with an AttributeError from deep inside the parser. It should raise TypeError with the message \"Expected str object, not '<type name>'\", for example \"Expected str object, not 'bytes'\". Implement this and add a test.",
+ "source": "https://github.com/hukkin/tomli/commit/4e245a4bbbefed99e550e196095ea65c851cf31d (PR #229)"
+}

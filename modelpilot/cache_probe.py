@@ -119,6 +119,27 @@ def cost(usage, rates, ttl):
             w5 * rates['write_5m'] + w1 * rates['write_1h']) / 1e6
 
 
+def priced_usage(request, model, usage, rates):
+    """Measured cost of one response, or None when any pricing input is ambiguous.
+
+    Shared by the proxy and governed transports so both apply one rule.
+    """
+    if not isinstance(usage, dict) or model != request.get('model'):
+        return None  # aliases/fallback need explicit rate mapping, not guessing
+    # "not_available": the model has no data-residency option (e.g. Haiku 4.5), so standard pricing applies.
+    if usage.get('service_tier', 'standard') != 'standard' or usage.get('inference_geo', 'global') not in ('global', 'not_available'):
+        return None
+    if request.get('speed') == 'fast':
+        return None
+    # Missing TTL breakdown is ambiguous in real traffic; M0's single-TTL fallback is not used.
+    if usage.get('cache_creation_input_tokens', 0) and 'cache_creation' not in usage:
+        return None
+    try:
+        return cost(usage, rates.get(model), '5m')
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None

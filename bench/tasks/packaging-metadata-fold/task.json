@@ -1,0 +1,38 @@
+{
+ "id": "packaging-metadata-fold",
+ "repo": "packaging",
+ "url": "https://github.com/pypa/packaging",
+ "license": "Apache-2.0",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "413d006fadf5b9b14d78ad444201d8189bff8c64",
+ "reference": "2d873eb6002021a8c007c933fbdab58b37a5079b",
+ "hidden_tests": [
+  "tests/test_metadata.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_metadata.py"
+ ],
+ "instruction": "packaging.metadata only folds '\\n' when writing header values in Metadata.as_rfc822(), and only rejects '\\n' in single-line fields such as Summary. Other line boundaries break the output: a bare '\\r' makes the email generator raise HeaderWriteError, and on Python releases without the CVE-2024-6923 fix any str.splitlines() boundary ends the header line. Treat every line boundary that str.splitlines() recognises ('\\r\\n', '\\n', '\\r', '\\v', '\\f', '\\x1c', '\\x1d', '\\x1e', '\\x85', '\\u2028', '\\u2029') like '\\n': fold it when writing (so an author of 'Hello\\rWorld' is written as 'author: Hello\\n        World'), and reject it in a Summary value during validation. Add tests.",
+ "source": "https://github.com/pypa/packaging/commit/2d873eb6002021a8c007c933fbdab58b37a5079b",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

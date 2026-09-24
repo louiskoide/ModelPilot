@@ -1,0 +1,40 @@
+{
+ "id": "tomli-optional-seconds",
+ "repo": "tomli",
+ "url": "https://github.com/hukkin/tomli",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "feature",
+ "base": "12314bde5b89a8bdc32de7403a2a4cf786187bbc",
+ "reference": "9eb2125ef49071e673d42e383b5221a268665193",
+ "hidden_tests": [
+  "tests/data/valid/dates-and-times/datetimes.json",
+  "tests/data/valid/dates-and-times/datetimes.toml",
+  "tests/data/valid/dates-and-times/localtime.json",
+  "tests/data/valid/dates-and-times/localtime.toml",
+  "tests/test_data.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_data"
+ ],
+ "instruction": "TOML 1.1 makes seconds optional in times: a local time, local date-time or offset date-time may be written as HH:MM, and the seconds are then zero (for example `t = 00:00` and `dt = 2025-04-18T20:05`). Fractional seconds are only allowed after seconds. Add support for this in tomli's parser. The TOML-test suite cases for this feature are currently listed in tests/test_data.py as expected to fail; make them pass, remove them from that list, and add test data.",
+ "source": "https://github.com/hukkin/tomli/commit/9eb2125ef49071e673d42e383b5221a268665193",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

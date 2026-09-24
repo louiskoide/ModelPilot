@@ -1,0 +1,37 @@
+{
+ "repo": "tomli",
+ "url": "https://github.com/hukkin/tomli",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.8",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "id": "tomli-hex-escape",
+ "type": "feature",
+ "base": "2a2aa62f1bc71b89b74d41dd2ab67b5dd24bc129",
+ "reference": "12314bde5b89a8bdc32de7403a2a4cf786187bbc",
+ "hidden_tests": [
+  "tests/test_data.py",
+  "tests/data/valid/multiline-basic-str/replacements.toml",
+  "tests/data/valid/multiline-basic-str/replacements.json"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_data"
+ ],
+ "instruction": "TOML 1.1 adds the \\xHH escape to basic strings: a backslash, an x and exactly two hexadecimal digits (either case) giving a Unicode code point, so \"\\x4a\" and \"\\x4A\" both decode to \"J\" and \"\\x09\" to a tab. Add support for it in basic strings, including multi-line basic strings. Literal strings are unaffected. The TOML-test suite case for this escape is currently listed in tests/test_data.py as expected to fail; make it pass, remove it from that list, and add test data.",
+ "source": "https://github.com/hukkin/tomli/commit/12314bde5b89a8bdc32de7403a2a4cf786187bbc (PR #202)"
+}

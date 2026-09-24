@@ -1,0 +1,41 @@
+{
+ "id": "click-prompt-strip-ansi",
+ "repo": "click",
+ "url": "https://github.com/pallets/click",
+ "license": "BSD-3-Clause",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "240603f240a9ff179d834fede836060d897c6980",
+ "reference": "93ba0075f4881b858b61f89a753c7c10e330027e",
+ "hidden_tests": [
+  "tests/test_termui.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_termui.py"
+ ],
+ "instruction": "click.confirm() and click.prompt() write their prompt text without stripping ANSI color and style codes when the output stream does not support them, unlike click.echo(), so styled prompts show raw escape codes in non-terminal output. For example, click.confirm(click.style('Hello World!', fg='green')) invoked through CliRunner with color=False should show 'Hello World! [y/N]: y', while with color=True the codes are kept. Apply the same stripping rule echo uses (for the stream the prompt goes to, stdout or stderr), and keep it working under CliRunner's color handling. Add tests.",
+ "source": "https://github.com/pallets/click/commit/93ba0075f4881b858b61f89a753c7c10e330027e",
+ "setup_files": {
+  "src/click-8.5.0.dev.dist-info/METADATA": "Metadata-Version: 2.1\nName: click\nVersion: 8.5.0.dev\n"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

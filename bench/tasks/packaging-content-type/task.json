@@ -1,0 +1,38 @@
+{
+ "id": "packaging-content-type",
+ "repo": "packaging",
+ "url": "https://github.com/pypa/packaging",
+ "license": "Apache-2.0",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "1a9c4cb6b6aac7fb6137fcdc4f440af912d8d87f",
+ "reference": "9d0ec47b36a1bcdf705b397b84cd89272410a00d",
+ "hidden_tests": [
+  "tests/test_metadata.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_metadata.py"
+ ],
+ "instruction": "packaging.metadata validates Description-Content-Type, but a malformed value can leak an unrelated exception (for example IndexError for 'text/plain; x*') or be silently accepted despite header defects (for example 'text/plain; charset=\"unterminated' or 'text/plain; a}b'). Report such values as InvalidMetadata for the 'description-content-type' field, whose message includes the repr of the value and the phrase 'is not a valid content type', so that Metadata.from_email() reports exactly one InvalidMetadata for that field in its ExceptionGroup. Keep the existing 'must be one of ...' error for well-formed but unsupported content types (for example application/octet-stream, which must still raise InvalidMetadata when the attribute is read). Add tests.",
+ "source": "https://github.com/pypa/packaging/commit/9d0ec47b36a1bcdf705b397b84cd89272410a00d",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

@@ -1,0 +1,35 @@
+{
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.9",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "id": "mi-sample-strict-counts",
+ "type": "bug_fix",
+ "base": "f36c88fe03688fa442154ef14f429bcfa4c38525",
+ "reference": "ae37eb38a1d3958d764ff3ec43107116dfe29135",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "instruction": "more_itertools.sample(population, k, counts=..., strict=True) is documented to raise ValueError when k is larger than the population, as the unweighted and weighted modes do. With counts, that error is not raised in every case where the population is too small (for example sample('abcde', 10, counts=[1, 1, 1, 1, 1], strict=True)). Fix the counted mode so strict=True always raises in that situation, and add tests for sample() error cases.",
+ "source": "https://github.com/more-itertools/more-itertools/commit/ae37eb38a1d3958d764ff3ec43107116dfe29135"
+}

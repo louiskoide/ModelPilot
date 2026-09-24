@@ -1,0 +1,45 @@
+{
+ "id": "boltons-us-tz-fold",
+ "repo": "boltons",
+ "url": "https://github.com/mahmoud/boltons",
+ "license": "BSD-3-Clause",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--deselect",
+  "tests/test_socketutils.py::test_socketutils_netstring",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "e66cade323f5c11cebb4bd0f099e634b245adccd",
+ "reference": "99dec84c99d02d8259093c0d520769b28d4d2aaf",
+ "hidden_tests": [
+  "tests/test_timeutils.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "--deselect",
+  "tests/test_socketutils.py::test_socketutils_netstring",
+  "tests/test_timeutils.py"
+ ],
+ "instruction": "boltons.timeutils' US timezone objects (Eastern, Central, Mountain, Pacific) ignore datetime.fold at the end of daylight saving time, when the local hour between 1:00 and 2:00 occurs twice. With tzinfo=Eastern, datetime(2011, 11, 6, 1, 30, fold=0) must be EDT (UTC-4) and the same time with fold=1 must be EST (UTC-5). Converting from UTC must set fold correctly: 2011-11-06 05:30 UTC becomes 01:30 EDT with fold 0, and 06:30 UTC becomes 01:30 EST with fold 1. The historical DST rules for earlier years must keep working. Fix it and add tests.",
+ "source": "https://github.com/mahmoud/boltons/commit/99dec84c99d02d8259093c0d520769b28d4d2aaf",
+ "excluded_tests": {
+  "tests/test_socketutils.py::test_socketutils_netstring": "socket timing self-test fails in this environment on the reference commit; unrelated to any task"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

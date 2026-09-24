@@ -1,0 +1,41 @@
+{
+ "id": "click-package-name",
+ "repo": "click",
+ "url": "https://github.com/pallets/click",
+ "license": "BSD-3-Clause",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "bug_fix",
+ "base": "916883afad450c0c9bbc4212817900949131adbd",
+ "reference": "bec59289d8cf9b9b4010642b2fee483e5f8eeefc",
+ "hidden_tests": [
+  "tests/test_basic.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_basic.py"
+ ],
+ "instruction": "click.version_option() detects the package name (or takes package_name=) and looks up the installed distribution's version by that name. When the import name differs from the distribution name (for example the module PIL is provided by the distribution Pillow), it raises RuntimeError saying the package is not installed. When the name does not match an installed distribution, resolve it as an import (top-level module) name using importlib.metadata.packages_distributions() and use that distribution's version; if the import name maps to more than one installed distribution, raise RuntimeError saying it maps to multiple installed distributions and naming them; if neither lookup finds anything, keep the existing 'not installed' RuntimeError. Document the behavior and add tests.",
+ "source": "https://github.com/pallets/click/commit/bec59289d8cf9b9b4010642b2fee483e5f8eeefc",
+ "setup_files": {
+  "src/click-8.4.2.dev.dist-info/METADATA": "Metadata-Version: 2.1\nName: click\nVersion: 8.4.2.dev\n"
+ },
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}

@@ -1,0 +1,14 @@
+{
+ "python": "3.12.14",
+ "implementation": "CPython",
+ "source": "Homebrew python@3.12, project venv at work/bench/py312 (ignored)",
+ "packages": [
+  "iniconfig==2.3.0",
+  "packaging==26.3",
+  "pluggy==1.6.0",
+  "Pygments==2.21.0",
+  "pytest==8.4.2"
+ ],
+ "recreate": "python3.12 -m venv work/bench/py312 && work/bench/py312/bin/pip install -r <(packages above)",
+ "note": "The agent and the grader both use this interpreter: its bin directory leads the agent PATH."
+}
