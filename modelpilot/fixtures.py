@@ -34,24 +34,28 @@ def response_for(request):
 
 
 def scripted_response(request, script):
-    """Drive a real client offline: step N answers after N tool results in the conversation.
+    """Drive a real client offline: step N answers after N tool results and follow-up prompts.
 
-    Each step is {'tool': name, 'input': {...}} (a tool_use turn) or {'text': ...}.
-    Steps past the end repeat the last one.
+    Each step is {'tool': name, 'input': {...}} (a tool_use turn) or {'text': ...}. A user
+    message without tool results after the first is a follow-up prompt (e.g. a resumed
+    session). Steps past the end repeat the last one.
     """
-    results = sum(1 for m in request.get('messages', []) if m.get('role') == 'user' and isinstance(m.get('content'), list)
-                  for b in m['content'] if isinstance(b, dict) and b.get('type') == 'tool_result')
-    step = script[min(results, len(script)-1)]
+    user = [m.get('content') for m in request.get('messages', []) if m.get('role') == 'user']
+    results = sum(1 for c in user if isinstance(c, list) for b in c if isinstance(b, dict) and b.get('type') == 'tool_result')
+    prompts = sum(1 for c in user if not (isinstance(c, list) and any(isinstance(b, dict) and b.get('type') == 'tool_result'
+                                                                       for b in c)))
+    index = results + max(0, prompts - 1)
+    step = script[min(index, len(script)-1)]
     usage = dict(USAGE, cache_read_input_tokens=0, input_tokens=100)
     if 'tool' in step:
-        block = {'type': 'tool_use', 'id': f'toolu_fixture{results}', 'name': step['tool'], 'input': {}}
+        block = {'type': 'tool_use', 'id': f'toolu_fixture{index}', 'name': step['tool'], 'input': {}}
         deltas = [{'type': 'input_json_delta', 'partial_json': json.dumps(step['input'])}]
         stop = 'tool_use'
     else:
         block = {'type': 'text', 'text': ''}
         deltas = [{'type': 'text_delta', 'text': step['text']}]
         stop = 'end_turn'
-    start = {'type': 'message', 'id': f'msg_fixture{results}', 'role': 'assistant', 'model': request['model'],
+    start = {'type': 'message', 'id': f'msg_fixture{index}', 'role': 'assistant', 'model': request['model'],
              'content': [], 'stop_reason': None, 'stop_sequence': None, 'usage': dict(usage, output_tokens=1)}
     events = ([{'type': 'message_start', 'message': start},
                {'type': 'content_block_start', 'index': 0, 'content_block': block}] +

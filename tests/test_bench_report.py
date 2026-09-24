@@ -92,7 +92,7 @@ def record(task, arm, trial=0, *, passed=True, cost_usd=.1, wall=60.0, stop='suc
 
 
 class SummaryTests(unittest.TestCase):
-    TASKS = [f't{i}' for i in range(8)]
+    TASKS = [f't{i}' for i in range(12)]
 
     def test_clear_cost_difference_excludes_zero_and_identical_arms_do_not(self):
         records = ([record(t, 'cheap', cost_usd=.10 + i / 1000) for i, t in enumerate(self.TASKS)] +
@@ -110,6 +110,15 @@ class SummaryTests(unittest.TestCase):
         self.assertFalse(twin['shows_difference'])
         self.assertEqual(twin['note'], 'no difference shown')
         self.assertEqual(summary['bootstrap'], {'seed': 1, 'resamples': 2000, 'unit': 'task', 'interval': '95% percentile'})
+
+    def test_too_few_tasks_never_show_a_difference(self):
+        # The 3c pilot: two tasks give a tight but meaningless interval.
+        records = [record(t, 'a', wall=10 + i) for i, t in enumerate(self.TASKS[:2])] + \
+                  [record(t, 'b', wall=50 + i) for i, t in enumerate(self.TASKS[:2])]
+        wall = summarize(records, ['a', 'b'], seed=0, resamples=500)['paired'][0]['differences']['mean_wall_seconds']
+        self.assertLess(wall['ci95'][1], 0)
+        self.assertFalse(wall['shows_difference'])
+        self.assertEqual(wall['note'], f'too few tasks (fewer than {bench_report.MIN_TASKS})')
 
     def test_bootstrap_is_reproducible_from_its_seed(self):
         records = [record(t, arm, passed=(i + len(arm)) % 3 > 0, cost_usd=.1 + i / 100)

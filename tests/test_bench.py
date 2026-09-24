@@ -305,7 +305,7 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(expected['synthetic']['hidden_passed'], 2)
 
     def test_a_failing_reference_stops_the_run_before_any_request(self):
-        broken = dict(self.task, reference=self.task['base'])
+        broken = dict(self.task, hidden_command=['{python}', '-m', 'unittest', '-q', 'tests.test_missing'])
         with self.assertRaises(bench.PreflightError) as caught:
             bench.preflight([broken], sys.executable, self.repo_case.root/'preflight')
         self.assertIn('synthetic', str(caught.exception))
@@ -408,10 +408,12 @@ class OfflineTrialTests(unittest.TestCase):
         self.assertEqual(budget['sessions'][0]['stop'], 'budget_stop')
 
     def test_a_timeout_keeps_partial_output_and_leaves_no_processes(self):
-        self.upstream.delay = 5
-        record = self.trial('slow', [{'text': 'Done.'}], timeout=2, grace=2)
-        self.assertEqual((record['status'], record['sessions'][0]['stop']), ('timeout', 'timeout'))
-        self.assertIn('"init"', (self.out/'slow'/'client.stdout.jsonl').read_text())
+        # Generous against a slow start on a busy machine; teardown does not wait for the sleeping reply.
+        self.upstream.delay, self.upstream.block_on_close = 15, False
+        record = self.trial('slow', [{'text': 'Done.'}], timeout=6, grace=2)
+        self.assertEqual((record['status'], record['sessions'][0]['stop']), ('timeout', 'timeout'), record['sessions'])
+        output = (self.out/'slow'/'client.stdout.jsonl').read_text()
+        self.assertIn('"init"', output, output[-500:])
         self.assertEqual(bench.leftover_processes(self.out/'slow'), [])
 
     def test_background_tool_processes_do_not_outlive_the_trial(self):

@@ -113,6 +113,31 @@ class UsageObserver:
             self.invalid = True
 
 
+USAGE_COUNTERS = ('input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens')
+TTL_COUNTERS = ('ephemeral_5m_input_tokens', 'ephemeral_1h_input_tokens')
+
+
+def counter(value):
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def logged_usage(usage):
+    """Numeric counters only, never free-form upstream strings. The cache-write TTL split is
+    kept when complete, so a logged row can be re-priced (e.g. as a cold-equivalent cost)."""
+    row = {k: v for k, v in usage.items() if k in USAGE_COUNTERS and counter(v)}
+    split = usage.get('cache_creation')
+    if isinstance(split, dict) and all(counter(split.get(k)) for k in TTL_COUNTERS):
+        row['cache_creation'] = {k: split[k] for k in TTL_COUNTERS}
+    return row
+
+
+def request_effort(request):
+    """Requested effort, logged because cache entries are separate per model and effort."""
+    config = request.get('output_config')
+    effort = config.get('effort') if isinstance(config, dict) else None
+    return effort if isinstance(effort, str) and len(effort) <= 16 else None
+
+
 def measured_cost(observer, request, rates):
     if not observer.complete or observer.invalid:
         return None
@@ -340,7 +365,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                'tool_count': len(tools) if isinstance(tools, list) else 0,
                'request_sha256': hashlib.sha256(raw).hexdigest(),
                'model': request.get('model') if request.get('model') in self.server.rates else 'unknown',
-               'stream': bool(request.get('stream')), 'http_status': None,
+               'effort': request_effort(request), 'stream': bool(request.get('stream')), 'http_status': None,
                'status': 'transport_error', 'cost_usd': None}
         governed = self.server.governor is not None and path.path == '/v1/messages'  # count_tokens is free
         if governed:
@@ -381,10 +406,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             observer.finish()
             row['status'] = 'ok' if 200 <= response.status < 300 else 'upstream_error'
             row['usage_complete'] = observer.complete and not observer.invalid
-            # Retain only numeric counters, never free-form upstream error/content strings.
-            row['usage'] = {k: v for k, v in observer.usage.items()
-                            if k in ('input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens')
-                            and isinstance(v, int) and not isinstance(v, bool) and v >= 0}
+            row['usage'] = logged_usage(observer.usage)
             if row['status'] == 'ok':
                 row['cost_usd'] = measured_cost(observer, request, self.server.rates)
             row['decision'] = forecast(request, row['usage'], self.server.rates) if row['cost_usd'] is not None else {

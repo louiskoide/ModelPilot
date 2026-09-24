@@ -74,6 +74,10 @@ def candidates(repo, source_prefix, test_prefix, max_source_lines=40, since='201
     return found
 
 
+# Python 3.14 filters extracted archives by default; ask for the same filter wherever it exists.
+SAFE_TAR = {'filter': 'data'} if hasattr(tarfile, 'data_filter') else {}
+
+
 def export(repo, commit, destination):
     """Write the tree at commit into destination with no git history."""
     destination = Path(destination)
@@ -84,7 +88,7 @@ def export(repo, commit, destination):
         for member in archive.getmembers():
             if member.issym() or member.islnk() or member.name.startswith('/') or '..' in Path(member.name).parts:
                 continue  # never follow links or escape the destination
-            archive.extract(member, destination)
+            archive.extract(member, destination, **SAFE_TAR)
     return destination
 
 
@@ -125,17 +129,57 @@ def writable_site_packages(python):
     return [d for d in json.loads(out) if Path(d).exists() and os.access(d, os.W_OK)]
 
 
-def clean_env(python=None):
+def clean_env(python=None, home=None, tmp=None):
     """Test environment without provider credentials or user Python settings.
 
-    With python given, its directory leads PATH so `python3`/`pytest` resolve to it.
+    With python given, its directory leads PATH so `python3`/`pytest` resolve to it. With home
+    and tmp given, tests get those instead of the caller's HOME/TMPDIR.
     """
     keep = ('PATH', 'LANG', 'LC_ALL', 'HOME', 'TMPDIR', 'SYSTEMROOT')
     env = {k: v for k, v in os.environ.items() if k in keep}
-    env.update(PYTHONDONTWRITEBYTECODE='1', PYTHONHASHSEED='0')
+    env.update(PYTHONDONTWRITEBYTECODE='1', PYTHONHASHSEED='0', PYTHONNOUSERSITE='1')
     if python:
         env['PATH'] = os.pathsep.join([str(Path(python).parent), env.get('PATH', '/usr/bin:/bin')])
+    if home:
+        env['HOME'] = str(home)
+    if tmp:
+        env['TMPDIR'] = str(tmp)
     return env
+
+
+PYTEST_RUN = ('passed', 'failed', 'error', 'errors', 'xfailed', 'xpassed')  # skips and warnings never ran
+
+
+def is_pytest(command):
+    return any('pytest' in part for part in command)
+
+
+def pytest_counts(output):
+    summaries = re.findall(r'^[=\s]*((?:\d+ \w+(?:, )?)+) in [\d.]+s\b', output, re.M)
+    return {kind: int(n) for n, kind in re.findall(r'(\d+) (\w+)', summaries[-1])} if summaries else {}
+
+
+def unittest_counts(output):
+    """Tests run and passed from 'Ran N tests' plus the outcome line, e.g. 'OK (skipped=1)'."""
+    ran = re.search(r'^Ran (\d+) tests?', output, re.M)
+    if not ran:
+        return {'run': 0, 'passed': 0, 'skipped': 0}
+    outcome = re.search(r'^(?:OK|FAILED)(?: \(([^)]*)\))?\s*$', output, re.M)
+    details = {k.strip(): int(v) for k, v in re.findall(r'([a-z ]+)=(\d+)', (outcome and outcome.group(1)) or '')}
+    skipped = details.get('skipped', 0)
+    not_passed = sum(details.get(k, 0) for k in ('failures', 'errors', 'expected failures', 'unexpected successes'))
+    total = int(ran.group(1))
+    return {'run': total - skipped, 'passed': max(0, total - skipped - not_passed), 'skipped': skipped}
+
+
+def unittest_id(test_id):
+    """One ID on every Python: 3.11+ appends the method name inside the parentheses."""
+    match = re.fullmatch(r'(\S+) \((\S+)\.(\w+)\)', test_id)
+    return f'{match.group(1)} ({match.group(2)})' if match and match.group(1) == match.group(3) else test_id
+
+
+def uncolored(output):
+    return re.sub(r'\x1b\[[0-9;]*m', '', output)  # some repos force colored output
 
 
 def parse_results(command, code, output):
@@ -143,20 +187,31 @@ def parse_results(command, code, output):
 
     A usage error, crash, empty collection or timeout is not a test failure: it proves nothing
     about the task. A pytest collection error counts, because hidden tests that import a
-    missing name fail that way (unittest reports the same case as an ERROR).
+    missing name fail that way (unittest reports the same case as an ERROR). Skipped tests
+    and pytest warnings are not tests run.
     """
-    output = re.sub(r'\x1b\[[0-9;]*m', '', output)  # some repos force colored output
-    if any('pytest' in part for part in command):
-        summaries = re.findall(r'^[=\s]*((?:\d+ \w+(?:, )?)+) in [\d.]+s\b', output, re.M)
-        counts = {kind: int(n) for n, kind in re.findall(r'(\d+) (\w+)', summaries[-1])} if summaries else {}
-        run = sum(v for k, v in counts.items() if k != 'deselected')
+    output = uncolored(output)
+    if is_pytest(command):
+        counts = pytest_counts(output)
+        run = sum(counts.get(k, 0) for k in PYTEST_RUN)
         failed = counts.get('failed', 0) + counts.get('error', 0) + counts.get('errors', 0)
         collection = code == 2 and 'error during collection' in output
         ids = re.findall(r'^(?:FAILED|ERROR) (\S+)', output, re.M)
         return run, (code == 1 and failed > 0) or collection, sorted(set(ids))
     ran = re.search(r'^Ran (\d+) tests?', output, re.M)
-    return (int(ran.group(1)) if ran else 0, code == 1 and bool(ran) and bool(re.search(r'^FAILED \(', output, re.M)),
-            sorted(set(re.findall(r'^(?:FAIL|ERROR): (\S+ \([^)]*\))', output, re.M))))
+    ids = re.findall(r'^(?:FAIL|ERROR): (\S+ \([^)]*\))', output, re.M)
+    return (unittest_counts(output)['run'], code == 1 and bool(ran) and bool(re.search(r'^FAILED \(', output, re.M)),
+            sorted({unittest_id(i) for i in ids}))
+
+
+def parse_counts(command, output):
+    """Tests that passed and tests that were skipped."""
+    output = uncolored(output)
+    if is_pytest(command):
+        counts = pytest_counts(output)
+        return {'passed': counts.get('passed', 0), 'skipped': counts.get('skipped', 0)}
+    counts = unittest_counts(output)
+    return {'passed': counts['passed'], 'skipped': counts['skipped']}
 
 
 def python_satisfies(python, minimum):
@@ -167,8 +222,8 @@ def python_satisfies(python, minimum):
     return tuple(map(int, version.split('.'))) >= tuple(map(int, minimum.split('.')))
 
 
-def run_tests(command, tree, python, pythonpath=None):
-    env = clean_env(python)
+def run_tests(command, tree, python, pythonpath=None, home=None, tmp=None):
+    env = clean_env(python, home, tmp)
     if pythonpath:
         env['PYTHONPATH'] = str(Path(tree)/pythonpath)
     argv = [python if part == '{python}' else part for part in command]
@@ -179,13 +234,41 @@ def run_tests(command, tree, python, pythonpath=None):
     except subprocess.TimeoutExpired:
         code, output = None, 'timeout'
     run, failed, ids = parse_results(command, code, output)
+    counts = parse_counts(command, output)
     return {'exit_code': code, 'seconds': round(time.monotonic() - started, 3), 'tests_run': run,
-            'tests_failed': failed, 'failing_tests': ids,
+            'tests_passed': counts['passed'], 'tests_skipped': counts['skipped'], 'tests_failed': failed, 'failing_tests': ids,
             'output_tail': output[-2000:], 'output_sha256': hashlib.sha256(output.encode()).hexdigest()}
 
 
-def grade(task, tree, repo, python, scratch):
-    """Hidden grader: agent's tree with the whole test directory replaced by the reference version."""
+def isolated_dirs(scratch):
+    """Fresh HOME and TMPDIR for test runs, so nothing outside the tree changes the outcome."""
+    dirs = (Path(scratch)/'home', Path(scratch)/'tmp')
+    for path in dirs:
+        if path.exists():
+            shutil.rmtree(path)
+        path.mkdir(parents=True)
+    return dirs
+
+
+def grade_reason(hidden, suite, expected_hidden_passed=None):
+    if hidden['exit_code'] is None or suite['exit_code'] is None:
+        return 'grader_timeout'
+    if hidden['exit_code'] != 0:
+        return 'hidden_tests_failed'
+    if hidden['tests_run'] == 0 or (expected_hidden_passed is not None and hidden['tests_passed'] < expected_hidden_passed):
+        return 'hidden_tests_not_run'
+    if suite['exit_code'] != 0 or suite['tests_run'] == 0:
+        return 'suite_failed'
+    return 'passed'
+
+
+def grade(task, tree, repo, python, scratch, expected_hidden_passed=None):
+    """Hidden grader: agent's tree with the whole test directory replaced by the reference version.
+
+    Tests run with their own HOME/TMPDIR and no user site-packages. With expected_hidden_passed
+    (the reference's count from a preflight), the tree must pass as many hidden tests as the
+    reference did: a skipped hidden test was not passed.
+    """
     scratch = Path(scratch)
     graded = scratch/'graded'
     if graded.exists():
@@ -197,11 +280,12 @@ def grade(task, tree, repo, python, scratch):
     reference = export(repo, task['reference'], scratch/'reference-tests')
     shutil.copytree(reference/task['test_dir'], test_dir)
     shutil.rmtree(reference)
-    hidden = run_tests(task['hidden_command'], graded, python, task.get('pythonpath'))
-    suite = run_tests(task['suite_command'], graded, python, task.get('pythonpath'))
-    passed = all(r['exit_code'] == 0 and r['tests_run'] > 0 for r in (hidden, suite))
-    reason = 'passed' if passed else ('hidden_tests_failed' if hidden['exit_code'] != 0 else 'suite_failed')
-    return {'passed': passed, 'reason': reason, 'hidden': hidden, 'suite': suite}
+    home, tmp = isolated_dirs(scratch)
+    hidden = run_tests(task['hidden_command'], graded, python, task.get('pythonpath'), home=home, tmp=tmp)
+    suite = run_tests(task['suite_command'], graded, python, task.get('pythonpath'), home=home, tmp=tmp)
+    reason = grade_reason(hidden, suite, expected_hidden_passed)
+    return {'passed': reason == 'passed', 'reason': reason, 'hidden': hidden, 'suite': suite,
+            'expected_hidden_passed': expected_hidden_passed}
 
 
 def validate(task, repo, python, scratch, repeats=3):
@@ -219,7 +303,8 @@ def validate(task, repo, python, scratch, repeats=3):
         return {'valid': False, 'reason': 'python_too_old', 'requires_python': task.get('requires_python')}
     base = task_tree(task, repo, task['base'], scratch/'base')
     reference = task_tree(task, repo, task['reference'], scratch/'reference')
-    base_suite = run_tests(task['suite_command'], base, python, task.get('pythonpath'))
+    home, tmp = isolated_dirs(scratch/'base-env')
+    base_suite = run_tests(task['suite_command'], base, python, task.get('pythonpath'), home=home, tmp=tmp)
     base_grade = grade(task, base, repo, python, scratch/'grade-base')
     reference_grades = [grade(task, reference, repo, python, scratch/f'grade-ref-{i}') for i in range(repeats)]
     checks = {'base_suite_passes': base_suite['exit_code'] == 0 and base_suite['tests_run'] > 0,
