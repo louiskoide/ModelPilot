@@ -11,6 +11,10 @@ after --gap seconds (0 keeps the prompt cache warm; 330 lets it expire); other t
 while one waits. Before any request, each task's reference is graded once ($0), and a trial
 must pass as many hidden tests as its reference did. Costs are reported cold-equivalent
 (see bench_report) next to measured. The client binary is pinned for the whole run.
+
+Jev arms (see bench_jev) run Jev's own proxy for the whole trial in front of the trial's
+ModelPilot proxy, with the jev-router sentinel instead of --model. Their dollars are provider
+cost only: router (TypeSafe) cost is unpriced, so they are a lower bound.
 """
 import argparse
 import getpass
@@ -26,9 +30,9 @@ import tempfile
 import threading
 import time
 import uuid
-from . import bench_report, bench_tasks
+from . import bench_jev, bench_report, bench_tasks
 from .governed_session import client_env
-from .jev_route_check import TOKEN_FIELDS, check_anthropic_key, parse_events
+from .jev_route_check import PATCH, TOKEN_FIELDS, check_anthropic_key, parse_events
 from .proxy import ProxyServer
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,12 +45,16 @@ ARMS = {
     'opus-5': {'kind': 'fixed', 'model': 'claude-opus-5'},
     'sonnet-5': {'kind': 'fixed', 'model': 'claude-sonnet-5'},
     'haiku-4.5': {'kind': 'fixed', 'model': 'claude-haiku-4-5-20251001'},
-    # Registered so plans and reports name them; their launchers arrive with work item 4.
-    'jev-stock': {'kind': 'jev', 'variant': 'stock'},
-    'jev-compat': {'kind': 'jev', 'variant': 'compat'},
+    # Jev picks the served model per turn; the client only sends the sentinel.
+    'jev-stock': {'kind': 'jev', 'variant': 'stock', 'model': 'jev-router', 'checkout': 'work/jev-router-baseline',
+                  'patch': None},
+    'jev-compat': {'kind': 'jev', 'variant': 'compat', 'model': 'jev-router', 'checkout': 'work/jev-router-compat',
+                   'patch': PATCH},
+    # Registered so plans and reports name it; its launcher arrives with work item 4.
     'modelpilot': {'kind': 'modelpilot', 'policy': 'docs/m6-modelpilot-policy.md'},
 }
-RUNNABLE = ('fixed',)
+RUNNABLE = ('fixed', 'jev')
+IDLE_SECONDS = 130  # the proxy's upstream socket timeout (120 s) bounds any request still in flight
 # Client result subtypes, pinned by the offline tests against Claude Code 2.1.281.
 STOPS = {'error_max_turns': 'turn_limit', 'error_max_budget_usd': 'budget_stop'}
 # Files outside the restored test directory that can change which tests run, or how.
@@ -74,25 +82,40 @@ def schedule(tasks, arms, trials, seed):
     return order
 
 
-def accounting(rows, final):
+def accounting(rows, final, jev=False):
+    """Wire accounting for one trial. Jev arms: provider cost only (router unpriced), and the
+    client prices the jev-router sentinel with its own guess, so only its tokens are compared."""
     messages = [r for r in rows if r.get('kind') == 'messages']
     ok = [r for r in messages if r.get('http_status') == 200]
+    # Sensitivity only: requests the API answered with an error, counted as free. A transport
+    # failure or an unpriced success is never a rejection.
+    answered = [r for r in messages if not (isinstance(r.get('http_status'), int) and r['http_status'] != 200)]
+    if_free = sum(r['cost_usd'] for r in answered) if answered and all(r.get('cost_usd') is not None for r in answered) else None
     proxy_tokens = {wire: sum((r.get('usage') or {}).get(wire, 0) for r in ok) for wire, _ in TOKEN_FIELDS}
     usage = final.get('modelUsage') or {}
     client_tokens = {wire: sum(m.get(name, 0) for m in usage.values() if isinstance(m, dict)) for wire, name in TOKEN_FIELDS}
     unpriced = sum(r.get('cost_usd') is None for r in messages)
     known = sum(r['cost_usd'] for r in messages if r.get('cost_usd') is not None)
     client = final.get('total_cost_usd')
-    return {'requests': len(messages), 'http_statuses': [r.get('http_status') for r in messages],
-            'rejected_requests': sum(r.get('http_status') != 200 for r in messages),
-            'models': [r.get('model') for r in messages], 'unpriced_requests': unpriced,
-            # Unknown cost stays unknown: a trial with any unpriced request has no dollar total.
-            'cost_usd': known if unpriced == 0 and messages else None, 'known_cost_usd': known,
-            'proxy_tokens': proxy_tokens, 'client_tokens': client_tokens,
-            'tokens_match': bool(usage) and proxy_tokens == client_tokens,
-            'client_cost_usd': client,
-            'client_cost_matches': isinstance(client, (int, float)) and unpriced == 0 and abs(client - known) < 1e-6,
-            'first_byte_seconds': [r.get('first_byte_seconds') for r in messages]}
+    out = {'requests': len(messages), 'http_statuses': [r.get('http_status') for r in messages],
+           # Answered by the API with an error; a transport failure (no status) is not a rejection.
+           'rejected_requests': sum(isinstance(r.get('http_status'), int) and r['http_status'] != 200 for r in messages),
+           'transport_failures': sum(r.get('http_status') is None for r in messages),
+           'models': [r.get('model') for r in messages], 'unpriced_requests': unpriced,
+           # Unknown cost stays unknown: a trial with any unpriced request has no dollar total.
+           'cost_usd': known if unpriced == 0 and messages else None, 'known_cost_usd': known,
+           'cost_if_rejected_free_usd': if_free, 'rejected_assumption': 'API error responses counted as $0 (unconfirmed)',
+           'cost_scope': 'provider_only_router_unpriced' if jev else 'complete',
+           'proxy_tokens': proxy_tokens, 'client_tokens': client_tokens,
+           'tokens_match': bool(usage) and proxy_tokens == client_tokens,
+           'client_cost_usd': client,
+           'client_cost_basis': 'sentinel_model_unknown_price' if jev else 'client_model_table',
+           'client_cost_matches': None if jev else
+           isinstance(client, (int, float)) and unpriced == 0 and abs(client - known) < 1e-6,
+           'first_byte_seconds': [r.get('first_byte_seconds') for r in messages]}
+    if jev:
+        out['router_cost_usd'] = None
+    return out
 
 
 def stop_reason(status, final, rows):
@@ -121,11 +144,13 @@ def budget_text(usd):
     return ('%.10f' % usd).rstrip('0').rstrip('.')
 
 
-def client_command(cli, prompt, model, max_turns, budget_usd, session):
-    # The stop threshold applies per invocation: a resumed session gets its own.
-    return [str(cli), '-p', prompt, '--model', model, '--output-format', 'stream-json', '--verbose',
+def client_command(cli, prompt, model, max_turns, budget_usd, session, extra=()):
+    # The stop threshold applies per invocation: a resumed session gets its own. No model
+    # (Jev arms) leaves the client on the sentinel the router's environment sets.
+    return [str(cli), '-p', prompt, *(['--model', model] if model else []), '--output-format', 'stream-json', '--verbose',
             '--max-turns', str(max_turns), '--max-budget-usd', budget_text(budget_usd), '--setting-sources', '',
-            '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--tools', TOOLS, '--allowedTools', TOOLS, *session]
+            '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--tools', TOOLS, '--allowedTools', TOOLS,
+            *session, *extra]
 
 
 def client_version(cli):
@@ -252,10 +277,12 @@ class Trial:
 
     step() runs the next session and returns True while a follow-up is still due; the last
     step grades. trial.json is rewritten after every step, so a crash keeps the accounting.
+    One ModelPilot proxy (and, for Jev arms, one Jev router) serves every session of the trial;
+    close() releases them. jev_stub replaces the router's TypeSafe call (offline tests only).
     """
     def __init__(self, task, arm_id, trial_dir, cli, key, upstream, price_table, *, trial=0, python=None,
                  max_turns=30, budget_usd=1.0, timeout=900, grace=10, shape='single', gap=0,
-                 expected_hidden_passed=None, client_version=None):
+                 expected_hidden_passed=None, client_version=None, jev_key=None, jev_stub=None, router=None):
         arm = ARMS[arm_id]
         if arm['kind'] not in RUNNABLE:
             raise NotImplementedError(f'{arm_id}: launcher not implemented yet (CLAUDE.md work item 4)')
@@ -270,12 +297,17 @@ class Trial:
         self.prompts = [PREAMBLE + task['instruction']] + ([FOLLOW_UP] if shape == 'followup' else [])
         self.session_id = str(uuid.uuid4())
         self.sessions, self.final = [], {}
-        self.started = self.finished = False
+        self.started = self.finished = self.router_unavailable = False
+        self.proxy = self.proxy_thread = self.route = None
+        self.router = (router or bench_jev.JevRouter(arm)) if arm['kind'] == 'jev' else None
+        self.jev_key, self.jev_stub = jev_key, jev_stub
         self.record = {'task': task['id'], 'arm': arm_id, 'trial': trial, 'model': arm['model'],
                        'spec_sha256': bench_tasks.spec_hash(task), 'shape': shape,
                        'gap_requested_seconds': gap if shape == 'followup' else None,
                        'expected_hidden_passed': expected_hidden_passed, 'limits': self.limits,
                        'client_path': str(cli), 'client_version': client_version, 'complete': False}
+        if self.router:
+            self.record.update(self.router.describe())
 
     @property
     def log(self):
@@ -289,6 +321,10 @@ class Trial:
     def step(self):
         if self.version and client_version(self.cli) != self.version:
             raise ClientChanged(f'{self.cli} no longer reports {self.version}; not running more trials.')
+        if self.router:
+            self.router.verify()  # an agent could edit the checkout through --add-dir or Bash
+            if self.started and not self.router.alive():
+                raise bench_jev.JevRouterDown(f'Jev router for {self.dir} exited; a harness failure, not a model result.')
         if not self.started:
             self.setup()
         index = len(self.sessions)
@@ -318,27 +354,33 @@ class Trial:
         paths = bench_tasks.test_env_paths(self.task, self.work)
         if paths:
             env['PYTHONPATH'] = os.pathsep.join(paths)
-        self.env = env
         self.record['python'] = python_version(self.python)
+        self.proxy = ProxyServer(('127.0.0.1', 0), self.upstream, self.log, self.rates)
+        self.proxy_thread = threading.Thread(target=self.proxy.serve_forever, daemon=True)
+        self.proxy_thread.start()
+        proxy_url = f'http://127.0.0.1:{self.proxy.server_port}'
+        if self.router:
+            self.route = self.router.start(proxy_url, dirs, self.jev_key, self.dir/'jev.stderr.txt', stub=self.jev_stub)
+            self.record['router'] = self.route.get('router')
+            env.update(self.route['env'])  # the router's port and the jev-router sentinel
+        else:
+            env['ANTHROPIC_BASE_URL'] = proxy_url
+        self.env = env
 
     def run_session(self, index):
         first_row = len(read_rows(self.log))
-        proxy = ProxyServer(('127.0.0.1', 0), self.upstream, self.log, self.rates)
-        thread = threading.Thread(target=proxy.serve_forever, daemon=True)
-        thread.start()
-        env = dict(self.env, ANTHROPIC_BASE_URL=f'http://127.0.0.1:{proxy.server_port}')
         # Sessions persist only in the trial's own config dir, so the follow-up can resume them.
         session = ['--session-id', self.session_id] if index == 0 else ['--resume', self.session_id]
-        command = client_command(self.cli, self.prompts[index], self.arm['model'], self.limits['max_turns'],
-                                 self.limits['budget_usd'], session)
+        model, extra = (None, ['--add-dir', self.route['add_dir']]) if self.router else (self.arm['model'], [])
+        command = client_command(self.cli, self.prompts[index], model, self.limits['max_turns'],
+                                 self.limits['budget_usd'], session, extra)
         started_unix, started = time.time(), time.monotonic()
         try:
-            result = run_client(command, env, self.work, self.limits['timeout_s'], grace=self.grace, reap_dir=self.dir)
+            result = run_client(command, self.env, self.work, self.limits['timeout_s'], grace=self.grace, reap_dir=self.dir)
         finally:
             wall = time.monotonic() - started
-            proxy.shutdown()
-            thread.join()
-            proxy.server_close()
+            # Every request the session started is logged before its rows are counted.
+            idle = self.proxy.wait_idle(IDLE_SECONDS)
         for name, suffix in (('stdout', 'jsonl'), ('stderr', 'txt')):
             with (self.dir/f'client.{name}.{suffix}').open('a') as f:
                 f.write(redact(result[name], self.api_key))
@@ -353,7 +395,11 @@ class Trial:
                   'returncode': result['returncode'], 'stop': stop_reason(result['status'], final, rows),
                   'subtype': final.get('subtype'), 'num_turns': final.get('num_turns'), 'requests': len(messages),
                   'rows': [first_row, first_row + len(rows)], 'wall_seconds': round(wall, 3),
-                  'started_unix': started_unix, 'ended_unix': time.time(), 'first_read_tokens': first_read}
+                  'started_unix': started_unix, 'ended_unix': time.time(), 'first_read_tokens': first_read,
+                  'proxy_idle': idle}
+        if self.router:
+            record['router_pid'] = self.router.pid
+            self.router.collect(self.dir/'tmp', self.dir/'decisions.json')
         if index:
             # Other trials may re-warm the shared system prompt during the gap; cost is repriced
             # cold-equivalent, but a physically warm follow-up's latency is not.
@@ -364,19 +410,44 @@ class Trial:
     def save(self, phase):
         rows = read_rows(self.log)
         last = self.sessions[-1] if self.sessions else {}
+        if self.router:
+            decisions, stderr = self.dir/'decisions.json', self.dir/'jev.stderr.txt'
+            routing = bench_jev.routing(json.loads(decisions.read_text()) if decisions.exists() else [],
+                                        stderr.read_text(errors='replace') if stderr.exists() else '', rows, self.sessions)
+            self.record['routing'] = routing
+            self.router_unavailable = routing['auth_failure']
         self.record.update(
             phase=phase, sessions=self.sessions,
             status='timeout' if any(s['status'] == 'timeout' for s in self.sessions) else 'completed',
             wall_seconds=round(sum(s['wall_seconds'] for s in self.sessions), 3),
             client={'subtype': self.final.get('subtype'), 'is_error': self.final.get('is_error'),
                     'num_turns': self.final.get('num_turns'), 'stop': last.get('stop')},
-            accounting=accounting(rows, self.final), cache=bench_report.cache_attribution(rows, self.rates))
+            accounting=accounting(rows, self.final, jev=bool(self.router)),
+            cache=bench_report.cache_attribution(rows, self.rates))
         (self.dir/'trial.json').write_text(json.dumps(self.record, indent=2) + '\n')
+
+    def close(self):
+        """Stop the trial's router and proxy (idempotent). Afterwards every request is logged."""
+        if self.router:
+            self.router.stop()  # first, so nothing new reaches the proxy
+            stderr = self.dir/'jev.stderr.txt'
+            if stderr.exists():
+                stderr.write_text(redact(redact(stderr.read_text(errors='replace'), self.api_key), self.jev_key))
+        if self.proxy:
+            self.proxy.shutdown()
+            self.proxy_thread.join()
+            # Handler threads are daemons that server_close() does not join: without this wait a
+            # request still in flight (billed upstream) could lose its row when the log closes.
+            if not self.proxy.wait_idle(IDLE_SECONDS):
+                self.record['proxy_busy_at_close'] = True
+            self.proxy.server_close()
+            self.proxy = None
 
     def finish(self, stopped=None):
         """Grade the tree as the sessions left it. stopped: the run ended before a due follow-up."""
         if stopped:
             self.record['stopped'] = stopped
+        self.close()
         self.save('grading')
         subprocess.run(['git', 'add', '-A', '-N'], cwd=self.work, capture_output=True)  # include new files in the diff
         (self.dir/'agent.diff').write_bytes(subprocess.run(['git', 'diff', '--binary', 'HEAD'], cwd=self.work,
@@ -405,8 +476,11 @@ class Trial:
 def run_trial(task, arm_id, trial_dir, cli, key, upstream, price_table, *, sleep=time.sleep, **options):
     """Run one trial start to finish, waiting out the follow-up gap."""
     trial = Trial(task, arm_id, trial_dir, cli, key, upstream, price_table, **options)
-    while trial.step():
-        sleep(trial.gap)
+    try:
+        while trial.step():
+            sleep(trial.gap)
+    finally:
+        trial.close()
     return trial.record
 
 
@@ -475,8 +549,18 @@ def preflight(tasks, python, scratch):
     return expected
 
 
+def jev_manifest(arms):
+    """What a run's Jev arms ran, for the manifest; None without Jev arms."""
+    jev = {a: bench_jev.JevRouter(ARMS[a]).describe() for a in arms if ARMS[a]['kind'] == 'jev'}
+    return {'arms': jev, 'router_cost': 'unpriced (TypeSafe); Jev dollars are provider cost only, a lower bound',
+            'stop_threshold_basis': "--max-budget-usd is priced by Claude Code at its own rate for the jev-router "
+                                    'sentinel, not the wire cost of the served model',
+            'add_dir': 'the Jev checkout, as the stock launcher passes it'} if jev else None
+
+
 def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *, client_version=None, shape='single',
-              gap=0, run_budget=None, expected=None, trial_factory=None, clock=time.monotonic, sleep=time.sleep, **limits):
+              gap=0, run_budget=None, expected=None, jev_key=None, trial_factory=None, clock=time.monotonic,
+              sleep=time.sleep, **limits):
     out = Path(out)
     out.mkdir(mode=0o700, parents=True)
     order = schedule(tasks, arms, trials, seed)
@@ -491,13 +575,14 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
                 'preamble': PREAMBLE, 'tools': TOOLS, 'shape': shape, 'gap_seconds': gap,
                 'follow_up_prompt': FOLLOW_UP if shape == 'followup' else None, 'run_budget_usd': run_budget,
                 'reference_preflight': expected, 'cost_basis': 'cold-equivalent; measured alongside',
+                'jev': jev_manifest(arms),
                 'note': 'Stop thresholds are not billing caps: per session, and the run threshold between sessions. No retries.'}
     with (out/'manifest.json').open('x') as f:
         json.dump(manifest, f, indent=2)
 
     def default_factory(task, arm, trial_dir, n):
         return Trial(task, arm, trial_dir, cli, key, upstream, price_table, trial=n, shape=shape, gap=gap,
-                     client_version=client_version,
+                     client_version=client_version, jev_key=jev_key,
                      expected_hidden_passed=((expected or {}).get(task['id']) or {}).get('hidden_passed'), **limits)
     factory = trial_factory or default_factory
     executed = []
@@ -507,6 +592,9 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
         return sum(item.trial.known_cost() for item in lazy if item.trial)
 
     def stop():
+        # A rejected TypeSafe key would make every later Jev trial fail open onto Opus.
+        if any(item.trial.router_unavailable for item in lazy if item.trial):
+            return 'jev_router_unavailable'
         return 'run_budget' if run_budget is not None and spend() >= run_budget else None
     reason = error = None
     try:
@@ -518,6 +606,9 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
         error = type(e).__name__
         raise
     finally:
+        for item in lazy:  # a crash must not leave a trial's proxy or router running
+            if item.trial and not item.trial.finished:
+                item.trial.close()
         records = [item.trial.record for item in lazy if item.trial and item.trial.finished]
         summary = bench_report.summarize(records, arms, seed=seed)
         summary.update(trials=len(records), complete=reason is None and error is None, stopped=reason, error=error,
@@ -560,10 +651,17 @@ def main():
     blocked = [a for a in arms if ARMS[a]['kind'] not in RUNNABLE]
     if blocked:
         raise SystemExit(f'Not runnable yet: {", ".join(blocked)} (launchers arrive with work item 4).')
+    jev_arms = [a for a in arms if ARMS[a]['kind'] == 'jev']
     table = rates()
-    missing = [ARMS[a]['model'] for a in arms if ARMS[a]['model'] not in table]
+    served = sorted({m for a in arms for m in (bench_jev.JEV_MODELS if a in jev_arms else [ARMS[a]['model']])})
+    missing = [m for m in served if m not in table]
     if missing:
         raise SystemExit(f'No configured rates for {missing}.')
+    if jev_arms and not shutil.which('node'):
+        raise SystemExit('Jev arms need Node.')
+    problems = [p for p in (bench_jev.JevRouter(ARMS[a]).problem() for a in jev_arms) if p]
+    if problems:
+        raise SystemExit(' '.join(problems))
     if args.live and args.run_budget is None:
         raise SystemExit('--live needs --run-budget: known spend at which no further session starts.')
     python = bench_tasks.interpreter()
@@ -588,6 +686,11 @@ def main():
         print(f'Prepared {runs} trials ({len(tasks)} tasks × {len(arms)} arms × {args.trials}), {shape}, seed {args.seed}, '
               f'max {args.max_turns} turns and ${args.budget:.2f} stop threshold per session. {run_stop} Up to about '
               f'${worst:.2f} if sessions reach their thresholds. Thresholds are not billing caps. No retries. Add --live.')
+        if jev_arms:
+            print(f'Jev arms {", ".join(jev_arms)}: checkouts verified. TypeSafe routing is billed separately and unpriced, '
+                  'so their dollars are a lower bound; the client stop threshold is priced on the jev-router sentinel. '
+                  'Stock Jev is expected not to route on this client (run as Opus plus router overhead). '
+                  '--live asks for a TypeSafe key; consider python3 -m modelpilot.jev_check --live first.')
         return
     cli, version = resolve_client(args.claude or shutil.which('claude') or 'claude')
     writable = bench_tasks.writable_site_packages(python)
@@ -599,12 +702,18 @@ def main():
     problem = check_anthropic_key(key)
     if problem:
         raise SystemExit(problem + ' No billable requests sent.')
+    jev_key = None
+    if jev_arms:
+        jev_key = (os.environ.get('JEV_API_KEY') or os.environ.get('TYPESAFE_API_KEY')
+                   or getpass.getpass('TypeSafe/Jev API key (hidden): ').strip())
+        if not jev_key or any(c.isspace() for c in jev_key):
+            raise SystemExit('Missing or malformed TypeSafe key. No billable requests sent.')
     out = ROOT/'runs'/('bench-' + time.strftime('%Y%m%d-%H%M%S'))
     print(f'Running {runs} billable trials with {cli} ({version}); stop at ${args.run_budget:.2f} known spend; '
           f'results: {out}', flush=True)
     summary = run_bench(tasks, arms, args.trials, args.seed, out, cli, key, 'https://api.anthropic.com', table,
                         client_version=version, shape=args.shape, gap=args.gap, run_budget=args.run_budget,
-                        expected=expected, max_turns=args.max_turns, budget_usd=args.budget)
+                        expected=expected, jev_key=jev_key, max_turns=args.max_turns, budget_usd=args.budget)
     print(json.dumps(summary, indent=2))
 
 
