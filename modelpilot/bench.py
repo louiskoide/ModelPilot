@@ -382,7 +382,7 @@ class Trial:
         (self.dir/'agent.diff').write_bytes(subprocess.run(['git', 'diff', '--binary', 'HEAD'], cwd=self.work,
                                                            capture_output=True).stdout)
         changed = subprocess.run(['git', 'diff', '--name-only', 'HEAD'], cwd=self.work, capture_output=True,
-                                 text=True).stdout.split()
+                                 text=True).stdout.splitlines()
         self.record['test_config_changed'] = test_config_changes(changed, self.task['test_dir'])
         graded = bench_tasks.grade(self.task, self.work, self.repo, self.python, self.dir/'grade',
                                    expected_hidden_passed=self.expected)
