@@ -1,4 +1,6 @@
+import http.client
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -7,10 +9,12 @@ import threading
 import time
 import unittest
 from modelpilot.fixtures import fixture_server
+from modelpilot.jev_route_check import DECISION, load_decisions
 from modelpilot.proxy import ProxyServer
 
 ROOT = Path(__file__).resolve().parents[1]
 JEV = ROOT/'work/jev-router-compat'
+LAUNCHER = ROOT/'modelpilot/jev_accounted_launch.mjs'
 RATES = json.loads((ROOT/'configs/jev-rates.json').read_text())['rates'] if (ROOT/'configs/jev-rates.json').exists() else {}
 
 
@@ -53,5 +57,72 @@ class AccountedLaunchSelfTest(unittest.TestCase):
         self.assertIsNotNone(messages['cost_usd'])
         self.assertFalse(messages['applied'])
 
+
+
+@unittest.skipUnless(shutil.which('node') and (JEV/'src/proxy.mjs').exists(), 'needs node and work/jev-router-compat')
+class ServeModeTests(unittest.TestCase):
+    """--serve: Jev's real proxy for a whole trial, in front of ModelPilot's proxy; the harness starts Claude Code."""
+    setUp = AccountedLaunchSelfTest.setUp
+    tearDown = AccountedLaunchSelfTest.tearDown
+
+    def serve(self, *extra, key=None):
+        self.home = Path(self.tmp.name)
+        env = {'PATH': os.environ['PATH'], 'HOME': str(self.home), 'TMPDIR': str(self.home), 'JEV_DEBUG': '1'}
+        if key:
+            env['JEV_API_KEY'] = key
+        return subprocess.Popen(['node', str(LAUNCHER), '--serve', str(JEV), f'http://127.0.0.1:{self.proxy.server_port}', *extra],
+                                env=env, cwd=JEV, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def send(self, port, method, path, body=None):
+        conn = http.client.HTTPConnection('127.0.0.1', port, timeout=10)
+        conn.request(method, path, json.dumps(body) if body else None,
+                     {'Content-Type': 'application/json', 'x-api-key': 'sk-ant-offline', 'anthropic-version': '2023-06-01'})
+        response = conn.getresponse()
+        response.read()
+        conn.close()
+        return response.status
+
+    def test_serve_prints_the_client_environment_and_routes_until_stdin_closes(self):
+        proc = self.serve('--stub-route', 'claude-sonnet-5')
+        try:
+            info = json.loads(proc.stdout.readline())
+            self.assertEqual(info['env']['ANTHROPIC_BASE_URL'], f"http://127.0.0.1:{info['port']}")
+            self.assertEqual(info['env']['ANTHROPIC_MODEL'], 'jev-router')
+            self.assertEqual(info['env']['CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY'], '1')
+            self.assertEqual((info['add_dir'], info['router']), (str(JEV.resolve()), 'stub'))
+            self.assertEqual(self.send(info['port'], 'GET', '/v1/models?limit=100'), 200)
+            turn = {'model': 'jev-router', 'max_tokens': 8, 'tools': [{'name': 'Read', 'input_schema': {'type': 'object'}}],
+                    'messages': [{'role': 'user', 'content': 'Fix the bug'}, {'role': 'system', 'content': '# Environment'}]}
+            self.assertEqual(self.send(info['port'], 'POST', '/v1/messages', turn), 200)
+        finally:
+            proc.stdin.close()
+            self.assertEqual(proc.wait(timeout=10), 0)  # a closed stdin (the harness gone) ends the router
+        stderr = proc.stderr.read().decode()
+        proc.stdout.close()
+        proc.stderr.close()
+        self.assertTrue(DECISION.findall(stderr), stderr)
+        rows = [json.loads(line) for line in self.log.read_text().splitlines()]
+        messages = [r for r in rows if r['kind'] == 'messages']
+        self.assertEqual([(r['model'], r['http_status']) for r in messages], [('claude-sonnet-5', 200)])
+        decisions = load_decisions(self.home)
+        self.assertEqual(len(decisions), 1)
+        self.assertTrue(decisions[0]['jev']['request']['stub'])
+        self.assertEqual(decisions[0]['jev']['request']['state']['session']['current_model'], 'claude-opus-5')
+
+    def test_serve_refuses_to_run_unrouted_without_a_key(self):
+        proc = self.serve()
+        out, err = proc.communicate(timeout=30)
+        self.assertEqual((proc.returncode, out), (2, b''))
+        self.assertIn(b'refusing', err)
+
+    def test_serve_stops_on_sigterm(self):
+        proc = self.serve(key='ts-offline-not-a-key')
+        try:
+            self.assertIn('port', json.loads(proc.stdout.readline()))
+            proc.terminate()
+            self.assertEqual(proc.wait(timeout=10), 0)
+        finally:
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                stream.close()
 
 if __name__ == '__main__': unittest.main()

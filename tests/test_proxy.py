@@ -151,6 +151,49 @@ class ProxyTests(unittest.TestCase):
         self.assertIsNone(row['cost_usd'])
 
 
+class InFlightTests(unittest.TestCase):
+    """A proxy that outlives a session must say when every request it accepted has been logged."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.log = Path(self.temp.name)/'log.jsonl'
+        self.upstream = fixture_server()
+        self.upstream.script, self.upstream.delay = [{'text': 'done'}], .4
+        self.proxy = ProxyServer(('127.0.0.1', 0), f'http://127.0.0.1:{self.upstream.server_port}', self.log, RATES)
+        self.threads = [threading.Thread(target=s.serve_forever, daemon=True) for s in (self.upstream, self.proxy)]
+        for t in self.threads:
+            t.start()
+
+    def tearDown(self):
+        for s in (self.proxy, self.upstream):
+            s.shutdown()
+            s.server_close()
+        for t in self.threads:
+            t.join()
+        self.temp.cleanup()
+
+    def post(self):
+        request = {'model': 'claude-opus-4-6', 'stream': True, 'max_tokens': 8, 'tools': [{'name': 'Read'}],
+                   'messages': [{'role': 'user', 'content': 'x'}]}
+        conn = http.client.HTTPConnection('127.0.0.1', self.proxy.server_port, timeout=5)
+        conn.request('POST', '/v1/messages', json.dumps(request), {'Content-Type': 'application/json'})
+        conn.getresponse().read()
+        conn.close()
+
+    def test_wait_idle_returns_only_after_the_request_is_logged(self):
+        self.assertTrue(self.proxy.wait_idle(0))
+        client = threading.Thread(target=self.post)
+        client.start()
+        for _ in range(200):
+            if self.proxy.in_flight:
+                break
+            time.sleep(.005)
+        self.assertEqual(self.proxy.in_flight, 1)
+        self.assertFalse(self.proxy.wait_idle(.05))
+        self.assertTrue(self.proxy.wait_idle(5))
+        self.assertEqual(len(self.log.read_text().splitlines()), 1)
+        client.join()
+
+
 class GovernedProxyTests(unittest.TestCase):
     """Dry-run governor wiring: every billable proxy request is reserved and settled under one shared ID."""
     call = ProxyTests.call

@@ -75,20 +75,43 @@ class CacheAttributionTests(unittest.TestCase):
         self.assertIsNone(result['cold_equivalent_cost_usd'])
         self.assertEqual(result['cold_equivalent_unknown'], 'no_cache_write_breakdown')
 
-    def test_an_unpriced_request_leaves_both_costs_unknown(self):
-        rows = [row(0.0, 0, 5000), row(1.0, 0, 0, status=400)]
+    def test_an_unpriced_success_leaves_every_cost_unknown(self):
+        rows = [row(0.0, 0, 5000), dict(row(1.0, 5000, 10), cost_usd=None)]
         result = cache_attribution(rows, RATES)
         self.assertIsNone(result['measured_cost_usd'])
         self.assertIsNone(result['cold_equivalent_cost_usd'])
+        self.assertIsNone(result['cold_equivalent_if_rejected_free_usd'])
         self.assertEqual(result['cold_equivalent_unknown'], 'unpriced_request')
 
+    def test_a_rejected_request_leaves_the_headline_unknown_but_gives_the_sensitivity_figure(self):
+        # Compat Jev on Haiku: the system-role message is rejected, then the resend succeeds.
+        rows = [row(0.0, 0, 5000), row(1.0, 0, 0, status=400), row(2.0, 5000, 10)]
+        result = cache_attribution(rows, RATES)
+        self.assertIsNone(result['measured_cost_usd'])
+        self.assertIsNone(result['cold_equivalent_cost_usd'])
+        self.assertEqual(result['cold_equivalent_unknown'], 'rejected_request')
+        self.assertEqual(result['rejected_requests'], 1)
+        self.assertAlmostEqual(result['cold_equivalent_if_rejected_free_usd'], rows[0]['cost_usd'] + rows[2]['cost_usd'])
 
-def record(task, arm, trial=0, *, passed=True, cost_usd=.1, wall=60.0, stop='success', complete=True):
-    return {'task': task, 'arm': arm, 'trial': trial, 'passed': passed, 'wall_seconds': wall, 'complete': complete,
-            'accounting': {'cost_usd': cost_usd, 'first_byte_seconds': [1.0, 2.0]},
-            'cache': {'cold_equivalent_cost_usd': cost_usd, 'measured_cost_usd': cost_usd,
-                      'cache_start': {'first_read_tokens': 0, 'carried_tokens': 0, 'warm': False}},
-            'sessions': [{'stop': stop}], 'grade': {'reason': 'passed' if passed else 'hidden_tests_failed'}}
+
+def record(task, arm, trial=0, *, passed=True, cost_usd=.1, wall=60.0, stop='success', complete=True,
+           scope='complete', if_free=None, rejected=0, routing=None):
+    if_free = cost_usd if if_free is None else if_free
+    out = {'task': task, 'arm': arm, 'trial': trial, 'passed': passed, 'wall_seconds': wall, 'complete': complete,
+           'accounting': {'cost_usd': cost_usd, 'first_byte_seconds': [1.0, 2.0], 'cost_scope': scope,
+                          'rejected_requests': rejected},
+           'cache': {'cold_equivalent_cost_usd': cost_usd, 'measured_cost_usd': cost_usd,
+                     'cold_equivalent_if_rejected_free_usd': if_free,
+                     'cache_start': {'first_read_tokens': 0, 'carried_tokens': 0, 'warm': False}},
+           'sessions': [{'stop': stop}], 'grade': {'reason': 'passed' if passed else 'hidden_tests_failed'}}
+    if routing is not None:
+        out['routing'] = routing
+    return out
+
+
+def routed(model, decisions=1, usage=({'input_tokens': 893, 'output_tokens': 100},)):
+    return {'routed': True, 'router': 'typesafe', 'decisions': decisions, 'extra_decisions': decisions - 1, 'fail_open': [],
+            'served_models': [model], 'router_usage': list(usage)}
 
 
 class SummaryTests(unittest.TestCase):
@@ -157,6 +180,34 @@ class SummaryTests(unittest.TestCase):
         arm = summarize([record('t0', 'a', passed=False)], ['a'], seed=0, resamples=50)['arms'][0]
         self.assertIsNone(arm['cost_per_pass_usd'])
         self.assertEqual(arm['pass_rate'], 0)
+
+    def test_jev_arms_are_labeled_provider_only_with_routing_and_sensitivity(self):
+        unrouted = {'routed': False, 'router': None, 'decisions': 0, 'extra_decisions': 0, 'fail_open': ['unrouted_sentinel'],
+                    'served_models': ['claude-opus-5'], 'router_usage': []}
+        records = [record('t0', 'jev', cost_usd=None, if_free=.05, rejected=1, scope='provider_only_router_unpriced',
+                          routing=routed('claude-haiku-4-5-20251001', decisions=2)),
+                   record('t1', 'jev', cost_usd=.2, scope='provider_only_router_unpriced', routing=routed('claude-sonnet-5')),
+                   record('t2', 'jev', cost_usd=.3, passed=False, scope='provider_only_router_unpriced', routing=unrouted),
+                   record('t0', 'opus'), record('t1', 'opus'), record('t2', 'opus')]
+        summary = summarize(records, ['jev', 'opus'], seed=0, resamples=50)
+        jev, opus = summary['arms']
+        self.assertEqual((jev['cost_scope'], opus['cost_scope']), ('provider_only_router_unpriced', 'complete'))
+        self.assertAlmostEqual(jev['mean_cost_usd'], .25)  # the rejected trial stays out of the headline
+        self.assertAlmostEqual(jev['mean_cost_if_rejected_free_usd'], .55 / 3)
+        self.assertAlmostEqual(jev['cost_per_pass_if_rejected_free_usd'], .55 / 2)
+        self.assertEqual(jev['rejected_requests'], 1)
+        self.assertEqual(jev['routing'], {'trials': 3, 'routed_trials': 2, 'fail_open_trials': 1,
+                                          'routers': {'typesafe': 2, None: 1}, 'decisions': 3,
+                                          'extra_decisions': 1,
+                                          'served_models': {'claude-haiku-4-5-20251001': 1, 'claude-sonnet-5': 1,
+                                                            'claude-opus-5': 1},
+                                          'router_tokens': {'input_tokens': 1786, 'output_tokens': 200}})
+        self.assertNotIn('routing', opus)
+        pair = summary['paired'][0]
+        self.assertIn('jev', pair['dollar_basis'])
+        self.assertIn('lower bound', pair['dollar_basis'])
+        fixed = summarize([record('t0', 'a'), record('t0', 'b')], ['a', 'b'], seed=0, resamples=20)['paired'][0]
+        self.assertEqual(fixed['dollar_basis'], 'complete')
 
     def test_incomplete_trials_are_counted_not_analysed(self):
         records = [record('t0', 'a'), record('t1', 'a', complete=False, cost_usd=5.0)]
