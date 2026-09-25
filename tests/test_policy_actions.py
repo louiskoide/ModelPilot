@@ -30,7 +30,10 @@ class TransformTests(unittest.TestCase):
             with self.assertRaises(ValueError):transform_request(self.request(),model,effort)
     def test_non_trailing_system_message_is_not_silently_moved(self):
         p=self.request(); p['messages'].append({'role':'user','content':'later'})
-        with self.assertRaises(ValueError):transform_request(p,S,'low')
+        with self.assertRaises(ValueError):transform_request(p,H,None)
+    def test_sonnet_keeps_system_messages_as_the_client_sends_them(self):
+        p=self.request(); p['messages'].append({'role':'user','content':'later'})
+        self.assertEqual(transform_request(p,S,'low')['messages'],p['messages'])
 
 class EscalationTests(unittest.TestCase):
     def setUp(self):

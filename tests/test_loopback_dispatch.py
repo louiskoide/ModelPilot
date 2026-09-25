@@ -10,7 +10,7 @@ class LoopbackTests(unittest.TestCase):
         with LoopbackFixture(mode) as fixture:
             result=FixtureDispatcher(self.gov,base.RATES,fixture).dispatch(self.proposal,'owner',self.request)
             self.assertEqual(fixture.calls,1)
-            self.assertNotIn('system',[m['role'] for m in fixture.last_request['messages']])
+            self.assertEqual(fixture.last_request['messages'],self.request['messages'])  # Sonnet keeps them
             return result
     def test_json_settles(self):self.assertEqual(self.run_mode('json')['status'],'fixture_confirmed')
     def test_fragmented_stream_settles(self):self.assertEqual(self.run_mode('stream')['cost_usd'],.00024)

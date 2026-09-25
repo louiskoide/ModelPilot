@@ -109,6 +109,8 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if script and request.get('tools') and self.path.split('?', 1)[0] == '/v1/messages':
             time.sleep(self.server.delay)
             status, content_type, data = scripted_response(request, script)
+            if request['model'] in self.server.truncate_models and request.get('stream'):
+                data = data[:data.rindex(b'event: message_stop')]  # incomplete: usage never final
         else:
             status, content_type, data = response_for(request)
         self.send_response(status)
@@ -131,12 +133,17 @@ class FixtureHandler(BaseHTTPRequestHandler):
             pass
 
 
+class FixtureServer(ThreadingHTTPServer):
+    """Owned synthetic upstream; policy dispatch accepts only this type (never a live endpoint)."""
+
+
 def fixture_server():
-    server = ThreadingHTTPServer(('127.0.0.1', 0), FixtureHandler)
+    server = FixtureServer(('127.0.0.1', 0), FixtureHandler)
     server.received = []
     server.count = 0
     server.script = None  # set to a scripted_response() step list to drive a real client
     server.delay = 0  # seconds before each scripted reply
+    server.truncate_models = set()  # scripted streams for these models end before message_stop
     server.keep_bodies = False  # tests that must see what reached the model set this
     server.bodies = []
     server.lock = threading.Lock()

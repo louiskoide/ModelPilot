@@ -1,4 +1,8 @@
-"""Loopback Messages API pass-through proxy. Policy decisions are logs only."""
+"""Loopback Messages API pass-through proxy. Policy decisions are logs only.
+
+The one exception is a fixture_dispatch.ProxyPolicy, which applies ladder escalations and is
+only accepted when the upstream is the owned in-process fixture server (tests, never live).
+"""
 import argparse
 import hashlib
 import http.client
@@ -190,7 +194,7 @@ class ProxyServer(ThreadingHTTPServer):
     # server_close must join request handlers before closing their shared accounting log.
     # Client and upstream socket operations already have 120-second timeouts.
     daemon_threads = False
-    def __init__(self, address, upstream, log_path, rates, governor=None):
+    def __init__(self, address, upstream, log_path, rates, governor=None, policy=None):
         parsed = urlsplit(upstream)
         if not ((parsed.scheme == 'https' and parsed.netloc == 'api.anthropic.com') or
                 (parsed.scheme == 'http' and parsed.hostname == '127.0.0.1')):
@@ -201,6 +205,11 @@ class ProxyServer(ThreadingHTTPServer):
         self.rates = rates
         # Dry-run governor: {'db', 'session', 'limit_usd', 'task'}; opened per request (threads).
         self.governor = dict(governor) if governor else None
+        if policy is not None:
+            if not self.governor or self.governor.get('task') is None:
+                raise ValueError('Policy dispatch needs a governor task')
+            policy.check_upstream(parsed)
+        self.policy = policy
         if self.governor:
             gov = self.open_governor()
             try:
@@ -245,6 +254,20 @@ class ProxyServer(ThreadingHTTPServer):
         finally:
             gov.close()
         row['governor_status'] = 'settled'
+
+    def plan_policy(self, request):
+        gov = self.open_governor()
+        try:
+            return self.policy.plan(gov, self.rates, self.governor['task'], request)
+        finally:
+            gov.close()
+
+    def finish_policy(self, ticket, row, observer):
+        gov = self.open_governor()
+        try:
+            return self.policy.finish(gov, self.rates, ticket, row['cost_usd'], observer.model, observer.usage)
+        finally:
+            gov.close()
 
     def record(self, row):
         with self.log_lock:
@@ -355,6 +378,19 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except (ValueError, UnicodeError):
             self.send_error(400)
             return
+        governed = self.server.governor is not None and path.path == '/v1/messages'  # count_tokens is free
+        ticket, policy_row, client_sha = None, None, hashlib.sha256(raw).hexdigest()
+        if governed and self.server.policy is not None:
+            try:
+                outcome = self.server.plan_policy(request)
+            except Exception as e:
+                outcome = {'status': 'deferred', 'reason': 'policy_error:' + type(e).__name__}
+            if outcome['status'] == 'admitted':
+                ticket, request = outcome, outcome['request']
+                raw = json.dumps(request).encode()
+                policy_row = {'kind': ticket['kind'], 'status': 'reserved'}
+            else:
+                policy_row = {k: outcome[k] for k in ('status', 'reason') if k in outcome}
         headers = clean_headers(self.headers)
         headers['Content-Length'] = str(len(raw))
         # Negotiate identity so usage inspection does not depend on client compression support.
@@ -363,14 +399,19 @@ class ProxyHandler(BaseHTTPRequestHandler):
         conn = self.upstream_connection()
         start = time.monotonic()
         tools = request.get('tools')
-        row = {'started_unix': time.time(), 'kind': 'messages', 'mode': 'dry-run', 'applied': False,
+        row = {'started_unix': time.time(), 'kind': 'messages', 'mode': 'dry-run' if ticket is None else 'fixture-policy',
+               'applied': ticket is not None,
                'tool_count': len(tools) if isinstance(tools, list) else 0,
                'request_sha256': hashlib.sha256(raw).hexdigest(),
                'model': request.get('model') if request.get('model') in self.server.rates else 'unknown',
                'effort': request_effort(request), 'stream': bool(request.get('stream')), 'http_status': None,
                'status': 'transport_error', 'cost_usd': None}
-        governed = self.server.governor is not None and path.path == '/v1/messages'  # count_tokens is free
-        if governed:
+        if policy_row is not None:
+            row['policy'] = policy_row
+        if ticket is not None:
+            row.update(client_request_sha256=client_sha, governor_request_id=ticket['request_id'],
+                       governor_status='reserved')
+        elif governed:
             try:
                 self.server.admit(row, raw, request)
             except Exception as e:
@@ -423,7 +464,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
             conn.close()
             self.close_connection = True
             row['wall_seconds'] = time.monotonic()-start
-            if governed and row.get('governor_status') == 'reserved':
+            if ticket is not None:
+                try:
+                    result = self.server.finish_policy(ticket, row, observer)
+                    row['governor_status'] = 'settled'
+                    row['policy'].update(status=result['status'])
+                except Exception as e:
+                    row.update(governor_status='settle_failed', governor_error=type(e).__name__)
+            elif governed and row.get('governor_status') == 'reserved':
                 try:
                     self.server.settle(row)
                 except Exception as e:
