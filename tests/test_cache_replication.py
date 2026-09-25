@@ -12,9 +12,31 @@ class ReplicationTests(unittest.TestCase):
                     self.assertNotIn('thinking', p)
         self.assertEqual(len([g for g in groups if g['name'].startswith('ttl/')]), 27)
 
+    def test_opus_5_5_suite_tests_returns_to_opus(self):
+        groups = r.plan('test', 'opus-5-5')
+        self.assertEqual(sum(len(g['steps']) for g in groups), 141)
+        for g in groups:
+            models = [p['model'] for _, _, p in g['steps']]
+            self.assertEqual(models[0], r.OPUS_5_5)
+            if g['name'].startswith('model/'):
+                self.assertEqual(models[-1], r.OPUS_5_5)
+            for _, _, p in g['steps']:
+                # Opus 5.5 rejects disabled thinking; the suite omits the parameter.
+                self.assertNotIn('thinking', p)
+                self.assertIn(p['model'], r.RATES)
+        self.assertEqual({g['name'].split('/')[3] for g in groups if g['name'].startswith('model/')},
+                         set(r.MODELS))
+
+    def test_opus_5_5_rates_use_its_read_multiplier(self):
+        self.assertEqual(r.RATES[r.OPUS_5_5], dict(input=4, output=20, write_5m=5, write_1h=8, read=.2))
+
+    def test_unknown_suite_is_refused(self):
+        with self.assertRaises(ValueError):
+            r.plan('test', 'nope')
+
     def test_independent_groups_have_distinct_prefixes(self):
         prefixes = []
-        for g in r.plan('test'):
+        for g in r.plan('test') + r.plan('test', 'opus-5-5'):
             p = g['steps'][0][2]
             block = p.get('system', p['messages'][0]['content'])[0]
             prefixes.append(block['text'])

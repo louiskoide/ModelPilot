@@ -1,4 +1,7 @@
-"""Three-model M0 replication. Planning is free; --live prompts for a local key."""
+"""M0 replication on current models. Planning is free; --live prompts for a local key.
+
+Suites: three-model (Haiku 4.5, Sonnet 5, Opus 5; run September 24) and opus-5-5.
+"""
 import argparse
 import getpass
 import heapq
@@ -12,23 +15,47 @@ import uuid
 from . import cache_probe as probe
 
 ROOT = Path(__file__).resolve().parents[1]
-MODELS = ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5']
+HAIKU, OPUS_5_5 = 'claude-haiku-4-5-20251001', 'claude-opus-5-5'
+MODELS = [HAIKU, 'claude-sonnet-5', 'claude-opus-5']
 RATES = {m: dict(input=i, output=o, write_5m=i*1.25, write_1h=i*2, read=i*.1)
          for m, i, o in zip(MODELS, [1, 2, 5], [5, 10, 25])}
+# Opus 5.5 reads are 0.05x input, not 0.1x; writes use the standard multipliers (derived; confirm at launch).
+RATES[OPUS_5_5] = dict(input=4, output=20, write_5m=5, write_1h=8, read=.2)
 SOURCE = 'https://platform.claude.com/docs/en/build-with-claude/prompt-caching'
+SUITES = ('three-model', 'opus-5-5')
 
 
-def plan(run_id):
+def plan(run_id, suite='three-model'):
+    if suite not in SUITES:
+        raise ValueError(f'Unknown suite {suite!r}')
     groups = []
     def add(name, steps, layer):
         requests = []
         for label, delay, model, effort in steps:
             p = probe.payload({'prefix_lines': 260, 'max_tokens': 32}, run_id+'/'+name,
                               model, effort, layer=layer)
-            if model == MODELS[0]:
+            if model == HAIKU:
                 p.pop('output_config')
             requests.append((label, delay, p))
         groups.append(dict(name=name, steps=requests))
+    if suite == 'opus-5-5':
+        # Opus 5.5 is always "a", so every model group tests a return to Opus, which the
+        # three-model order never did. `thinking` is omitted, as in the three-model suite.
+        for repeat in range(3):
+            for layer in ('system', 'messages'):
+                add(f'effort/{repeat}/{OPUS_5_5}/{layer}',
+                    [(label, 0, OPUS_5_5, effort) for label, effort in
+                     [('cold','low'), ('warm','low'), ('changed','high'),
+                      ('changed_warm','high'), ('return','low')]], layer)
+                for b in MODELS:
+                    add(f'model/{repeat}/{OPUS_5_5}/{b}/{layer}',
+                        [(label, 0, model, 'low') for label, model in
+                         [('a_cold',OPUS_5_5), ('a_warm',OPUS_5_5), ('b_cold',b), ('b_warm',b),
+                          ('a_return',OPUS_5_5)]], layer)
+            for kind, gaps in [('before',[0,240]), ('after',[0,330]), ('refresh',[0,180,180])]:
+                add(f'ttl/{repeat}/{OPUS_5_5}/{kind}',
+                    [(f'touch_{i}', gap, OPUS_5_5, 'low') for i, gap in enumerate(gaps)], 'messages')
+        return groups
     for repeat in range(3):
         for layer in ('system', 'messages'):
             for model in MODELS[1:]:
@@ -126,20 +153,26 @@ def execute(groups, out, budget, transport=probe.send):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--live', action='store_true')
+    parser.add_argument('--suite', choices=SUITES, default='three-model')
     parser.add_argument('--budget', type=float, default=5)
     parser.add_argument('--out', type=Path)
     args = parser.parse_args()
     budget = Budget(args.budget)
     rid = str(uuid.uuid4())
-    groups = plan(rid)
-    out = args.out or ROOT/'runs'/('m0-replication-'+time.strftime('%Y%m%d-%H%M%S'))
+    groups = plan(rid, args.suite)
+    calls = sum(len(g['steps']) for g in groups)
+    prefix = 'm0-replication-' + ('' if args.suite == 'three-model' else args.suite + '-')
+    out = args.out or ROOT/'runs'/(prefix+time.strftime('%Y%m%d-%H%M%S'))
     out.mkdir(parents=True, exist_ok=False)
-    manifest = dict(run_id=rid, live=args.live, calls=213, budget_usd=args.budget, rates=RATES,
-                    pricing_source=SOURCE, pricing_checked='2026-09-24', groups=groups,
-                    thinking='Disabled for all models to isolate effort; Haiku has no effort parameter.',
+    manifest = dict(run_id=rid, suite=args.suite, live=args.live, calls=calls, budget_usd=args.budget,
+                    rates=RATES, pricing_source=SOURCE, pricing_checked='2026-09-24', groups=groups,
+                    thinking='The thinking parameter is omitted: Sonnet 5, Opus 5 and Opus 5.5 then run '
+                             'adaptive thinking by default (Opus 5.5 cannot disable it); Haiku runs '
+                             'without thinking and has no effort parameter.',
                     timing='Independent prefixes interleaved; TTL gaps from request start, actual gaps logged.')
     (out/'plan.json').write_text(json.dumps(manifest, indent=2)+'\n')
-    print(f'Plan: 213 requests, three repeats, ${args.budget:g} admission budget; results: {out}', flush=True)
+    print(f'Plan ({args.suite}): {calls} requests, three repeats, ${args.budget:g} admission budget; '
+          f'results: {out}', flush=True)
     if not args.live:
         print('Dry-run only. Add --live to send paid requests. Allow roughly 10–20 minutes.')
         return
