@@ -13,7 +13,13 @@ Minimize **API dollars per passed task**, at the same per-task limits as the oth
 - verifier and fallback calls;
 - rejected requests.
 
-## What M0 tells the policy
+## September 24 replication update
+
+The three-model direct-API replication completed: 213 calls, $3.2075768, 611.547 seconds. See [measured results](m0-replication-results.md). Effort changes wrote 12/12; model changes wrote 18/18; effort returns hit 10/12 and tested model returns hit 18/18. Opus also missed warm controls and a 240-second read. The model-return order does not test returning to Opus, and adaptive thinking was disabled.
+
+This supersedes deterministic warm-target assumptions below: prior use within 300 seconds is only evidence of possible reuse. Until hit probability is calibrated, R3's warm-target condition alone is insufficient to justify switching; compare conservative costs assuming a target write and reserve for that write. The cache-state model must represent uncertain warmth and reconcile from returned usage. Keep R3 cold/forecast gates, with conservative cost admission. Do not infer guaranteed five-minute retention from the nominal TTL.
+
+## What the original M0 tells the policy
 
 - A model **or** effort change writes a new cache prefix: 12/12 effort switches and 3/3 model switches. A write costs 1.25× input, and a warm read costs 0.1× input.
 - Returning to a model/effort whose cache is still warm reuses it. The cache lives for about 5 minutes after its last use, and each use extends it.
