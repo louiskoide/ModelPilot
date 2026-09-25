@@ -65,6 +65,7 @@ The project is a tested set of components and bounded harnesses, not an operatio
 | m6-baselines-20260922-104333 | all 16 pass; $0.009834; 38.8418 s |
 | governed-session-20260922-214046 | **failed**: 3 requests, $0.0401259; accounting exact (governor = proxy = client, tokens match), stale_task fencing seen, correction delivered and acknowledged, but Sonnet rejected it as prompt injection and answered the original task |
 | bench-20260923-070044 | 3c pilot **passed**: 2 tasks × fixed Sonnet 5/Opus 5, 4/4 graded passes, $0.626 total, proxy = client tokens and dollars in every trial; Sonnet used about 2× the requests and 3–6× the cache reads, so it was only 8–15% cheaper per task (not evidence) |
+| m0-replication-opus-5-5-20260924-214653 | 141 requests; $1.96549795; 552.868 s; Opus 5.5 effort changes read the existing cache 6/6 (no thinking produced; unconfirmed); returns to Opus 5.5 hit 18/18; TTL 240 s hit, 330 s rewrite, refresh hit |
 | governed-session-20260922-222741 | **passed** with the user-declared coded channel: 3 requests, $0.0386484; correction delivered and obeyed (corrected token only), governor = proxy = client cost, tokens match, no unknown cost, nothing applied |
 
 M6 per-arm results: Opus low $0.001870/8.75s; Opus high $0.004745/15.72s; Sonnet low $0.001122/7.37s; Sonnet high $0.002097/6.97s. Each passed four tiny tasks. Sonnet low was cheapest in this sample; no statistically reliable latency or real-work ranking.
@@ -109,7 +110,7 @@ Jev credential check (`python3 -m modelpilot.jev_check --live`) has passed. Keys
 
 ## M0 replication completed September 24
 
-See `docs/m0-replication-results.md`: 213/213 requests completed, $3.2075768 calculated API cost, 611.547 seconds. Opus had early cache misses; prior use within 300 seconds is not guaranteed reuse. The policy update requires conservative write-cost admission. Adaptive-thinking sessions and returns to Opus after a model switch remain untested. Next work is the offline benchmark adapters, not an automatic paid rerun.
+See `docs/m0-replication-results.md`: 213/213 requests completed, $3.2075768 calculated API cost, 611.547 seconds. Opus had early cache misses; prior use within 300 seconds is not guaranteed reuse. The policy update requires conservative write-cost admission. Adaptive-thinking sessions and returns to Opus after a model switch remain untested. Next work is the offline benchmark adapters, not an automatic paid rerun. Opus 5.5 run (`--suite opus-5-5`, `runs/m0-replication-opus-5-5-20260924-214653`): 141/141 requests, $1.96549795, 552.868 s. Returns to Opus 5.5 after another model hit 18/18, and there were no early misses. Effort changes read the existing cache 6/6 instead of writing, contrary to every earlier model and the API reference. No request produced thinking, so treat this as unconfirmed and keep reserving effort changes as writes.
 
 ## Experimental Jev benchmark adapter
 
