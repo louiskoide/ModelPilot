@@ -113,7 +113,7 @@ class Governor:
     def policy(self):
         return self.recover()['policy']
 
-    def admit(self, request_id, estimate, task=None, revision=None, ttl=600, enforce=True):
+    def admit(self, request_id, estimate, task=None, revision=None, ttl=600, enforce=True, fence=None):
         """Reserve before dispatch. Work for a stale or terminal task revision is refused.
 
         enforce=False is for observers that forward regardless (the dry-run proxy): the
@@ -130,6 +130,8 @@ class Governor:
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
             self._recover()
+            if fence is not None:
+                fence()  # Host-only validation under the same write lock as budget reservation.
             if self.db.execute('SELECT 1 FROM gov_reservations WHERE session=? AND request_id=?',
                                (self.session, request_id)).fetchone():
                 raise ValueError('Duplicate request ID')

@@ -187,7 +187,9 @@ def forecast(request, usage, rates):
 
 
 class ProxyServer(ThreadingHTTPServer):
-    daemon_threads = True
+    # server_close must join request handlers before closing their shared accounting log.
+    # Client and upstream socket operations already have 120-second timeouts.
+    daemon_threads = False
     def __init__(self, address, upstream, log_path, rates, governor=None):
         parsed = urlsplit(upstream)
         if not ((parsed.scheme == 'https' and parsed.netloc == 'api.anthropic.com') or

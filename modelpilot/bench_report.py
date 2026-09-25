@@ -69,6 +69,8 @@ def cache_attribution(rows, rates):
 
 
 def cold_cost(record):
+    if (record.get('accounting') or {}).get('cost_complete') is False:
+        return None  # Provider-only cache repricing cannot establish total routed cost.
     return (record.get('cache') or {}).get('cold_equivalent_cost_usd')
 
 
@@ -185,11 +187,15 @@ def summarize(records, arms, seed=0, resamples=10000):
     Arms are paired on the tasks both ran. An interval covering 0, or fewer than MIN_TASKS
     paired tasks, shows no difference.
     """
+    excluded = [r for r in records if (r.get('routing') or {}).get('benchmark_eligible') is False]
+    records = [r for r in records if (r.get('routing') or {}).get('benchmark_eligible') is not False]
     rng = random.Random(seed)
     complete = {arm: [r for r in records if r['arm'] == arm and r.get('complete', True)] for arm in arms}
     incomplete = {arm: [r for r in records if r['arm'] == arm and not r.get('complete', True)] for arm in arms}
     by_arm = {arm: cells(complete[arm]) for arm in arms}
-    return {'arms': [arm_summary(arm, complete[arm], incomplete[arm], by_arm[arm], rng, resamples) for arm in arms],
+    return {'excluded_ineligible_trials': [{'task': r['task'], 'arm': r['arm'],
+                'reason': 'adapter_not_benchmark_eligible', 'cost_usd': (r.get('accounting') or {}).get('cost_usd')} for r in excluded],
+            'arms': [arm_summary(arm, complete[arm], incomplete[arm], by_arm[arm], rng, resamples) for arm in arms],
             'paired': [pair_summary(a, b, by_arm[a], by_arm[b], rng, resamples)
                        for i, a in enumerate(arms) for b in arms[i + 1:]],
             'bootstrap': {'seed': seed, 'resamples': resamples, 'unit': 'task', 'interval': '95% percentile'},

@@ -255,12 +255,17 @@ class Trial:
     """
     def __init__(self, task, arm_id, trial_dir, cli, key, upstream, price_table, *, trial=0, python=None,
                  max_turns=30, budget_usd=1.0, timeout=900, grace=10, shape='single', gap=0,
-                 expected_hidden_passed=None, client_version=None):
+                 expected_hidden_passed=None, client_version=None, adapter=None):
         arm = ARMS[arm_id]
-        if arm['kind'] not in RUNNABLE:
+        if arm['kind'] not in RUNNABLE and adapter is None:
             raise NotImplementedError(f'{arm_id}: launcher not implemented yet (CLAUDE.md work item 4)')
         if shape not in SHAPES:
             raise ValueError(f'unknown shape {shape}')
+        if adapter is not None and adapter.arm_id != arm_id:
+            raise ValueError('Adapter does not match requested arm')
+        self.adapter = adapter
+        if adapter is not None:
+            arm = dict(arm, model=adapter.model)
         self.task, self.arm = task, arm
         self.dir = Path(trial_dir)
         self.cli, self.api_key, self.upstream, self.rates = cli, key, upstream, price_table
@@ -304,6 +309,8 @@ class Trial:
         return due
 
     def setup(self):
+        if self.adapter:
+            self.adapter.verify()
         self.started = True
         self.dir.mkdir(mode=0o700, parents=True)
         self.repo = task_repo(self.task)
@@ -320,10 +327,13 @@ class Trial:
             env['PYTHONPATH'] = os.pathsep.join(paths)
         self.env = env
         self.record['python'] = python_version(self.python)
+        if self.adapter and hasattr(self.adapter, 'setup'):
+            self.adapter.setup(self)
 
     def run_session(self, index):
         first_row = len(read_rows(self.log))
-        proxy = ProxyServer(('127.0.0.1', 0), self.upstream, self.log, self.rates)
+        options = self.adapter.proxy_options() if self.adapter and hasattr(self.adapter, 'proxy_options') else {}
+        proxy = ProxyServer(('127.0.0.1', 0), self.upstream, self.log, self.rates, **options)
         thread = threading.Thread(target=proxy.serve_forever, daemon=True)
         thread.start()
         env = dict(self.env, ANTHROPIC_BASE_URL=f'http://127.0.0.1:{proxy.server_port}')
@@ -331,6 +341,9 @@ class Trial:
         session = ['--session-id', self.session_id] if index == 0 else ['--resume', self.session_id]
         command = client_command(self.cli, self.prompts[index], self.arm['model'], self.limits['max_turns'],
                                  self.limits['budget_usd'], session)
+        if self.adapter:
+            command = self.adapter.command(command, env['ANTHROPIC_BASE_URL'])
+            env = self.adapter.environment(env)
         started_unix, started = time.time(), time.monotonic()
         try:
             result = run_client(command, env, self.work, self.limits['timeout_s'], grace=self.grace, reap_dir=self.dir)
@@ -341,7 +354,7 @@ class Trial:
             proxy.server_close()
         for name, suffix in (('stdout', 'jsonl'), ('stderr', 'txt')):
             with (self.dir/f'client.{name}.{suffix}').open('a') as f:
-                f.write(redact(result[name], self.api_key))
+                f.write(redact(redact(result[name], self.adapter.key) if self.adapter else result[name], self.api_key))
         final = next((e for e in reversed(parse_events(result['stdout'])) if e.get('type') == 'result'), {})
         if final:
             self.final = final  # a resumed session's totals are cumulative for the whole session
@@ -370,7 +383,9 @@ class Trial:
             wall_seconds=round(sum(s['wall_seconds'] for s in self.sessions), 3),
             client={'subtype': self.final.get('subtype'), 'is_error': self.final.get('is_error'),
                     'num_turns': self.final.get('num_turns'), 'stop': last.get('stop')},
-            accounting=accounting(rows, self.final), cache=bench_report.cache_attribution(rows, self.rates))
+            accounting=self.adapter.accounting(rows, self.final) if self.adapter else accounting(rows, self.final), cache=bench_report.cache_attribution(rows, self.rates))
+        if self.adapter and (self.dir/'tmp').exists():
+            self.record['routing'] = self.adapter.evidence(self.dir)
         (self.dir/'trial.json').write_text(json.dumps(self.record, indent=2) + '\n')
 
     def finish(self, stopped=None):

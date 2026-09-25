@@ -85,7 +85,17 @@ function resolveClaude() {
   }
   return null;
 }
-const claude = resolveClaude();
+const binaryIndex = argv.indexOf('--claude-bin');
+const explicitClaude = binaryIndex >= 0 ? argv[binaryIndex + 1] : null;
+if (binaryIndex >= 0 && (!explicitClaude || binaryIndex >= sep || !explicitClaude.startsWith('/'))) {
+  process.stderr.write('[accounted] --claude-bin requires an absolute executable path before --\n');
+  process.exit(2);
+}
+if (explicitClaude) {
+  try { accessSync(explicitClaude, constants.X_OK); }
+  catch { process.stderr.write('[accounted] explicit Claude binary is unavailable\n'); process.exit(2); }
+}
+const claude = explicitClaude || resolveClaude();
 if (!claude) {
   process.stderr.write('[accounted] claude is not on PATH\n');
   process.exit(1);

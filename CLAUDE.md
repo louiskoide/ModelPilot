@@ -106,3 +106,21 @@ Paid entry points (inspect each plan first): `modelpilot.cache_probe`, `modelpil
 5. Update docs with measured evidence; report incomplete gates explicitly. M6 is not complete until these comparisons actually run.
 
 Jev credential check (`python3 -m modelpilot.jev_check --live`) has passed. Keys are entered by the user in their own Terminal at hidden prompts; never ask for them in chat. A TypeSafe key was exposed in a screenshot on September 22, 2026 and must be treated as revoked. See setup guide for all preflight runs.
+
+## M0 replication completed September 24
+
+See `docs/m0-replication-results.md`: 213/213 requests completed, $3.2075768 calculated API cost, 611.547 seconds. Opus had early cache misses; prior use within 300 seconds is not guaranteed reuse. The policy update requires conservative write-cost admission. Adaptive-thinking sessions and returns to Opus after a model switch remain untested. Next work is the offline benchmark adapters, not an automatic paid rerun.
+
+## Experimental Jev benchmark adapter
+
+See `docs/bench-adapters.md`. `bench.Trial` now accepts an explicit adapter, and `JevAdapter` supplies stock/compat launcher, environment, evidence and unknown-total-cost handling. Eight adapter tests pass, including Node exact-binary selection and a real-Claude trial with a stub router. Actual Jev routing integration and router pricing are still gates; paid benchmark CLI arms remain disabled. The ModelPilot adapter is not implemented yet.
+
+Pinned Jev proxy integration now passes offline: 5 checks, plus 65 stock and 66 compat upstream tests. Compat preserves its selected model through a tool continuation; stock silent-default and null-router fallback are explicitly distinguished. Token/provider-cost reconciliation is exact against scripted responses; router cost remains unknown. See `docs/bench-adapters.md`. Separate-process Claude resume and actual TypeSafe scoring are not covered by these new fixtures.
+
+ModelPilot observation adapter is now implemented in `modelpilot/modelpilot_adapter.py`: Trial ledger/proxy/hooks integration, independent conservative switch-cost helper, and explicit active-mode refusal. Observer trials are excluded from benchmark comparisons. Offline checks passed (41 integration/regression tests, then 22 policy/report checks); no paid traffic. Actual policy actions and capability transformations remain unimplemented. See `docs/bench-adapters.md` for exact scope and next gates.
+
+Offline action preparation now exists in `modelpilot/policy_actions.py`: request-copy capability transforms, thinking-history refusal, ledger-fenced one-rung proposals and pessimistic cost preparation. Observer records include proposals. 56 relevant tests pass. Nothing forwards transformed requests or advances the ladder yet; next is a fixture-only atomic dispatcher with settlement/replay tests. See `docs/bench-adapters.md` for limitations.
+
+Fixture-only dispatcher added in `modelpilot/fixture_dispatch.py`: atomic host fencing + reservation, deterministic one-attempt-per-window identity, synthetic settlement, stale-result refusal and confirmation. It only accepts an in-process StrictFixture and must use isolated test ledgers; it is not wired to active benchmark traffic. `Governor.admit` supports an optional host fence inside its transaction. Next gate is strict loopback HTTP/streaming/cancellation integration, not paid execution.
+
+Owned loopback HTTP dispatcher now covers JSON, fragmented SSE, cancellation, truncation and provider errors without any external endpoint. A failing-first test reproduced the proxy log-close race; ProxyServer now joins active handlers before closing the accounting log (existing socket timeouts bound individual stalled operations). See `docs/bench-adapters.md`. No active paid-policy execution is enabled.
