@@ -1,11 +1,14 @@
-"""Observe-only ModelPilot benchmark plumbing and conservative switch-cost proposals.
+"""ModelPilot benchmark plumbing and conservative switch-cost proposals.
 
-This is not the active ModelPilot policy and is ineligible for savings comparisons.
+Observe-only by default. tools=True adds the R5 tools (bench_tools MCP server). A
+fixture_policy (the owned fixtures.FixtureServer) applies ladder escalations offline. None of
+this is the active ModelPilot policy, and every trial stays ineligible for savings comparisons.
 """
 import hashlib
 import json
 import math
 from pathlib import Path
+import sys
 from .governor import Governor
 from .governed_session import hook_settings, OWNER
 from .hooks import channel_declaration
@@ -47,17 +50,28 @@ def switch_decision(source, target, prefix_tokens, output_tokens, horizon, avail
     return result
 
 
+TOOLS_NOTE=('ModelPilot tools: run the test suite with mcp__modelpilot__run_tests and search the repository with '
+            'mcp__modelpilot__search. Long output comes back as an excerpt plus a handle; page more with '
+            'mcp__modelpilot__expand_output only when you need it.')
+
+
 class ModelPilotAdapter:
     arm_id='modelpilot'
     model='claude-sonnet-5'
     key=''
 
-    def __init__(self,limit_usd=1.,mode='dry-run'):
+    def __init__(self,limit_usd=1.,mode='dry-run',tools=False,threshold=8192,fixture_policy=None):
         if mode!='dry-run':
             raise ValueError('Active ModelPilot benchmark policy is not validated')
         if not math.isfinite(limit_usd) or limit_usd<=0:
             raise ValueError('Positive finite budget required')
-        self.limit=limit_usd
+        if isinstance(threshold,bool) or not isinstance(threshold,int) or threshold<256:
+            raise ValueError('Excerpt threshold must be an integer of at least 256 bytes')
+        self.policy=None
+        if fixture_policy is not None:
+            from .fixture_dispatch import ProxyPolicy
+            self.policy=ProxyPolicy(fixture_policy,self.model,OWNER)  # refuses anything but the fixture
+        self.limit,self.tools,self.threshold=limit_usd,tools,threshold
         self.binding={}
 
     def verify(self):
@@ -77,17 +91,35 @@ class ModelPilotAdapter:
             gov.close()
         self.settings=trial.dir/'modelpilot-settings.json'
         self.settings.write_text(json.dumps(hook_settings(self.python),indent=2)+'\n')
+        if self.tools:
+            from .bench_tools import mcp_config
+            spec=trial.dir/'modelpilot-tools-task.json'
+            spec.write_text(json.dumps({k:trial.task.get(k) for k in ('suite_command','pythonpath')})+'\n')
+            self.mcp=trial.dir/'modelpilot-mcp.json'
+            self.mcp.write_text(json.dumps(mcp_config(sys.executable,self.db,self.session,self.limit,self.task,trial.work,
+                                                      spec,trial.python,trial.dir/'home',trial.dir/'tmp',
+                                                      self.threshold),indent=2)+'\n')
         self.binding={'MODELPILOT_DB':str(self.db),'MODELPILOT_SESSION':self.session,
                       'MODELPILOT_LIMIT_USD':str(self.limit),'MODELPILOT_TASK':self.task,
                       'MODELPILOT_OWNER':OWNER,'MODELPILOT_HOOK_ERRORS':str(trial.dir/'hook-errors.jsonl')}
 
     def proxy_options(self):
-        return {'governor':{'db':self.db,'session':self.session,'limit_usd':self.limit,'task':self.task}}
+        options={'governor':{'db':self.db,'session':self.session,'limit_usd':self.limit,'task':self.task}}
+        if self.policy is not None:
+            options['policy']=self.policy
+        return options
 
     def command(self,command,proxy_url):
         result=list(command)
         i=result.index('-p')+1
-        result[i]=channel_declaration(self.task,self.code)+'\n\n'+result[i]
+        prompt=channel_declaration(self.task,self.code)+'\n\n'
+        if self.tools:
+            from .bench_tools import TOOL_NAMES
+            prompt+=TOOLS_NOTE+'\n\n'
+            result[result.index('--mcp-config')+1]=str(self.mcp)
+            j=result.index('--allowedTools')+1
+            result[j]=','.join([result[j]]+TOOL_NAMES)
+        result[i]=prompt+result[i]
         return result+['--effort','medium','--settings',str(self.settings)]
 
     def environment(self,env):
@@ -106,6 +138,10 @@ class ModelPilotAdapter:
         try:
             policy=gov.policy()
             hooks=gov.journal('hook_event')
+            tool_calls=[e['payload'] for e in gov.journal('bench_tool')]
+            escalations=[{k:e['payload'].get(k) for k in ('action','status','target_model','target_effort')}
+                         for e in gov.journal('fixture_dispatch')]
+            kept=len(gov.journal('fixture_keep_escalated'))
             from .policy_actions import escalation_proposal
             try:
                 row=gov.state.get(self.task)
@@ -120,7 +156,11 @@ class ModelPilotAdapter:
         settled=all(r.get('governor_status')=='settled' for r in messages)
         known=sum(r.get('cost_usd') or 0 for r in messages)
         policy_file=Path(__file__).resolve().parents[1]/'docs/m6-modelpilot-policy.md'
-        return {'mode':'dry-run','applied':False,'active_policy_implemented':False,'benchmark_eligible':False,
+        return {'mode':'dry-run' if self.policy is None else 'fixture-policy',
+                'applied':any(r.get('applied') for r in messages),
+                'active_policy_implemented':False,'benchmark_eligible':False,
+                'tools':{'enabled':self.tools,'threshold_bytes':self.threshold,'calls':tool_calls},
+                'fixture_policy':{'escalations':escalations,'kept_requests':kept} if self.policy else None,
                 'policy_sha256':hashlib.sha256(policy_file.read_bytes()).hexdigest(),
                 'governor':policy,'escalation_proposal':proposal,'hook_events':len(hooks),'all_requests_settled':bool(messages) and settled,
                 'accounting_matches':bool(messages) and settled and policy['cost_complete'] and

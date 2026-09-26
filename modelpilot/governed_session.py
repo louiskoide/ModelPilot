@@ -68,7 +68,8 @@ def correct_after_first_tool(db, session, limit, task, correction, done, record)
 
 def run_session(run, cli, key, upstream, rates, *, prompt, instruction, correction=None, files=None,
                 model='claude-sonnet-4-6', effort='low', tools='Read', limit_usd=5, budget_usd=.5,
-                max_turns=6, expect=(), forbid=(), timeout=300):
+                max_turns=6, expect=(), forbid=(), timeout=300, policy_upstream=None):
+    """policy_upstream: the owned fixtures.FixtureServer, to apply ladder escalations offline."""
     run = Path(run)
     run.mkdir(mode=0o700, parents=True)
     dirs = {name: run/name for name in ('workspace', 'home', 'tmp', 'config')}
@@ -82,8 +83,12 @@ def run_session(run, cli, key, upstream, rates, *, prompt, instruction, correcti
     revision = gov.state.claim(task, 1, OWNER, seconds=3600)['revision']
     code = gov.declare_channel()
     gov.close()
+    policy = None
+    if policy_upstream is not None:
+        from .fixture_dispatch import ProxyPolicy
+        policy = ProxyPolicy(policy_upstream, model, OWNER)
     proxy = ProxyServer(('127.0.0.1', 0), upstream, run/'observations.jsonl', rates,
-                        governor={'db': db, 'session': session, 'limit_usd': limit_usd, 'task': task})
+                        governor={'db': db, 'session': session, 'limit_usd': limit_usd, 'task': task}, policy=policy)
     proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
     proxy_thread.start()
     settings = run/'settings.json'
@@ -105,7 +110,7 @@ def run_session(run, cli, key, upstream, rates, *, prompt, instruction, correcti
                '--max-budget-usd', f'{budget_usd:.2f}', '--no-session-persistence', '--setting-sources', '',
                '--settings', str(settings), '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
                '--tools', tools, '--allowedTools', tools]
-    report = {'status': 'running', 'mode': 'dry-run', 'model': model, 'effort': effort, 'task_revision_start': revision,
+    report = {'status': 'running', 'mode': 'dry-run' if policy is None else 'fixture-policy', 'model': model, 'effort': effort, 'task_revision_start': revision,
               'limits': f'client stop threshold ${budget_usd:.2f}, max {max_turns} turns; governor limit ${limit_usd} '
                         '(dry-run, never enforced); not a billing cap'}
     stdout = stderr = ''
@@ -126,15 +131,16 @@ def run_session(run, cli, key, upstream, rates, *, prompt, instruction, correcti
         proxy.server_close()
         (run/'client.stdout.jsonl').write_text(stdout.replace(key, '[REDACTED]'))
         (run/'client.stderr.txt').write_text(stderr.replace(key, '[REDACTED]'))
-        report.update(summarize(run, db, session, limit_usd, task, stdout, correction_record, expect, forbid))
+        report.update(summarize(run, db, session, limit_usd, task, stdout, correction_record, expect, forbid,
+                                policy is not None))
         if report['status'] == 'running':
-            report['status'] = 'passed' if passed(report, correction) else 'failed'
+            report['status'] = 'passed' if passed(report, correction, policy is not None) else 'failed'
         with (run/'summary.json').open('x') as f:
             json.dump(report, f, indent=2)
     return report
 
 
-def summarize(run, db, session, limit, task, stdout, correction_record, expect, forbid):
+def summarize(run, db, session, limit, task, stdout, correction_record, expect, forbid, policy_mode=False):
     events = parse_events(stdout)
     final = next((e for e in reversed(events) if e.get('type') == 'result'), {})
     answer = final.get('result') or ''
@@ -160,6 +166,7 @@ def summarize(run, db, session, limit, task, stdout, correction_record, expect, 
     known = sum(r['cost_usd'] for r in ok if r.get('cost_usd') is not None)
     client_cost = final.get('total_cost_usd')
     unpriced = sum(r.get('cost_usd') is None for r in messages)
+    client_cost_matches = isinstance(client_cost, (int, float)) and abs(client_cost - known) < 1e-6
     errors = run/'hook-errors.jsonl'
     return {
         'client': {'result_subtype': final.get('subtype'), 'is_error': final.get('is_error'), 'answer': answer,
@@ -181,20 +188,31 @@ def summarize(run, db, session, limit, task, stdout, correction_record, expect, 
         'hook_events': [e['payload']['event'] for e in journal if e['kind'] == 'hook_event'],
         'hook_errors': len(errors.read_text().splitlines()) if errors.exists() else 0,
         'client_tokens': client_tokens,
+        # Claude Code 2.1.282 prices and attributes all usage to the model it requested, even when
+        # the proxy forwarded another: under the fixture policy only its tokens are comparable.
+        'client_cost_matches': client_cost_matches,
         'accounting_matches': (bool(ok) and unpriced == 0 and abs(policy['spent_usd'] - known) < 1e-9
-                               and isinstance(client_cost, (int, float)) and abs(client_cost - known) < 1e-6
-                               and proxy_tokens == client_tokens),
+                               and (client_cost_matches or policy_mode) and proxy_tokens == client_tokens),
         'applied': any(e['payload'].get('applied') is True for e in journal),
+        'policy': {'escalations': [{k: e['payload'].get(k) for k in ('status', 'action', 'target_model', 'target_effort')}
+                                   for e in journal if e['kind'] == 'fixture_dispatch'],
+                   'kept_requests': sum(e['kind'] == 'fixture_keep_escalated' and e['payload']['status'] == 'kept'
+                                        for e in journal),
+                   'unknown_outcomes': sum(e['kind'] in ('fixture_dispatch', 'fixture_keep_escalated')
+                                           and e['payload']['status'] == 'unknown_outcome' for e in journal),
+                   'forwarded_settings': [[r.get('model'), r.get('effort'), r.get('applied')] for r in messages],
+                   'deferrals': sorted({r['policy']['reason'] for r in messages if r.get('policy', {}).get('reason')})},
     }
 
 
-def passed(report, correction):
+def passed(report, correction, policy=False):
     client = report['client']
     return (report.get('returncode') == 0 and client['result_subtype'] == 'success' and not client['is_error']
             and report['answer_ok'] and report['proxy']['requests'] > 0 and report['proxy']['unsettled'] == 0
             and all(s == 200 for s in report['proxy']['http_statuses'])
             and report['governor']['still_unknown'] == 0 and report['governor']['cost_complete']
-            and report['accounting_matches'] and report['hook_errors'] == 0 and not report['applied']
+            and report['accounting_matches'] and report['hook_errors'] == 0
+            and (report['policy']['unknown_outcomes'] == 0 if policy else not report['applied'])
             and (not correction or (report['correction']['delivered'] and report['correction']['acknowledged'])))
 
 

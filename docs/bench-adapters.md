@@ -68,3 +68,45 @@ Six loopback tests pass. A separate failing-first shutdown regression reproduced
 Next: exercise policy dispatch through the real Claude client and connect the worker/reference-output tools in an isolated fixture benchmark. Provider compatibility and active paid-policy eligibility remain separate gates.
 
 Full regression: **292 tests, OK, 68.633 seconds** (`runs/loopback-dispatch-regression.log`). The closed-accounting-log exception no longer appeared. A connection-reset traceback from a disconnected local HTTP client and the existing HTTPError cleanup warning remain in fixture output; this is not a claim that all teardown logging is clean. No paid calls.
+
+## Policy dispatch through the real Claude client — September 25
+
+`fixture_dispatch.ProxyPolicy` applies ladder escalations inside the governed proxy, so a real Claude Code client (2.1.282, fake key) works through the policy against the scripted fixture. It is accepted only when the proxy's upstream is the owned in-process `fixtures.FixtureServer` (type and port checked), and the proxy has no CLI flag for it: there is no paid path. `FixtureDispatcher` is split into `begin` (fence + reservation, returns the exact request) and `finish` (settle, confirm the rung only for a priced reply, journal), so the proxy streams the response between them.
+
+Behaviour on each main-loop request (the client's configured model, with tools; side requests and other models pass untouched):
+
+- An executable ladder rung (`increase_effort`, `stronger_model`) is sent once per window with the existing fence and deterministic identity. A priced reply confirms the rung.
+- After confirmation, later requests of the same task revision keep the escalated setting, each with a fresh enforced reservation fenced on the revision and setting. A correction (new revision) resets it with the ladder.
+- Anything refused, stale, unaffordable, unknown-cost or not transformable is forwarded unchanged, as in dry-run. ModelPilot never blocks the client, so unknown spend halts the policy, not the session.
+
+Findings from the real client:
+
+- Claude Code 2.1.282 appends a `system`-role message after every user turn, so earlier ones sit mid-history. The client sends these to Sonnet 5 and Opus 5 itself. The transform now keeps them for those targets and relocates (trailing only, else refuses) for Haiku, which rejects them. The previous rule relocated for every non-Opus target and refused every real Sonnet request.
+- Every main-loop request carries `thinking`. The fixture produces no thinking blocks, but real Sonnet/Opus replies will, and the transform refuses any setting change across thinking history. Under real traffic, the policy is therefore expected to defer most rungs until thinking-history compatibility is verified with the provider.
+- The client shows the served model (`claude-opus-5`) on the message but attributes and prices all usage under the model it requested. Client dollars are wrong whenever the model changes (Sonnet-priced $0.00168 against measured $0.00204). Under the policy, dollars come from the governor/proxy ledger. The client is compared on tokens only (`client_cost_matches` is reported separately).
+
+Validation (`tests/test_policy_session.py`, 7 tests, $0): real client, six identical Bash failures → 3 requests at Sonnet 5 medium, 3 at high, 1 at Opus 5 medium, both rungs confirmed, 2 kept requests, governor = proxy, tokens = client. A correction after an escalation is delivered and acknowledged, and the corrected revision returns to the client's setting. A too-small budget defers with `insufficient_write_reservation` and forwards unchanged. At proxy level: a truncated escalation stays unknown, never confirms, and later rungs defer on unknown budget; side requests and other models are untouched; thinking history blocks the rewrite. The real-client tests passed 5 of 5 repeated runs.
+
+Full regression: **303 tests, OK, 85.686 seconds** on Python 3.12 (`runs/policy-dispatch-regression.log`). The known connection-reset traceback still appears in fixture output. System Python 3.9 shows the two known `test_transport` HTTPError errors. No paid calls.
+
+Not covered: provider acceptance of any rewritten request, thinking-history changes, the worker/reference-output tools in a benchmark trial, and active mode in `bench.py` (the ModelPilot adapter still refuses it). Next: connect the worker/reference-output tools in an isolated fixture benchmark trial.
+
+## ModelPilot arm tools in a fixture bench trial — September 25
+
+`modelpilot/bench_tools.py` is the arm's stdio MCP server (policy R5, lever 1). It exposes `run_tests`, `search` and `expand_output`. All three are host operations: no model calls, and no model-chosen commands.
+
+- `run_tests` takes no arguments. It runs the task's own `suite_command` in the trial workspace through `bench_tasks.run_tests` (credential-free environment, the trial's HOME/TMPDIR, the grader's timeout). It returns counts, failing IDs and the output. Each completed run is recorded as a `suite`/`failures` ladder observation, so stalled tests are host evidence for R2.
+- `search` is a literal search of tracked and new non-ignored files (1 MiB per file, 300 characters per line).
+- Output over the threshold `T` (default 8 KB) is stored in the ledger and returned as a head/tail excerpt plus a handle. `expand_output` pages it. Every call is journaled (`bench_tool`: counts, bytes, truncation, never content).
+
+`ModelPilotAdapter(tools=True)` writes the per-trial MCP config, adds the three tools to `--allowedTools` and adds one prompt paragraph naming them. `fixture_policy=<FixtureServer>` passes a `ProxyPolicy` to the trial proxy. Everything else is unchanged: the arm stays dry-run, `benchmark_eligible` stays false, and the observer exclusion still applies. `m2_mcp.Server` is now reusable (`tools`, `call`, `serve`), and its argument check no longer assumes a `required` list.
+
+Validation (`tests/test_bench_tools.py`, 9 tests, $0). Server level: the excerpt stays within the threshold and pages back in full; three stalled suite runs produce `increase_effort`; tests see no provider key; invalid arguments are refused; a correction refuses stale observations. Two `bench.run_trial` trials use the real client (2.1.282) and the synthetic task, and both pass the hidden grader:
+- A 200-match search enters context only as an excerpt. The next request carries the full text only after `expand_output`, with tokens and governor = proxy matching.
+- A broken edit plus three `run_tests` calls escalates Sonnet 5 medium → high through the fixture policy. The fix is then made at high, 2 kept requests follow, and the cost is complete.
+
+The trial tests passed 3 of 3 repeated runs.
+
+Full regression: **312 tests, OK, 99.358 seconds** on Python 3.12 (`runs/bench-tools-regression.log`). The known connection-reset traceback still appears; Python 3.9 shows the two known `test_transport` errors. No paid calls.
+
+Not covered: M3 worker drafts with M4 verification and `execute_fallback` (lever 3, which makes its own billable calls), test selection in `run_tests`, whether models actually prefer these tools over Bash, R3/R4 cost-motivated switches, and any provider traffic. Remaining gates before a paid ModelPilot arm: thinking-history compatibility across setting changes (probe with the provider), the user's approval of active mode for the benchmark arm, and Jev router pricing for the comparison.

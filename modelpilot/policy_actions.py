@@ -40,7 +40,9 @@ def transform_request(request,model,effort):
             if not context:out.pop('context_management',None)
     else:
         out.setdefault('output_config',{})['effort']=effort
-    if model!=MODELS[-1]:
+    # Claude Code 2.1.282 itself sends system-role messages (after every user turn) to Sonnet 5
+    # and Opus 5, so they are kept. Haiku rejects them (Jev finding): relocate trailing ones only.
+    if model==MODELS[0]:
         messages=out['messages'];tail=[]
         while messages and messages[-1].get('role')=='system':tail.insert(0,messages.pop())
         if any(m.get('role')=='system' for m in messages):
