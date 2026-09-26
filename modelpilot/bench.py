@@ -70,9 +70,10 @@ class PreflightError(RuntimeError):
 
 
 def rates():
-    """Rates for every benchmark model: the 5-family table plus M0's 4.6 entries."""
+    """Rates for every benchmark model: the 5-family table, the policy's Opus 5.5 top rung and M0's 4.6 entries."""
     merged = json.loads((ROOT/'configs/m0.json').read_text())['rates']
     merged.update(json.loads((ROOT/'configs/jev-rates.json').read_text())['rates'])
+    merged.update(json.loads((ROOT/'configs/opus-5-5-rates.json').read_text())['rates'])
     return merged
 
 

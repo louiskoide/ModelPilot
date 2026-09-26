@@ -39,6 +39,11 @@ class ScheduleTests(unittest.TestCase):
         table = bench.rates()
         self.assertTrue(all(arm['model'] in table for arm in bench.ARMS.values() if arm['kind'] == 'fixed'))
 
+    def test_policy_top_rung_has_rates_with_provenance(self):
+        self.assertEqual(bench.rates()['claude-opus-5-5'], dict(input=4, output=20, write_5m=5, write_1h=8, read=.2))
+        config = json.loads((bench.ROOT/'configs/opus-5-5-rates.json').read_text())
+        self.assertTrue(config['source'] and config['retrieved'])
+
     def test_session_end_reasons(self):
         ok = {'subtype': 'success', 'is_error': False}
         cases = [(('completed', ok, []), 'success'),

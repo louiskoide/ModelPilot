@@ -1,0 +1,530 @@
+"""Thinking history across setting changes, direct API. Planning is free; --live prompts for a local key.
+
+Real Claude Code requests carry `thinking`, and Sonnet 5 / Opus 5 replies carry thinking blocks, so
+the policy's ladder rewrites requests whose history holds another setting's thinking. This probe
+sends exactly what `policy_actions.transform_request` would forward and records whether the API
+accepts it, what the cache does and whether the target thinks. Blocks are always passed back
+unchanged (the API reference warns that stripping them can fail). `capture-shape` records, at $0,
+which thinking/context/beta fields the pinned client sends, so the probe can mirror them.
+"""
+import argparse
+import copy
+import getpass
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import urllib.error
+import uuid
+from . import cache_probe as probe
+from .cache_replication import HAIKU as H, OPUS_5_5, RATES, SOURCE, Budget
+from .policy_actions import MODELS as POLICY_MODELS, transform_request
+
+ROOT = Path(__file__).resolve().parents[1]
+SHAPE_FIXTURE = ROOT/'tests/fixtures/claude-2.1.282-shape.json'
+S, O = 'claude-sonnet-5', 'claude-opus-5'
+FAKE_KEY = 'sk-ant-offline-fixture-not-a-key'
+SUITES = ('smoke', 'transitions', 'top-rung', 'opus-5-5-effort')
+SHAPES = ('tool_continuation', 'new_turn')
+PREFIX_LINES, SEED_MAX_TOKENS, SWITCH_MAX_TOKENS = 260, 4096, 2048
+PUZZLE = ('Find the smallest positive integer n that leaves remainder 3 when divided by 7, remainder 4 when '
+          'divided by 11 and remainder 5 when divided by 13. Work it out carefully, then ')
+PROMPTS = {'tool_continuation': PUZZLE + 'call record_answer with n. Do not state the answer in text.',
+           'new_turn': PUZZLE + 'reply with only the number. Do not use any tool.'}
+FOLLOW_UP = 'Now add 17 to that number. Reply with only the result.'
+TOOL_RESULT = 'Recorded.'
+SYSTEM_NOTE = 'Environment note: this conversation is a ModelPilot measurement.'
+TOOL = {'name': 'record_answer', 'description': 'Record the final integer answer.',
+        'input_schema': {'type': 'object', 'properties': {'value': {'type': 'integer'}}, 'required': ['value']}}
+THINKING_TYPES = ('thinking', 'redacted_thinking')
+# case: (source setting, target setting). Controls continue on the same setting; they check that the
+# request shape itself is accepted, so a rejected transition can be attributed to the change.
+# "opus" is the policy's top rung: Opus 5.5 since September 26 (the first transitions run used Opus 5).
+TOP = OPUS_5_5
+CONTROLS = {'control/sonnet': ((S, 'medium'), (S, 'medium')), 'control/opus': ((TOP, 'medium'), (TOP, 'medium'))}
+# The ladder's rungs, correction resets to the client's setting and R3 downgrades.
+TRANSITIONS = {'effort_up/sonnet': ((S, 'medium'), (S, 'high')), 'effort_down/sonnet': ((S, 'high'), (S, 'medium')),
+               'model_up': ((S, 'high'), (TOP, 'medium')), 'model_down': ((TOP, 'medium'), (S, 'medium')),
+               'effort_up/opus': ((TOP, 'medium'), (TOP, 'high')),
+               'to_haiku/sonnet': ((S, 'medium'), (H, None)), 'to_haiku/opus': ((TOP, 'medium'), (H, None))}
+TOP_RUNG = ('model_up', 'model_down', 'effort_up/opus')
+SUITE_TRANSITIONS = {'transitions': tuple(TRANSITIONS), 'top-rung': TOP_RUNG}
+# Opus 5.5 is not a policy tier: this answers the replication's open effort/cache question with real thinking.
+O55_CASES = {'o55/control_high': ((OPUS_5_5, 'high'), (OPUS_5_5, 'high')),
+             'o55/high_to_low': ((OPUS_5_5, 'high'), (OPUS_5_5, 'low')),
+             'o55/low_to_high': ((OPUS_5_5, 'low'), (OPUS_5_5, 'high'))}
+CONTROL_CASES = set(CONTROLS) | {'control/haiku', 'o55/control_high'}
+
+
+def _blocks(content):
+    if isinstance(content, str):
+        return 'str'
+    return [b.get('type') for b in content if isinstance(b, dict)]
+
+
+def _cache_marks(content):
+    return [i for i, b in enumerate(content if isinstance(content, list) else [])
+            if isinstance(b, dict) and 'cache_control' in b]
+
+
+def summarize_shape(bodies, betas, client_version):
+    """Structure of the longest main-loop (tool-bearing) request per model; never text or IDs."""
+    longest = {}
+    for body, beta in zip(bodies, betas):
+        best = longest.get(body['model'])
+        if body.get('tools') and (best is None or len(body['messages']) >= len(best[0]['messages'])):
+            longest[body['model']] = (body, beta)
+    requests = {}
+    for model, (body, beta) in longest.items():
+        messages = []
+        for m in body['messages']:
+            row = {'role': m.get('role'), 'blocks': _blocks(m.get('content', []))}
+            if _cache_marks(m.get('content')):
+                row['cache_control'] = _cache_marks(m.get('content'))
+            messages.append(row)
+        def followed_by_system(kind):
+            users = [i for i, m in enumerate(messages) if m['role'] == 'user' and
+                     (('tool_result' in m['blocks']) == (kind == 'tool_result'))]
+            return bool(users) and all(i+1 < len(messages) and messages[i+1]['role'] == 'system' for i in users)
+        system = body.get('system', [])
+        requests[model] = {
+            'top_level_keys': sorted(body),
+            'thinking': body.get('thinking'),
+            'effort': (body.get('output_config') or {}).get('effort'),
+            'output_config_keys': sorted(body.get('output_config') or {}),
+            'context_management': body.get('context_management'),
+            'anthropic_beta': [b.strip() for b in (beta or '').split(',') if b.strip()],
+            'stream': body.get('stream', False),
+            'tool_names': [t.get('name') for t in body['tools']],
+            'tool_cache_control': _cache_marks(body['tools']),
+            'system_blocks': ('str' if isinstance(system, str) else
+                              [dict({'type': b.get('type')}, **({'cache_control': b['cache_control']} if 'cache_control' in b else {}))
+                               for b in system]),
+            'messages': messages,
+            'system_after_prompt': followed_by_system('prompt'),
+            'system_after_tool_result': followed_by_system('tool_result'),
+        }
+    return {'client_version': client_version, 'requests': requests,
+            'scope': 'Structure of what the client sent to an owned fixture upstream; no text, IDs or provider traffic.'}
+
+
+def capture_shape(cli, models=(S, O), timeout=180):
+    """Run the real client against the owned fixture ($0) once per model; return the structure."""
+    from .fixtures import fixture_server
+    from .governed_session import client_env
+    bodies, betas, version = [], [], None
+    for model in models:
+        server = fixture_server()
+        server.keep_bodies = True
+        server.script = [{'tool': 'Bash', 'input': {'command': 'true', 'description': 'check'}}, {'text': 'DONE'}]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                dirs = {name: Path(tmp)/name for name in ('workspace', 'home', 'tmp', 'config')}
+                for path in dirs.values():
+                    path.mkdir()
+                env = client_env(os.environ, FAKE_KEY, dirs, cli, {'ANTHROPIC_BASE_URL': f'http://127.0.0.1:{server.server_port}'})
+                version = subprocess.run([str(cli), '--version'], env=env, capture_output=True, text=True,
+                                         timeout=30, stdin=subprocess.DEVNULL).stdout.strip()
+                command = [str(cli), '-p', 'Run the check with Bash, then reply DONE.', '--model', model,
+                           '--effort', 'medium', '--output-format', 'stream-json', '--verbose', '--max-turns', '4',
+                           '--max-budget-usd', '1.00', '--no-session-persistence', '--setting-sources', '',
+                           '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
+                           '--tools', 'Bash', '--allowedTools', 'Bash']
+                subprocess.run(command, env=env, cwd=dirs['workspace'], capture_output=True, text=True,
+                               timeout=timeout, stdin=subprocess.DEVNULL)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+        beta_by_hash = {r['sha256']: r.get('beta') for r in server.received if 'sha256' in r}
+        for raw in server.bodies:
+            bodies.append(json.loads(raw))
+            betas.append(beta_by_hash.get(hashlib.sha256(raw).hexdigest()))
+    shape = summarize_shape(bodies, betas, version)
+    missing = [m for m in models if m not in shape['requests']]
+    if missing:
+        raise RuntimeError(f'No main-loop request captured for {missing}; see the client flags')
+    return shape
+
+
+def _append_system(messages):
+    """Mirror the client: a system note after the user turn, carrying the moving cache marker."""
+    for m in messages:
+        if m.get('role') == 'system' and isinstance(m.get('content'), list):
+            m['content'] = SYSTEM_NOTE
+    messages.append({'role': 'system', 'content': [{'type': 'text', 'text': SYSTEM_NOTE,
+                                                    'cache_control': {'type': 'ephemeral'}}]})
+
+
+def seed_request(shape_name, model, effort, nonce, spec):
+    # Same nonce-first prefix as M0, so independent groups never share a cached prefix.
+    text = probe.payload({'prefix_lines': PREFIX_LINES, 'max_tokens': 1}, nonce, model, effort, layer='system')['system'][0]['text']
+    p = {'model': model, 'max_tokens': SEED_MAX_TOKENS,
+         'system': [{'type': 'text', 'text': text, 'cache_control': {'type': 'ephemeral'}}],
+         'tools': [copy.deepcopy(TOOL)],
+         'messages': [{'role': 'user', 'content': [{'type': 'text', 'text': PROMPTS[shape_name]}]}]}
+    if spec.get('thinking') is not None:
+        p['thinking'] = copy.deepcopy(spec['thinking'])
+    p['output_config'] = {'effort': effort}
+    if spec.get('context_management') is not None:
+        p['context_management'] = copy.deepcopy(spec['context_management'])
+    if spec['system_after_prompt']:
+        _append_system(p['messages'])
+    return p
+
+
+def _group(run_id, case, shape_name, repeat, source, target, client_shape, spec_model=None):
+    spec = client_shape['requests'][spec_model or source[0]]
+    name = f'{case}/{shape_name}/{repeat}'
+    return {'name': name, 'case': case, 'shape': shape_name, 'repeat': repeat,
+            'source': list(source), 'target': list(target),
+            # The proxy forwards the client's headers unchanged, so the switch keeps the source's betas.
+            'betas': list(spec['anthropic_beta']), 'system_after_prompt': spec['system_after_prompt'],
+            'system_after_tool_result': spec['system_after_tool_result'],
+            # The single-turn Haiku control uses the tool prompt.
+            'request': seed_request(shape_name if shape_name in PROMPTS else 'tool_continuation',
+                                    source[0], source[1], f'{run_id}/{name}', spec),
+            'steps': ['seed', 'switched']}
+
+
+def plan(run_id, suite, repeats, client_shape):
+    if suite not in SUITES:
+        raise ValueError(f'Unknown suite {suite!r}')
+    if type(repeats) is not int or repeats < 1:
+        raise ValueError('Repeats must be a positive integer')
+    groups = []
+    for repeat in range(repeats):
+        if suite == 'opus-5-5-effort':
+            for case, (source, target) in O55_CASES.items():
+                groups.append(_group(run_id, case, 'new_turn', repeat, source, target, client_shape, spec_model=O))
+            continue
+        cases = dict(CONTROLS, **{case: TRANSITIONS[case] for case in SUITE_TRANSITIONS.get(suite, ())})
+        for shape_name in (('tool_continuation',) if suite == 'smoke' else SHAPES):
+            for case, (source, target) in cases.items():
+                # The arm's client is Sonnet 5 (S0): the top rung is reached only by the proxy rewriting its
+                # requests, which keeps the client's headers. So top-rung seeds carry Sonnet's betas.
+                groups.append(_group(run_id, case, shape_name, repeat, source, target, client_shape,
+                                     spec_model=S if source[0] == TOP else None))
+        if suite == 'transitions':
+            # Haiku's request shape without any history: attributes a Haiku rejection to the history.
+            g = _group(run_id, 'control/haiku', 'single_turn', repeat, (S, 'medium'), (H, None), client_shape)
+            g.update(request=transform_request(g['request'], H, None), steps=['single'])
+            groups.append(g)
+    for g in groups:
+        if 'switched' in g['steps']:
+            # A refusal that does not depend on the reply (e.g. mid-history system messages for Haiku)
+            # is known now: send nothing for it rather than pay for a seed that cannot be continued.
+            try:
+                switched_request(g, _placeholder_reply(g['shape']))
+            except ValueError as exc:
+                g.update(steps=[], refused=f'transform: {exc}')
+    return groups
+
+
+def _placeholder_reply(shape_name):
+    last = ({'type': 'tool_use', 'id': 'toolu_plan', 'name': TOOL['name'], 'input': {'value': 0}}
+            if shape_name == 'tool_continuation' else {'type': 'text', 'text': '0'})
+    return {'content': [{'type': 'thinking', 'thinking': '', 'signature': 'plan'}, last]}
+
+
+def planned_calls(groups):
+    return sum(len(g['steps']) for g in groups)
+
+
+def switched_request(group, response):
+    """The client's next request at the source setting, then exactly what the proxy would forward."""
+    p = copy.deepcopy(group['request'])
+    p['max_tokens'] = SWITCH_MAX_TOKENS
+    content = copy.deepcopy(response['content'])  # thinking blocks and signatures passed back unchanged
+    p['messages'].append({'role': 'assistant', 'content': content})
+    if group['shape'] == 'tool_continuation':
+        p['messages'].append({'role': 'user', 'content': [
+            {'type': 'tool_result', 'tool_use_id': b['id'], 'content': TOOL_RESULT} for b in content if b.get('type') == 'tool_use']})
+        if group['system_after_tool_result']:
+            _append_system(p['messages'])
+    else:
+        p['messages'].append({'role': 'user', 'content': [{'type': 'text', 'text': FOLLOW_UP}]})
+        if group['system_after_prompt']:
+            _append_system(p['messages'])
+    model, effort = group['target']
+    if model in POLICY_MODELS:
+        return transform_request(p, model, effort, allow_thinking_history=True)
+    p.update(model=model, output_config=dict(p.get('output_config', {}), effort=effort))
+    return p
+
+
+def _refusal_category(response):
+    return (response.get('stop_details') or {}).get('category')
+
+
+def seed_problem(shape_name, response):
+    content = response.get('content') or []
+    if response.get('stop_reason') == 'refusal':  # HTTP 200, but the model declined: nothing to continue
+        return f'seed_refused:{_refusal_category(response)}'
+    if not any(b.get('type') in THINKING_TYPES for b in content):
+        return 'seed_without_thinking'
+    want = 'tool_use' if shape_name == 'tool_continuation' else 'end_turn'
+    if response.get('stop_reason') != want:
+        return f"seed_stop_reason_{response.get('stop_reason')}"
+    if shape_name == 'tool_continuation' and not any(b.get('type') == 'tool_use' and b.get('name') == TOOL['name'] for b in content):
+        return 'seed_without_record_answer'
+    return None
+
+
+def describe(response):
+    """Structure only: never thinking text, signatures, tool inputs or answers."""
+    content = response.get('content') or []
+    thinking = [b for b in content if b.get('type') in THINKING_TYPES]
+    return {'content_types': [b.get('type') for b in content], 'thinking_blocks': len(thinking),
+            'signature_present': bool(thinking) and all(b.get('signature') or b.get('data') for b in thinking),
+            'thinking_chars': sum(len(b.get('thinking') or '') for b in thinking),
+            'stop_reason': response.get('stop_reason'), 'tool_use': any(b.get('type') == 'tool_use' for b in content),
+            'stop_details': _stop_details(response)}
+
+
+def _stop_details(response):
+    details = response.get('stop_details')
+    if not isinstance(details, dict):
+        return None
+    return {'type': details.get('type'), 'category': details.get('category'),
+            'explanation': probe.redact_message(str(details.get('explanation') or ''))[:300]}
+
+
+def estimate(nbytes, max_tokens, model):
+    # Conservative admission estimate, as in cache_replication: UTF-8 bytes as tokens, all written.
+    rate = RATES[model]
+    return ((nbytes + 1024)*rate['write_5m'] + max_tokens*rate['output'])/1e6
+
+
+def max_reserve(groups):
+    total = 0
+    for g in groups:
+        if not g['steps']:
+            continue
+        size = len(json.dumps(g['request']).encode())
+        total += estimate(size, g['request']['max_tokens'], g['request']['model'])
+        if 'switched' in g['steps']:
+            total += estimate(size + SEED_MAX_TOKENS*4, SWITCH_MAX_TOKENS, g['target'][0])
+    return total
+
+
+def verdicts(groups, outcomes):
+    # A transition's control continues on its target model, in the same shape and repeat (Haiku's is single-turn).
+    controls = {(g['target'][0], g['shape'], g['repeat']): outcomes.get(g['name']) for g in groups if g['case'] in CONTROL_CASES}
+    result = []
+    for g in groups:
+        v = {'case': g['case'], 'shape': g['shape'], 'repeat': g['repeat'], 'source': g['source'], 'target': g['target']}
+        v.update(outcomes.get(g['name']) or {'verdict': 'not_run'})
+        if g['case'] not in CONTROL_CASES and v['verdict'] in ('accepted', 'rejected', 'refused'):
+            model = g['target'][0]
+            seen = controls.get((model, 'single_turn' if model == H else g['shape'], g['repeat']))
+            if not seen or seen['verdict'] != 'accepted':
+                v.update(verdict='inconclusive', reason='control_not_accepted', observed=v['verdict'])
+        result.append(v)
+    return result
+
+
+def verified_transitions(summary):
+    """(source, target) model pairs accepted in every case, shape and repeat of the suite's transitions."""
+    cases = SUITE_TRANSITIONS.get(summary.get('suite'), ())
+    expected, accepted, bad = {}, set(), set()
+    for case in cases:
+        source, target = TRANSITIONS[case]
+        expected.setdefault((source[0], target[0]), set()).update(
+            (case, shape_name, repeat) for shape_name in SHAPES for repeat in range(summary['repeats']))
+    for v in summary['verdicts']:
+        if v['case'] in cases:
+            pair = (v['source'][0], v['target'][0])
+            if v['verdict'] == 'accepted':
+                accepted.add((pair, (v['case'], v['shape'], v['repeat'])))
+            else:
+                bad.add(pair)
+    return sorted([list(pair) for pair, keys in expected.items()
+                   if pair not in bad and all((pair, key) in accepted for key in keys)])
+
+
+def execute(groups, out, budget, suite, repeats, transport=probe.send):
+    """Sequential, no retries or threads. A switched-request 400 is an outcome; anything else unexpected stops."""
+    rows, outcomes = [], {}
+    started = time.monotonic()
+    state = {'status': 'running', 'error': None}
+
+    def summary():
+        sent = [r for r in rows if r['status'] != 'transform_refused']
+        result = dict(status=state['status'], error=state['error'], suite=suite, repeats=repeats,
+                      calls=len(sent), planned_calls=planned_calls(groups),
+                      known_cost_usd=sum(r['cost_usd'] for r in sent if r.get('cost_usd') is not None),
+                      budget_charged_usd=budget.spent,
+                      cost_complete=all(r.get('cost_usd') is not None for r in sent),
+                      rejected_requests=sum(r['status'] == 'rejected' for r in sent),
+                      refusals=sum(r.get('stop_reason') == 'refusal' for r in sent),
+                      transform_refused=sum(r['status'] == 'transform_refused' for r in rows),
+                      wall_seconds=time.monotonic()-started, verdicts=verdicts(groups, outcomes),
+                      scope='Direct API; thinking blocks passed back unchanged; rejected requests have unknown cost '
+                            '(charged to the budget at their admission estimate); no Claude Code integration or savings claim.')
+        result['verified_transitions'] = verified_transitions(result)
+        tmp = out/'summary.tmp'
+        tmp.write_text(json.dumps(result, indent=2)+'\n')
+        tmp.replace(out/'summary.json')
+        return result
+
+    with (out/'observations.jsonl').open('x') as log:
+        def record(row):
+            rows.append(row)
+            log.write(json.dumps(row)+'\n')
+            log.flush()
+            print(row['group'], row['role'], row['status'], row.get('observation', row.get('reason', '')), flush=True)
+
+        def send(group, role, p):
+            reserve = estimate(len(json.dumps(p).encode()), p['max_tokens'], p['model'])
+            budget.reserve(reserve)
+            row = dict(group=group['name'], case=group['case'], shape=group['shape'], repeat=group['repeat'], role=role,
+                       model=p['model'], effort=(p.get('output_config') or {}).get('effort'), started_unix=time.time(),
+                       request_sha256=hashlib.sha256(json.dumps(p, sort_keys=True).encode()).hexdigest())
+            now = time.monotonic()
+            try:
+                try:
+                    response, rid = transport(p, {'anthropic_beta': ','.join(group['betas'])})
+                except urllib.error.HTTPError as exc:
+                    details = probe.error_details(exc)
+                    details['error_hint'] = probe.redact_message(details.get('error_hint', ''))
+                    row.update(http_status=exc.code, error_type='HTTPError', **details)
+                    if exc.code != 400 or role == 'seed':
+                        row['status'] = 'error'  # a seed is our own construction: its rejection is a bug
+                        raise
+                    row.update(status='rejected', cost_usd=None, budget_charged_usd=reserve,
+                               api_error=probe.redact_message(getattr(exc, 'safe_api_message', '') or ''))
+                    budget.spent += reserve  # never assumed free
+                    return None
+                except Exception as exc:
+                    row.update(status='error', error_type=type(exc).__name__, **probe.error_details(exc))
+                    raise
+                usage = response.get('usage')
+                price = probe.priced_usage(p, response.get('model'), usage, RATES)
+                row.update(status='ok', http_status=200, request_id=rid, returned_model=response.get('model'), usage=usage,
+                           cost_usd=price, observation=probe.observe(usage) if isinstance(usage, dict) else 'unknown',
+                           **describe(response))
+                if price is None:
+                    row['status'] = 'unpriced'
+                    raise RuntimeError('Unpriced response; inspect metadata')
+                budget.spent += price
+                return response
+            finally:
+                row['wall_seconds'] = time.monotonic()-now
+                record(row)
+
+        try:
+            for group in groups:
+                if not group['steps']:
+                    record(dict(group=group['name'], case=group['case'], shape=group['shape'], repeat=group['repeat'],
+                                role='switched', status='transform_refused', reason=group['refused']))
+                    outcomes[group['name']] = {'verdict': 'transform_refused', 'reason': group['refused']}
+                    summary()
+                    continue
+                if group['steps'] == ['single']:
+                    reply = send(group, 'single', group['request'])
+                    verdict = 'rejected' if reply is None else 'refused' if reply.get('stop_reason') == 'refusal' else 'accepted'
+                    outcomes[group['name']] = {'verdict': verdict, 'api_error': rows[-1].get('api_error'),
+                                               'observation': rows[-1].get('observation')}
+                    summary()
+                    continue
+                seed = send(group, 'seed', group['request'])
+                outcome = {'seed_observation': rows[-1]['observation'], 'seed_thinking_blocks': rows[-1]['thinking_blocks']}
+                problem = seed_problem(group['shape'], seed)
+                if problem:
+                    outcomes[group['name']] = dict(outcome, verdict='inconclusive', reason=problem)
+                    summary()
+                    continue
+                try:
+                    request = switched_request(group, seed)
+                except ValueError as exc:
+                    reason = f'transform: {exc}'
+                    record(dict(group=group['name'], case=group['case'], shape=group['shape'], repeat=group['repeat'],
+                                role='switched', status='transform_refused', reason=reason))
+                    outcomes[group['name']] = dict(outcome, verdict='transform_refused', reason=reason)
+                    summary()
+                    continue
+                reply = send(group, 'switched', request)
+                last = rows[-1]
+                outcome.update(api_error=last.get('api_error'), switched_observation=last.get('observation'),
+                               switched_thinking_blocks=last.get('thinking_blocks'))
+                if reply is None:
+                    outcome['verdict'] = 'rejected'
+                elif reply.get('stop_reason') == 'refusal':  # accepted by the API, declined by the model
+                    outcome.update(verdict='refused', reason=f'refused:{_refusal_category(reply)}')
+                else:
+                    outcome['verdict'] = 'accepted'
+                outcomes[group['name']] = outcome
+                summary()
+            state['status'] = 'complete'
+        except (Exception, KeyboardInterrupt) as exc:
+            state.update(status='stopped', error=type(exc).__name__)
+        return summary()
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ['capture-shape']:
+        parser = argparse.ArgumentParser(prog='python3 -m modelpilot.thinking_probe capture-shape',
+                                         description='Record the pinned client request shape against the owned fixture ($0).')
+        parser.add_argument('--claude', type=Path, default=ROOT/'work/claude-client/node_modules/.bin/claude')
+        parser.add_argument('--out', type=Path, default=SHAPE_FIXTURE)
+        args = parser.parse_args(argv[1:])
+        shape = capture_shape(args.claude)
+        args.out.write_text(json.dumps(shape, indent=1)+'\n')
+        print(f"Captured {shape['client_version']}: {args.out}")
+        return
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--suite', choices=SUITES, default='transitions')
+    parser.add_argument('--repeats', type=int, help='default: 1 for smoke, 2 otherwise')
+    parser.add_argument('--budget', type=float, default=8)
+    parser.add_argument('--out', type=Path)
+    parser.add_argument('--live', action='store_true')
+    args = parser.parse_args(argv)
+    if not SHAPE_FIXTURE.exists():
+        raise SystemExit(f'No captured client shape at {SHAPE_FIXTURE}; run capture-shape first. Nothing sent.')
+    shape = json.loads(SHAPE_FIXTURE.read_text())
+    repeats = args.repeats or (1 if args.suite == 'smoke' else 2)
+    budget = Budget(args.budget)
+    rid = str(uuid.uuid4())
+    groups = plan(rid, args.suite, repeats, shape)
+    out = args.out or ROOT/'runs'/f"thinking-probe-{args.suite}-{time.strftime('%Y%m%d-%H%M%S')}"
+    out.mkdir(parents=True, exist_ok=False)
+    calls = planned_calls(groups)
+    manifest = dict(run_id=rid, suite=args.suite, repeats=repeats, live=args.live, calls=calls, budget_usd=args.budget,
+                    max_reserve_usd=max_reserve(groups), rates=RATES, pricing_source=SOURCE, pricing_checked='2026-09-24',
+                    shape=shape, prompts=PROMPTS, follow_up=FOLLOW_UP, controls=CONTROLS, transitions=TRANSITIONS,
+                    opus_5_5_cases=O55_CASES, groups=groups,
+                    method='Seed at the source setting; continue with its content passed back unchanged, transformed '
+                           'by policy_actions.transform_request (Opus 5.5: effort edited directly). Switched requests '
+                           'keep the source model\'s beta header, as the proxy would. No retries.')
+    (out/'plan.json').write_text(json.dumps(manifest, indent=2)+'\n')
+    print(f"Plan ({args.suite}, {repeats} repeat(s)): {calls} requests at most; admission estimates total "
+          f"${manifest['max_reserve_usd']:.2f} (a conservative upper bound, not a forecast); ${args.budget:g} budget; "
+          f"client shape {shape['client_version']}; results: {out}", flush=True)
+    if not args.live:
+        print('Dry-run only. Add --live to send paid requests.')
+        return
+    if os.environ.get('ANTHROPIC_BASE_URL'):
+        raise SystemExit('Direct Anthropic only; unset ANTHROPIC_BASE_URL. Nothing sent.')
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        os.environ['ANTHROPIC_API_KEY'] = getpass.getpass('Anthropic API key (hidden): ').strip()
+    from .jev_route_check import check_anthropic_key
+    problem = check_anthropic_key(os.environ['ANTHROPIC_API_KEY'])
+    if problem:
+        raise SystemExit(problem)
+    result = execute(groups, out, budget, args.suite, repeats)
+    print(json.dumps({k: v for k, v in result.items() if k != 'verdicts'}, indent=2))
+    if result['status'] != 'complete':
+        raise SystemExit(1)
+
+
+if __name__ == '__main__':
+    main()

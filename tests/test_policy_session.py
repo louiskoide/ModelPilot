@@ -4,14 +4,16 @@ import shutil
 import tempfile
 import threading
 import unittest
+from unittest import mock
+from modelpilot import policy_actions
 from modelpilot.fixture_dispatch import ProxyPolicy
 from modelpilot.fixtures import fixture_server
 from modelpilot.governed_session import OWNER, run_session
 from modelpilot.proxy import ProxyServer
 
-S, O = 'claude-sonnet-5', 'claude-opus-5'
+S, O = 'claude-sonnet-5', 'claude-opus-5-5'  # O: the ladder's top rung
 RATES = {S: dict(input=2, output=10, read=.2, write_5m=2.5, write_1h=4),  # configs/jev-rates.json
-         O: dict(input=5, output=25, read=.5, write_5m=6.25, write_1h=10)}
+         O: dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)}  # configs/opus-5-5-rates.json
 FAIL = {'tool': 'Bash', 'input': {'command': 'exit 3', 'description': 'fail on purpose'}}
 
 
@@ -74,9 +76,9 @@ class RealClientPolicyTests(Upstream, unittest.TestCase):
         self.assertEqual(report['policy']['kept_requests'], 2)
         self.assertTrue(report['accounting_matches'], report)
         self.assertEqual(report['governor']['still_unknown'], 0)
-        # Measured: 6 Sonnet 5 requests + 1 Opus 5 request (100 in / 4 out each).
-        self.assertAlmostEqual(report['governor']['spent_usd'], 6*.00024 + .0006)
-        # The client saw claude-opus-5 served but priced every request as the Sonnet 5 it asked for.
+        # Measured: 6 Sonnet 5 requests + 1 Opus 5.5 request (100 in / 4 out each: $0.00024 and $0.00048).
+        self.assertAlmostEqual(report['governor']['spent_usd'], 6*.00024 + .00048)
+        # The client saw claude-opus-5-5 served but priced every request as the Sonnet 5 it asked for.
         self.assertFalse(report['client_cost_matches'])
         self.assertAlmostEqual(report['client']['total_cost_usd'], 7*.00024)
         rows = [json.loads(line) for line in (run/'observations.jsonl').read_text().splitlines()]
@@ -181,10 +183,18 @@ class ProxyPolicyPathTests(Upstream, unittest.TestCase):
         self.assertEqual([(r['model'], r['applied'], r['policy']['status']) for r in self.rows()],
                          [(S, False, 'not_main_loop'), (O, False, 'not_main_loop')])
 
-    def test_thinking_history_blocks_the_rewrite(self):
-        self.post(messages=[{'role': 'user', 'content': 'go'},
-                            {'role': 'assistant', 'content': [{'type': 'thinking', 'thinking': 'x', 'signature': 's'}]},
-                            {'role': 'user', 'content': 'again'}])
+    THINKING = [{'role': 'user', 'content': 'go'},
+                {'role': 'assistant', 'content': [{'type': 'thinking', 'thinking': 'x', 'signature': 's'}]},
+                {'role': 'user', 'content': 'again'}]
+
+    def test_thinking_history_blocks_an_unverified_rewrite(self):
+        with mock.patch.object(policy_actions, 'THINKING_HISTORY_VERIFIED', frozenset()):
+            self.post(messages=self.THINKING)
         row, = self.rows()
         self.assertFalse(row['applied'])
         self.assertIn('Thinking history', row['policy']['reason'])
+
+    def test_verified_sonnet_effort_rung_applies_across_thinking_history(self):
+        self.post(messages=self.THINKING)
+        row, = self.rows()
+        self.assertEqual((row['model'], row['effort'], row['applied']), (S, 'high', True))

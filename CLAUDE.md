@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Last updated: September 24, 2026 (Jev bench arms). Read this first, then the relevant milestone guide/results before changing code.
+Last updated: September 26, 2026 (Opus 5.5 top rung; thinking-history probe). Read this first, then the relevant milestone guide/results before changing code.
 
 ## Objective and authorization
 
@@ -49,6 +49,7 @@ The project is a tested set of components and bounded harnesses, not an operatio
 - `jev_compat.py` + `jev_compat_probe.mjs`: offline, key-free Jev/Claude Code compatibility probe that includes a tool follow-up; `--prepare-compat` builds the patched variant. Never edit `work/jev-router-baseline`.
 - `jev_check.py`, `jev_route_check.py`: pinned Jev router-only credential preflight; one-task end-to-end routing preflight through the unmodified launcher with isolated HOME/config and wire-confirmed serving model.
 - `evaluate.py`: fresh-context Opus/Sonnet 4.6 × low/high, adaptive thinking, four typed-answer tasks, 16 requests, no retries. Unknown cost stops; $1 post-response stop threshold is not a hard ceiling.
+- `thinking_probe.py`: thinking history across the policy's setting changes, direct API (`--live` is billable; see `docs/thinking-history-probe.md`). `capture-shape` records the pinned client's request structure at $0 (`tests/fixtures/claude-2.1.282-shape.json`). Switched requests come from `policy_actions.transform_request(..., allow_thinking_history=True)`, an override only the probe uses. The policy allows a thinking-history change only for pairs in `THINKING_HISTORY_VERIFIED`, which holds every ladder rung and correction reset between Sonnet 5 and Opus 5.5 (live evidence, September 26). Refusals get their own verdict and record `stop_details`.
 - `configs/m0.json`: tested model IDs, rates, cache parameters. Prices are configured estimates, not invoice reconciliation or perpetually current facts.
 
 ## Verified evidence
@@ -68,6 +69,10 @@ The project is a tested set of components and bounded harnesses, not an operatio
 | bench-20260923-070044 | 3c pilot **passed**: 2 tasks × fixed Sonnet 5/Opus 5, 4/4 graded passes, $0.626 total, proxy = client tokens and dollars in every trial; Sonnet used about 2× the requests and 3–6× the cache reads, so it was only 8–15% cheaper per task (not evidence) |
 | m0-replication-opus-5-5-20260924-214653 | 141 requests; $1.96549795; 552.868 s; Opus 5.5 effort changes read the existing cache 6/6 (no thinking produced; unconfirmed); returns to Opus 5.5 hit 18/18; TTL 240 s hit, 330 s rewrite, refresh hit |
 | governed-session-20260922-222741 | **passed** with the user-declared coded channel: 3 requests, $0.0386484; correction delivered and obeyed (corrected token only), governor = proxy = client cost, tokens match, no unknown cost, nothing applied |
+| thinking-probe-smoke-20260926-131855 | 4/4 served, $0.0911971; Sonnet 5 and Opus 5 seeds thought and called the tool; captured betas accepted with an API key |
+| thinking-probe-transitions-20260926-131953 | 46 sent, $1.4093504. **Sonnet 5 effort changes (medium↔high) across thinking history accepted 8/8** and rewrote the whole cache; **all 16 Opus 5 requests refused** (HTTP 200 `refusal`, $0.8179575 of the cost; category not logged), so no Opus pair has evidence; 8 Haiku transitions refused by the transform (mid-history system messages) |
+| thinking-probe-top-rung-20260926-153723 | 40/40 served, $1.0890464, no refusals. **Sonnet 5 ↔ Opus 5.5 and Opus 5.5 effort changes across thinking history accepted 4/4 each.** Model switches rewrite the whole cache; Opus 5.5 effort changes rewrite only the messages part. Opus 5.5 → Sonnet drops the Opus reasoning (unbilled, as documented) |
+| thinking-probe-opus-5-5-effort-20260926-132158 | 12/12 served, $0.3117664; with thinking, Opus 5.5 effort changes read tools+system (7,876 tokens) and rewrote only the messages part; high thought more than low |
 
 M6 per-arm results: Opus low $0.001870/8.75s; Opus high $0.004745/15.72s; Sonnet low $0.001122/7.37s; Sonnet high $0.002097/6.97s. Each passed four tiny tasks. Sonnet low was cheapest in this sample; no statistically reliable latency or real-work ranking.
 
@@ -95,9 +100,9 @@ python3 -m modelpilot.m5 --out runs/m5-new-report.json
 python3 -m modelpilot.governor --out runs/governor-demo.json
 ```
 
-Proxy tests bind local loopback sockets; a sandbox denial is not a product test failure. Last verification: 344 offline tests on September 26, 2026 on Python 3.12 (`runs/merge-m6-plan-regression.log`), after merging `m6-plan` (Jev bench arms) with `main`. The governed session, the offline bench, policy and tool trial tests and the 3 offline Jev trial tests drive the real `claude` CLI, and the Jev launcher/trial tests need node plus both `work/jev-router-*` checkouts; all are skipped in CI. On this Mac, system Python 3.9 passes 342, and the two `test_transport` HTTPError tests error because of a 3.9 `HTTPError` quirk, not a product failure. CI runs 3.10 and 3.14. No need to rerun expensive cache/TTL tests for documentation changes.
+Proxy tests bind local loopback sockets; a sandbox denial is not a product test failure. Latest: 384 offline tests on September 26, 2026 on system Python 3.9 after the top-rung results (`runs/top-rung-results-regression.log`): 382 pass, the two known `test_transport` errors, none skipped (pinned client in `work/claude-client`, `claude` 2.1.283 on PATH). Previous: 344 offline tests on September 26, 2026 on Python 3.12 (`runs/merge-m6-plan-regression.log`), after merging `m6-plan` (Jev bench arms) with `main`. The governed session, the offline bench, policy and tool trial tests and the 3 offline Jev trial tests drive the real `claude` CLI, and the Jev launcher/trial tests need node plus both `work/jev-router-*` checkouts; all are skipped in CI. On this Mac, system Python 3.9 passes 342, and the two `test_transport` HTTPError tests error because of a 3.9 `HTTPError` quirk, not a product failure. CI runs 3.10 and 3.14. No need to rerun expensive cache/TTL tests for documentation changes.
 
-Paid entry points (inspect each plan first): `modelpilot.cache_probe`, `modelpilot.claude_check --suite m1|m2`, `modelpilot.worker_check`, `modelpilot.cascade_check`, `modelpilot.evaluate`, `modelpilot.jev_check`, `modelpilot.jev_route_check`, `modelpilot.governed_session` (and `cascade_check --execute-fallback`), `modelpilot.bench`, all with `--live`. Test limits are stopping thresholds, not hard billing caps.
+Paid entry points (inspect each plan first): `modelpilot.cache_probe`, `modelpilot.claude_check --suite m1|m2`, `modelpilot.worker_check`, `modelpilot.cascade_check`, `modelpilot.evaluate`, `modelpilot.jev_check`, `modelpilot.jev_route_check`, `modelpilot.governed_session` (and `cascade_check --execute-fallback`), `modelpilot.bench`, `modelpilot.thinking_probe`, all with `--live`. Test limits are stopping thresholds, not hard billing caps.
 
 ## Next work, in order
 
@@ -130,3 +135,20 @@ Owned loopback HTTP dispatcher now covers JSON, fragmented SSE, cancellation, tr
 Policy dispatch now runs through the real Claude Code client offline (`fixture_dispatch.ProxyPolicy`, `tests/test_policy_session.py`). Only the owned in-process `FixtureServer` upstream is accepted, and there is no CLI flag. Ladder rungs are applied in the proxy, confirmed once, kept for the task revision and reset by corrections. Anything refused or unknown is forwarded unchanged. Findings: Claude Code 2.1.282 sends mid-history `system` messages (kept for Sonnet 5/Opus 5, relocated only for Haiku). Every request carries `thinking`, so real traffic will defer rungs until thinking-history changes are verified. The client prices usage by requested, not served, model, so policy dollars come from the ledger.
 
 The arm's R5 tools are in `modelpilot/bench_tools.py`: a stdio MCP server with `run_tests` (the task's suite command, credential-free, results fed to the stuck ladder), `search` and `expand_output`, with excerpt plus handle above 8 KB. They're enabled by `ModelPilotAdapter(tools=True)`, and `fixture_policy=` adds the proxy policy in bench trials. Two real-client fixture bench trials pass the hidden grader (`tests/test_bench_tools.py`). Worker drafts (lever 3) and R3/R4 switches are not connected. Next gates: a provider probe of thinking history across setting changes, then user approval of active mode for the benchmark arm.
+
+## Thinking-history probe (September 26)
+
+`modelpilot/thinking_probe.py` is the probe for the first gate; see `docs/thinking-history-probe.md`. The pinned client 2.1.282 is installed in `work/claude-client`, and its request shape was captured at $0. It sends `thinking: adaptive`, `context_management` `clear_thinking_20251015` with `keep: "all"`, per-model beta headers (Opus adds `mid-conversation-tool-changes`), and a system message after every user turn. The probe keeps the source model's betas on a switch, as the proxy would. Haiku targets with real history are refused by the transform for mid-history system messages, separately from thinking.
+
+Live results, $1.8123139 in total over three runs (see the evidence table):
+- **Verified and unlocked:** Sonnet 5 effort changes across thinking history, 8/8. `THINKING_HISTORY_VERIFIED = {(sonnet-5, sonnet-5)}`, so the transform now allows the ladder's first rung and the Sonnet correction reset when the history holds thinking. Policy dispatch is still fixture-only, and active mode still needs the user's approval. Each one rewrites the whole cache, so the conservative write reservation stays.
+- **No evidence:** every Opus 5 request in the transitions run was refused, 34 s after the smoke run's Opus requests were served. Sonnet → Opus, Opus → Sonnet and Opus effort changes stay refused.
+- The probe now logs `stop_details` and gives refusals their own verdict.
+
+**Opus 5.5 is the ladder's top rung (user decision, September 26).** `policy_actions.MODELS` is Haiku 4.5, Sonnet 5 and Opus 5.5, because Opus 5.5 is cheaper on every rate: $4/$20 against $5/$25, cache reads $0.20 against $0.50. Rates are in `configs/opus-5-5-rates.json` and merged by `bench.rates()`; the write rates are derived and still to be confirmed. The probe's "opus" cases now target Opus 5.5. Opus 5.5 seeds carry Sonnet's betas, because the arm's client is Sonnet 5 and the proxy keeps its headers.
+
+The `top-rung` run (`runs/thinking-probe-top-rung-20260926-153723`, $1.0890464) accepted all 20 cases. `THINKING_HISTORY_VERIFIED` = {Sonnet→Sonnet, Sonnet→Opus 5.5, Opus 5.5→Sonnet, Opus 5.5→Opus 5.5}, so the whole ladder and both correction resets can now rewrite requests whose history holds thinking. Opus 5.5 → Sonnet drops the Opus reasoning (unbilled). The first gate (thinking-history compatibility) is passed for the Sonnet/Opus 5.5 ladder. Haiku targets still need a transform decision for mid-history system messages.
+
+Remaining gates before a paid ModelPilot arm: align the fixed and Jev arms with Opus 5.5 (below); the user's approval of active mode for the benchmark arm; Jev router pricing.
+
+Gate: the fixed arms (`opus-5`) and the Jev arm must offer the same top model before policy results are compared; see the policy doc's "Tier set". The Opus 5 refusals remain unexplained.

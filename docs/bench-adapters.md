@@ -109,7 +109,7 @@ The trial tests passed 3 of 3 repeated runs.
 
 Full regression: **312 tests, OK, 99.358 seconds** on Python 3.12 (`runs/bench-tools-regression.log`). The known connection-reset traceback still appears; Python 3.9 shows the two known `test_transport` errors. No paid calls.
 
-Not covered: M3 worker drafts with M4 verification and `execute_fallback` (lever 3, which makes its own billable calls), test selection in `run_tests`, whether models actually prefer these tools over Bash, R3/R4 cost-motivated switches, and any provider traffic. Remaining gates before a paid ModelPilot arm: thinking-history compatibility across setting changes (probe with the provider), the user's approval of active mode for the benchmark arm, and Jev router pricing for the comparison.
+Not covered: M3 worker drafts with M4 verification and `execute_fallback` (lever 3, which makes its own billable calls), test selection in `run_tests`, whether models actually prefer these tools over Bash, R3/R4 cost-motivated switches, and any provider traffic. Remaining gates before a paid ModelPilot arm: thinking-history compatibility across setting changes (probe with the provider; harness built, see the September 26 section below), the user's approval of active mode for the benchmark arm, and Jev router pricing for the comparison.
 
 ## Merge of m6-plan — September 26
 
@@ -120,3 +120,11 @@ Not covered: M3 worker drafts with M4 verification and `execute_fallback` (lever
 - **Trial:** one ModelPilot proxy per trial (m6-plan, `ProxyServer.wait_idle`). `adapter=` is kept for the ModelPilot arm; its `setup` and `proxy_options` apply to that trial-level proxy, and adapters are refused for Jev arms.
 
 Full regression: **344 tests, OK, 135.683 seconds** on Python 3.12 (`runs/merge-m6-plan-regression.log`). No tests were skipped, and the pinned Jev checkouts and Node were present. Python 3.9 shows only the two known `test_transport` errors. No paid calls.
+
+## Thinking-history probe — September 26
+
+The first remaining gate now has a harness: `modelpilot/thinking_probe.py`; see [thinking-history-probe.md](thinking-history-probe.md). It sends the exact requests `transform_request` would forward after a ladder rung, correction reset or Haiku downgrade, with the seed's thinking blocks passed back unchanged. It records acceptance, cache observation and whether the target thinks. `transform_request` gained `allow_thinking_history` (probe only) and `THINKING_HISTORY_VERIFIED` (empty). Real traffic therefore still defers every setting change across thinking history until live evidence fills that set.
+
+The pinned client's request shape was captured at $0 (`tests/fixtures/claude-2.1.282-shape.json`). It showed that Haiku targets are refused for a separate reason: 2.1.282 puts a system message after every user turn, and the transform relocates only trailing ones. The probe records these at plan time and sends nothing for them.
+
+Live results ($1.8123139 over three runs): Sonnet 5 effort changes across thinking history were accepted 8/8, so `THINKING_HISTORY_VERIFIED` now holds that pair. The proxy-level test now checks both sides: the verified Sonnet effort rung applies across thinking history, and an unverified change is still refused. Every Opus 5 request in the transitions run was refused (HTTP 200 `refusal`). Opus 5.5 has since replaced Opus 5 as the ladder's top rung (`policy_actions.MODELS`, with rates in `configs/opus-5-5-rates.json`). Its `top-rung` probe run accepted all 20 cases ($1.0890464), so `THINKING_HISTORY_VERIFIED` covers the whole Sonnet 5/Opus 5.5 ladder and both correction resets. The thinking-history gate is passed for those models. The fixed and Jev arms still need the same top model before any comparison (see the policy doc's "Tier set").
