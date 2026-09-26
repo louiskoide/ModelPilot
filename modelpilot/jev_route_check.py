@@ -56,6 +56,24 @@ def parse_events(stdout):
     return events
 
 
+def load_decisions(tmp_dir):
+    """Every Jev decision filed under tmp_dir/jev-claude, oldest first.
+
+    Jev files a print-mode session's decisions under its conversation key until the client
+    sends a session id, so one session can span files. Each file holds the latest decision
+    plus a history of every decision.
+    """
+    folder, decisions = Path(tmp_dir)/'jev-claude', []
+    for path in sorted(folder.glob('*.json')) if folder.is_dir() else []:
+        try:
+            data = json.loads(path.read_text())
+        except ValueError:
+            continue
+        if isinstance(data, dict) and 'jev' in data:
+            decisions.extend(d for d in data.get('history') or [data] if isinstance(d, dict))
+    return sorted(decisions, key=lambda d: d.get('at') or 0)
+
+
 def validate(events, stderr, decisions, token):
     """Routing counts only with a real Jev decision, a sentinel rewrite and wire-confirmed serving model."""
     result = next((e for e in reversed(events) if e.get('type') == 'result'), {})
@@ -268,15 +286,7 @@ def main():
             stdout, stderr = stdout.replace(key, '[REDACTED]'), stderr.replace(key, '[REDACTED]')
         (run/'stdout.jsonl').write_text(stdout)
         (run/'stderr.txt').write_text(stderr)
-        decisions = []
-        for path in sorted((dirs['tmp']/'jev-claude').glob('*.json')) if (dirs['tmp']/'jev-claude').is_dir() else []:
-            try:
-                data = json.loads(path.read_text())
-            except ValueError:
-                continue
-            # Each session file holds the latest decision plus a history of every decision.
-            if isinstance(data, dict) and 'jev' in data:
-                decisions.extend(d for d in data.get('history') or [data] if isinstance(d, dict))
+        decisions = load_decisions(dirs['tmp'])
         (run/'decisions.json').write_text(json.dumps(decisions, indent=2))
         validation = validate(parse_events(stdout), stderr, decisions, token)
         report.update(returncode=result.returncode, **validation)

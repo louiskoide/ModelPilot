@@ -110,3 +110,13 @@ The trial tests passed 3 of 3 repeated runs.
 Full regression: **312 tests, OK, 99.358 seconds** on Python 3.12 (`runs/bench-tools-regression.log`). The known connection-reset traceback still appears; Python 3.9 shows the two known `test_transport` errors. No paid calls.
 
 Not covered: M3 worker drafts with M4 verification and `execute_fallback` (lever 3, which makes its own billable calls), test selection in `run_tests`, whether models actually prefer these tools over Bash, R3/R4 cost-motivated switches, and any provider traffic. Remaining gates before a paid ModelPilot arm: thinking-history compatibility across setting changes (probe with the provider), the user's approval of active mode for the benchmark arm, and Jev router pricing for the comparison.
+
+## Merge of m6-plan — September 26
+
+`m6-plan` (September 24: Jev arms in `bench.py`, `bench_jev.py`, `jev_accounted_launch.mjs --serve`, report cost scopes) was developed alongside the Codex branch and never merged. The merge keeps one Jev path:
+
+- **Jev arms:** `bench_jev` (m6-plan). It runs one Jev proxy per trial, so routing state carries into a resumed follow-up. It verifies the checkout before every session, keeps the router and client keys separate, stops the run on a TypeSafe auth failure, and classifies `unrouted_sentinel`. It also has CLI support. `bench_adapters.JevAdapter` and its tests were removed: it restarted the launcher every session and was never enabled for paid runs. Its `--claude-bin` launcher option is kept (the exact-binary test now lives in `tests/test_jev_accounted_launch.py`), and `tests/test_jev_proxy_integration.py` now checks `bench_jev.routing` and `bench.accounting(jev=True)`.
+- **Cost rules, both kept:** Jev records carry `cost_scope: provider_only_router_unpriced` with provider dollars as a labeled lower bound (m6-plan). A record whose adapter sets `cost_complete: false` has no dollar figure in either the headline or the rejected-as-free sensitivity (main). Observer trials stay excluded (main).
+- **Trial:** one ModelPilot proxy per trial (m6-plan, `ProxyServer.wait_idle`). `adapter=` is kept for the ModelPilot arm; its `setup` and `proxy_options` apply to that trial-level proxy, and adapters are refused for Jev arms.
+
+Full regression: **344 tests, OK, 135.683 seconds** on Python 3.12 (`runs/merge-m6-plan-regression.log`). No tests were skipped, and the pinned Jev checkouts and Node were present. Python 3.9 shows only the two known `test_transport` errors. No paid calls.

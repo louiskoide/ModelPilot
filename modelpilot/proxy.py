@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 import threading
 import time
 from urllib.parse import urlsplit
@@ -218,6 +219,10 @@ class ProxyServer(ThreadingHTTPServer):
             finally:
                 gov.close()
         self.log_lock = threading.Lock()
+        # Accepted connections not yet finished, so a proxy that outlives one client session
+        # can tell when every request of that session has been logged.
+        self.in_flight = 0
+        self.idle = threading.Condition()
         log_path = Path(log_path)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_path = log_path
@@ -268,6 +273,37 @@ class ProxyServer(ThreadingHTTPServer):
             return self.policy.finish(gov, self.rates, ticket, row['cost_usd'], observer.model, observer.usage)
         finally:
             gov.close()
+
+    def process_request(self, request, client_address):
+        with self.idle:
+            self.in_flight += 1
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self.finished_request()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.finished_request()
+
+    def finished_request(self):
+        with self.idle:
+            self.in_flight -= 1
+            self.idle.notify_all()
+
+    def handle_error(self, request, client_address):
+        # A client that disconnects before sending a request (e.g. killed at a session timeout)
+        # sent nothing to forward or log; anything else still gets the default report.
+        if not isinstance(sys.exc_info()[1], ConnectionError):
+            super().handle_error(request, client_address)
+
+    def wait_idle(self, timeout=None):
+        """True once no accepted request is still being handled (its row is then logged)."""
+        with self.idle:
+            return self.idle.wait_for(lambda: self.in_flight == 0, timeout)
 
     def record(self, row):
         with self.log_lock:

@@ -32,9 +32,8 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual((result['cost_usd'], result['known_cost_usd'], result['rejected_requests']), (None, .01, 1))
 
     def test_unimplemented_arms_refuse_instead_of_pretending(self):
-        for arm in ('jev-stock', 'jev-compat', 'modelpilot'):
-            with self.assertRaises(NotImplementedError):
-                bench.run_trial({'id': 't'}, arm, '/nonexistent', 'claude', 'k', 'http://127.0.0.1:1', RATES)
+        with self.assertRaises(NotImplementedError):
+            bench.run_trial({'id': 't'}, 'modelpilot', '/nonexistent', 'claude', 'k', 'http://127.0.0.1:1', RATES)
 
     def test_every_fixed_arm_model_has_rates(self):
         table = bench.rates()
@@ -58,6 +57,39 @@ class ScheduleTests(unittest.TestCase):
                  'docs/pytest.ini.md', 'tox.ini']
         self.assertEqual(bench.test_config_changes(paths, 'tests'),
                          ['conftest.py', 'pyproject.toml', 'setup.cfg', 'src/sitecustomize.py', 'tox.ini'])
+
+    def test_rejected_requests_get_a_labeled_sensitivity_figure_but_no_headline(self):
+        rows = [{'kind': 'messages', 'http_status': 200, 'cost_usd': .01, 'usage': {'input_tokens': 5}},
+                {'kind': 'messages', 'http_status': 400, 'cost_usd': None},
+                {'kind': 'messages', 'http_status': 200, 'cost_usd': .02, 'usage': {'input_tokens': 5}}]
+        result = bench.accounting(rows, {})
+        self.assertIsNone(result['cost_usd'])
+        self.assertAlmostEqual(result['cost_if_rejected_free_usd'], .03)
+        self.assertEqual(result['cost_scope'], 'complete')
+        self.assertEqual(result['client_cost_basis'], 'client_model_table')
+        self.assertNotIn('router_cost_usd', result)
+        # A transport failure or an unpriced success is not a rejection: nothing is assumed free.
+        for bad in ({'kind': 'messages', 'http_status': None, 'cost_usd': None},
+                    {'kind': 'messages', 'http_status': 200, 'cost_usd': None, 'usage': {}}):
+            self.assertIsNone(bench.accounting(rows + [bad], {})['cost_if_rejected_free_usd'])
+        failed = bench.accounting(rows + [{'kind': 'messages', 'http_status': None, 'cost_usd': None}], {})
+        self.assertEqual((failed['rejected_requests'], failed['transport_failures']), (1, 1))
+
+    def test_jev_accounting_is_provider_only_and_skips_the_client_price(self):
+        rows = [{'kind': 'messages', 'http_status': 200, 'cost_usd': .01, 'usage': {'input_tokens': 5}}]
+        final = {'total_cost_usd': .04, 'modelUsage': {'jev-router': {'inputTokens': 5}}}
+        result = bench.accounting(rows, final, jev=True)
+        self.assertEqual((result['cost_usd'], result['cost_scope']), (.01, 'provider_only_router_unpriced'))
+        self.assertIsNone(result['router_cost_usd'])
+        self.assertIsNone(result['client_cost_matches'])
+        self.assertEqual(result['client_cost_basis'], 'sentinel_model_unknown_price')
+        self.assertTrue(result['tokens_match'])
+
+    def test_jev_commands_leave_the_model_to_the_router(self):
+        command = bench.client_command('/c', 'do it', None, 30, 1.0, ['--session-id', 'x'], ['--add-dir', '/jev'])
+        self.assertNotIn('--model', command)
+        self.assertEqual(command[-2:], ['--add-dir', '/jev'])
+        self.assertEqual(command[command.index('--tools') + 1], bench.TOOLS)
 
     def test_budget_threshold_is_passed_exactly(self):
         for budget, text in ((1.0, '1'), (.004, '0.004'), (.000001, '0.000001'), (2.5, '2.5')):
@@ -93,9 +125,10 @@ class Clock:
 
 class FakeTrial:
     """Stands in for bench.Trial on a fake clock: fixed sessions, duration and cost."""
-    def __init__(self, name, clock, sessions=2, seconds=100, cost=.4, fail_on=None):
+    def __init__(self, name, clock, sessions=2, seconds=100, cost=.4, fail_on=None, unavailable_after=None):
         self.key, self.clock, self.sessions, self.seconds, self.cost, self.fail_on = (name, 'sonnet-5', 0), clock, sessions, seconds, cost, fail_on
         self.ran, self.started, self.finished, self.record = 0, False, False, None
+        self.unavailable_after, self.router_unavailable, self.closed = unavailable_after, False, False
 
     def step(self):
         if self.fail_on == self.ran + 1:
@@ -104,6 +137,7 @@ class FakeTrial:
         self.clock.now += self.seconds
         self.clock.log.append((self.key[0], self.ran + 1))
         self.ran += 1
+        self.router_unavailable = self.ran == self.unavailable_after
         if self.ran == self.sessions:
             self.finish()
         return self.ran < self.sessions
@@ -111,7 +145,11 @@ class FakeTrial:
     def known_cost(self):
         return self.cost * self.ran
 
+    def close(self):
+        self.closed = True
+
     def finish(self, stopped=None):
+        self.close()
         self.finished = True
         self.record = {'task': self.key[0], 'arm': 'sonnet-5', 'trial': 0, 'passed': True, 'wall_seconds': 1.0,
                        'complete': stopped is None, 'stopped': stopped, 'sessions': [{'stop': 'success'}] * self.ran,
@@ -184,6 +222,15 @@ class RunBenchTests(unittest.TestCase):
             self.run_fake('AB', fake={order[1]: {'fail_on': 1}}, shape='single')
         saved = json.loads((self.out/'summary.json').read_text())
         self.assertEqual((saved['complete'], saved['error'], saved['trials']), (False, 'RuntimeError', 1))
+        self.assertTrue(self.made[1].closed)  # per-trial proxy and router are released on a crash
+
+    def test_a_router_authentication_failure_stops_the_run(self):
+        first = bench.schedule([{'id': n} for n in 'ABC'], ['sonnet-5'], 1, 0)[0][0]
+        summary = self.run_fake('ABC', fake={first: {'unavailable_after': 1, 'sessions': 1}}, shape='single')
+        self.assertEqual((summary['stopped'], summary['complete']), ('jev_router_unavailable', False))
+        self.assertEqual(len(self.made), 1)
+        saved = json.loads((self.out/'summary.json').read_text())
+        self.assertEqual(saved['stopped'], 'jev_router_unavailable')
 
 
 class TrialTests(unittest.TestCase):
@@ -240,6 +287,31 @@ class TrialTests(unittest.TestCase):
         self.assertTrue(record['complete'])
         self.assertGreaterEqual(record['gap_seconds'], 0)
         self.assertEqual(json.loads((self.repo_case.root/'trial'/'trial.json').read_text())['phase'], 'graded')
+
+    def test_closing_keeps_the_row_of_a_request_still_in_flight(self):
+        trial = self.trial(shape='followup', gap=0)
+        with self.stub(['success']):
+            self.assertTrue(trial.step())  # parked: the trial's proxy is still open
+        self.upstream.script, self.upstream.delay = [{'text': 'late'}], .5
+        port = trial.proxy.server_port
+
+        def late():
+            conn = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+            conn.request('POST', '/v1/messages', json.dumps({'model': 'claude-sonnet-5', 'max_tokens': 8, 'stream': True,
+                                                             'tools': [{'name': 'Read'}], 'messages': []}),
+                         {'Content-Type': 'application/json'})
+            conn.getresponse().read()
+            conn.close()
+        client = threading.Thread(target=late)
+        client.start()
+        for _ in range(200):
+            if trial.proxy.in_flight:
+                break
+            time.sleep(.005)
+        trial.close()
+        client.join()
+        self.assertEqual(len(bench.read_rows(trial.log)), 2)
+        self.assertIsNone(trial.proxy)
 
     def test_no_follow_up_after_an_unsuccessful_first_session(self):
         trial = self.trial(shape='followup', gap=0)

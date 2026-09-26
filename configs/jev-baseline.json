@@ -2,7 +2,7 @@
   "repository": "https://github.com/gargpratyush/jev-router",
   "commit": "38da6b84ea01241bfc41fbddc0928d0f40a703f0",
   "inspected_on": "2026-09-22",
-  "adapter_status": "not_implemented",
+  "adapter_status": "bench_arms_offline_verified_20260924 (jev-stock, jev-compat in modelpilot/bench.py; no live bench trial yet)",
   "setup_guide": "docs/jev-baseline-setup.md",
   "local_setup": {
     "dependencies_installed": true,

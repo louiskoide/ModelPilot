@@ -5,6 +5,10 @@ same model wrote. Measured cost then depends on run order. Cold-equivalent cost 
 those inherited reads as the cache writes an isolated trial would have paid; output is
 unchanged by caching, so nothing else differs. Measured cost is always reported alongside.
 
+A request the API rejected with an error is unpriced, so the trial's headline cost stays
+unknown; a separately labeled sensitivity figure counts such rejections as free. Jev arms
+report provider cost only (router cost unpriced): their dollars are a lower bound.
+
     python3 -m modelpilot.bench_report runs/bench-<ts> [--out FILE]
 
 rebuilds the summary from a run's trial records (for example after a crash). Evidence is
@@ -28,10 +32,13 @@ def cache_attribution(rows, rates):
     """Inherited cache reads in one trial's proxy rows, and the cost had the trial started cold."""
     messages = sorted((r for r in rows if r.get('kind') == 'messages'), key=lambda r: r.get('started_unix', 0))
     entries, last_ttl = {}, {}
-    carried_total, extra, unknown, start = 0, 0.0, None, None
+    carried_total, extra, unknown, start, rejected = 0, 0.0, None, None, 0
     for r in messages:
         if r.get('cost_usd') is None:
-            unknown = unknown or 'unpriced_request'
+            if isinstance(r.get('http_status'), int) and r['http_status'] != 200:
+                rejected += 1  # answered with an error: unconfirmed whether billed
+            else:
+                unknown = unknown or 'unpriced_request'
         usage = r.get('usage') or {}
         if r.get('http_status') != 200 or 'cache_read_input_tokens' not in usage:
             continue
@@ -65,16 +72,25 @@ def cache_attribution(rows, rates):
     measured = sum(priced) if messages and len(priced) == len(messages) else None
     return {'cache_start': start, 'carried_read_tokens': carried_total, 'measured_cost_usd': measured,
             'cold_equivalent_cost_usd': measured + extra if measured is not None and unknown is None else None,
-            'cold_equivalent_unknown': unknown, 'assumptions': ASSUMPTIONS}
+            'cold_equivalent_unknown': unknown or ('rejected_request' if rejected else None),
+            'rejected_requests': rejected,
+            'cold_equivalent_if_rejected_free_usd': sum(priced) + extra if messages and unknown is None else None,
+            'assumptions': ASSUMPTIONS}
 
 
 def cold_cost(record):
     if (record.get('accounting') or {}).get('cost_complete') is False:
-        return None  # Provider-only cache repricing cannot establish total routed cost.
+        return None  # an adapter reported its total incomplete: cache repricing cannot complete it
     return (record.get('cache') or {}).get('cold_equivalent_cost_usd')
 
 
-def cells(records):
+def cold_cost_if_rejected_free(record):
+    if (record.get('accounting') or {}).get('cost_complete') is False:
+        return None
+    return (record.get('cache') or {}).get('cold_equivalent_if_rejected_free_usd')
+
+
+def cells(records, cost_of=cold_cost):
     """Per-task aggregates for one arm: trials, passes, cold-equivalent cost (None if any unknown), wall time."""
     out = {}
     for r in records:
@@ -82,7 +98,7 @@ def cells(records):
         cell['n'] += 1
         cell['passes'] += bool(r.get('passed'))
         cell['wall'] += r.get('wall_seconds') or 0
-        cost = cold_cost(r)
+        cost = cost_of(r)
         cell['cost'] = None if cost is None or cell['cost'] is None else cell['cost'] + cost
     return out
 
@@ -138,30 +154,63 @@ def difference(estimate, drawn, tasks):
     return out
 
 
+def cost_scope(records):
+    """'complete', 'provider_only_router_unpriced' (Jev), 'mixed', or None without records."""
+    scopes = {(r.get('accounting') or {}).get('cost_scope', 'complete') for r in records}
+    return scopes.pop() if len(scopes) == 1 else 'mixed' if scopes else None
+
+
+def routing_summary(records):
+    """Jev routing across an arm's trials, or None for arms without a router."""
+    routes = [r['routing'] for r in records if r.get('routing')]
+    if not routes:
+        return None
+    tokens = Counter()
+    for usage in (u for x in routes for u in x.get('router_usage') or []):
+        tokens.update({k: v for k, v in usage.items() if isinstance(v, (int, float)) and not isinstance(v, bool)})
+    return {'trials': len(routes), 'routed_trials': sum(bool(x.get('routed')) for x in routes),
+            'fail_open_trials': sum(bool(x.get('fail_open')) for x in routes),
+            # 'stub' only in offline tests; a stub decision is never evidence of TypeSafe routing.
+            'routers': dict(Counter(x.get('router') for x in routes)),
+            'decisions': sum(x.get('decisions') or 0 for x in routes),
+            'extra_decisions': sum(x.get('extra_decisions') or 0 for x in routes),
+            'served_models': dict(Counter(m for x in routes for m in x.get('served_models') or [])),
+            'router_tokens': dict(tokens)}
+
+
 def arm_summary(arm, complete, incomplete, arm_cells, rng, resamples):
     point = metrics(list(arm_cells.values()))
+    if_free = metrics(list(cells(complete, cold_cost_if_rejected_free).values()))
     first_bytes = [s for r in complete for s in (r.get('accounting') or {}).get('first_byte_seconds') or [] if s is not None]
     measured = [r['accounting']['cost_usd'] for r in complete if (r.get('accounting') or {}).get('cost_usd') is not None]
     passes = sum(bool(r.get('passed')) for r in complete)
     unknown = [f"{r['task']}/{r.get('trial', 0)}" for r in complete if cold_cost(r) is None]
     tasks = sorted(arm_cells)
     drawn = bootstrap(tasks, lambda sample: metrics([arm_cells[t] for t in sample]), rng, resamples) if tasks else {}
-    return {'arm': arm, 'trials': len(complete), 'incomplete_trials': len(incomplete), 'passes': passes,
-            'pass_rate': point['pass_rate'] if complete else None,
-            'mean_cost_usd': point['mean_cost_usd'], 'cost_per_pass_usd': point['cost_per_pass_usd'],
-            'mean_measured_cost_usd': sum(measured) / len(measured) if measured else None,
-            'cost_usd_priced_trials': sum(measured), 'unpriced_trials': len(complete) - len(measured),
-            'cold_equivalent_unknown_trials': len(unknown), 'unknown_cost': unknown,
-            'mean_wall_seconds': point['mean_wall_seconds'], 'wall_seconds': sum(r.get('wall_seconds') or 0 for r in complete),
-            'median_first_byte_seconds': statistics.median(first_bytes) if first_bytes else None,
-            'warm_starts': sum(bool(((r.get('cache') or {}).get('cache_start') or {}).get('warm')) for r in complete),
-            'stops': dict(Counter(s.get('stop') for r in complete for s in r.get('sessions') or [])),
-            'grade_reasons': dict(Counter((r.get('grade') or {}).get('reason') for r in complete)),
-            'test_config_changed': sum(bool(r.get('test_config_changed')) for r in complete),
-            'ci95': {name: d['ci95'] for name, d in drawn.items()}}
+    out = {'arm': arm, 'trials': len(complete), 'incomplete_trials': len(incomplete), 'passes': passes,
+           'pass_rate': point['pass_rate'] if complete else None, 'cost_scope': cost_scope(complete),
+           'mean_cost_usd': point['mean_cost_usd'], 'cost_per_pass_usd': point['cost_per_pass_usd'],
+           # Sensitivity, not a headline: requests the API rejected with an error counted as free.
+           'mean_cost_if_rejected_free_usd': if_free['mean_cost_usd'],
+           'cost_per_pass_if_rejected_free_usd': if_free['cost_per_pass_usd'],
+           'rejected_requests': sum((r.get('accounting') or {}).get('rejected_requests') or 0 for r in complete),
+           'mean_measured_cost_usd': sum(measured) / len(measured) if measured else None,
+           'cost_usd_priced_trials': sum(measured), 'unpriced_trials': len(complete) - len(measured),
+           'cold_equivalent_unknown_trials': len(unknown), 'unknown_cost': unknown,
+           'mean_wall_seconds': point['mean_wall_seconds'], 'wall_seconds': sum(r.get('wall_seconds') or 0 for r in complete),
+           'median_first_byte_seconds': statistics.median(first_bytes) if first_bytes else None,
+           'warm_starts': sum(bool(((r.get('cache') or {}).get('cache_start') or {}).get('warm')) for r in complete),
+           'stops': dict(Counter(s.get('stop') for r in complete for s in r.get('sessions') or [])),
+           'grade_reasons': dict(Counter((r.get('grade') or {}).get('reason') for r in complete)),
+           'test_config_changed': sum(bool(r.get('test_config_changed')) for r in complete),
+           'ci95': {name: d['ci95'] for name, d in drawn.items()}}
+    routing = routing_summary(complete)
+    if routing:
+        out['routing'] = routing
+    return out
 
 
-def pair_summary(a, b, cells_a, cells_b, rng, resamples):
+def pair_summary(a, b, cells_a, cells_b, rng, resamples, scopes=('complete', 'complete')):
     shared = sorted(set(cells_a) & set(cells_b))
     priced = [t for t in shared if cells_a[t]['cost'] is not None and cells_b[t]['cost'] is not None]
 
@@ -176,8 +225,11 @@ def pair_summary(a, b, cells_a, cells_b, rng, resamples):
         point = compute(tasks, dollars)
         drawn = bootstrap(tasks, lambda sample: compute(sample, dollars), rng, resamples)
         differences.update({n: difference(point[n], drawn[n], len(tasks)) for n in point})
+    lower = [arm for arm, scope in zip((a, b), scopes) if scope not in ('complete', None)]
     return {'arms': [a, b], 'tasks': len(shared), 'dollar_tasks': len(priced),
-            'excluded_unpriced_tasks': len(shared) - len(priced), 'differences': differences}
+            'excluded_unpriced_tasks': len(shared) - len(priced),
+            'dollar_basis': f"lower bound for {', '.join(lower)}: router cost unpriced" if lower else 'complete',
+            'differences': differences}
 
 
 def summarize(records, arms, seed=0, resamples=10000):
@@ -193,10 +245,12 @@ def summarize(records, arms, seed=0, resamples=10000):
     complete = {arm: [r for r in records if r['arm'] == arm and r.get('complete', True)] for arm in arms}
     incomplete = {arm: [r for r in records if r['arm'] == arm and not r.get('complete', True)] for arm in arms}
     by_arm = {arm: cells(complete[arm]) for arm in arms}
+    summaries = [arm_summary(arm, complete[arm], incomplete[arm], by_arm[arm], rng, resamples) for arm in arms]
+    scope = {s['arm']: s['cost_scope'] for s in summaries}
     return {'excluded_ineligible_trials': [{'task': r['task'], 'arm': r['arm'],
                 'reason': 'adapter_not_benchmark_eligible', 'cost_usd': (r.get('accounting') or {}).get('cost_usd')} for r in excluded],
-            'arms': [arm_summary(arm, complete[arm], incomplete[arm], by_arm[arm], rng, resamples) for arm in arms],
-            'paired': [pair_summary(a, b, by_arm[a], by_arm[b], rng, resamples)
+            'arms': summaries,
+            'paired': [pair_summary(a, b, by_arm[a], by_arm[b], rng, resamples, (scope[a], scope[b]))
                        for i, a in enumerate(arms) for b in arms[i + 1:]],
             'bootstrap': {'seed': seed, 'resamples': resamples, 'unit': 'task', 'interval': '95% percentile'},
             'cost_basis': 'cold-equivalent (inherited cache reads repriced as writes); measured cost alongside',
