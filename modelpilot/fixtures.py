@@ -38,7 +38,8 @@ def scripted_response(request, script):
 
     Each step is {'tool': name, 'input': {...}} (a tool_use turn) or {'text': ...}. A user
     message without tool results after the first is a follow-up prompt (e.g. a resumed
-    session). Steps past the end repeat the last one.
+    session). Steps past the end repeat the last one. A callable 'input' is called with the
+    request, so a step can use an earlier tool result (e.g. a returned handle).
     """
     user = [m.get('content') for m in request.get('messages', []) if m.get('role') == 'user']
     results = sum(1 for c in user if isinstance(c, list) for b in c if isinstance(b, dict) and b.get('type') == 'tool_result')
@@ -47,6 +48,8 @@ def scripted_response(request, script):
     index = results + max(0, prompts - 1)
     step = script[min(index, len(script)-1)]
     usage = dict(USAGE, cache_read_input_tokens=0, input_tokens=100)
+    if 'tool' in step and callable(step['input']):
+        step = dict(step, input=step['input'](request))
     if 'tool' in step:
         block = {'type': 'tool_use', 'id': f'toolu_fixture{index}', 'name': step['tool'], 'input': {}}
         deltas = [{'type': 'input_json_delta', 'partial_json': json.dumps(step['input'])}]

@@ -222,7 +222,7 @@ def python_satisfies(python, minimum):
     return tuple(map(int, version.split('.'))) >= tuple(map(int, minimum.split('.')))
 
 
-def run_tests(command, tree, python, pythonpath=None, home=None, tmp=None):
+def run_tests(command, tree, python, pythonpath=None, home=None, tmp=None, keep_output=False):
     env = clean_env(python, home, tmp)
     if pythonpath:
         env['PYTHONPATH'] = str(Path(tree)/pythonpath)
@@ -235,9 +235,13 @@ def run_tests(command, tree, python, pythonpath=None, home=None, tmp=None):
         code, output = None, 'timeout'
     run, failed, ids = parse_results(command, code, output)
     counts = parse_counts(command, output)
-    return {'exit_code': code, 'seconds': round(time.monotonic() - started, 3), 'tests_run': run,
-            'tests_passed': counts['passed'], 'tests_skipped': counts['skipped'], 'tests_failed': failed, 'failing_tests': ids,
-            'output_tail': output[-2000:], 'output_sha256': hashlib.sha256(output.encode()).hexdigest()}
+    result = {'exit_code': code, 'seconds': round(time.monotonic() - started, 3), 'tests_run': run,
+              'tests_passed': counts['passed'], 'tests_skipped': counts['skipped'], 'tests_failed': failed,
+              'failing_tests': ids, 'output_tail': output[-2000:],
+              'output_sha256': hashlib.sha256(output.encode()).hexdigest()}
+    if keep_output:  # grade records keep only the tail
+        result['output'] = output
+    return result
 
 
 def isolated_dirs(scratch):

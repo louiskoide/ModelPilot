@@ -16,6 +16,9 @@ TOOLS = [
 
 
 class Server:
+    tools=TOOLS
+    name='modelpilot-m2'
+
     def __init__(self,state):
         self.state=state
         self.initialized=False
@@ -33,19 +36,19 @@ class Server:
             self.initialized=True
             requested=params.get('protocolVersion')
             version=requested if requested in ('2024-11-05','2025-03-26','2025-06-18') else '2025-06-18'
-            reply['result']={'protocolVersion':version,'capabilities':{'tools':{'listChanged':False}},'serverInfo':{'name':'modelpilot-m2','version':'0.1.0'}}
+            reply['result']={'protocolVersion':version,'capabilities':{'tools':{'listChanged':False}},'serverInfo':{'name':self.name,'version':'0.1.0'}}
         elif method=='ping':
             reply['result']={}
         elif not self.initialized:
             reply['error']={'code':-32002,'message':'Initialize first'}
         elif method=='tools/list':
-            reply['result']={'tools':TOOLS}
+            reply['result']={'tools':self.tools}
         elif method=='tools/call':
             name=params.get('name'); args=params.get('arguments',{})
-            schema=next((t['inputSchema'] for t in TOOLS if t['name']==name),None)
+            schema=next((t['inputSchema'] for t in self.tools if t['name']==name),None)
             valid=schema is not None and isinstance(args,dict)
             if valid:
-                valid=(not set(args)-set(schema['properties']) and all(k in args for k in schema['required']))
+                valid=(not set(args)-set(schema['properties']) and all(k in args for k in schema.get('required',[])))
                 for key,value in args.items():
                     kind=schema['properties'].get(key,{}).get('type')
                     valid=valid and (isinstance(value,str) if kind=='string' else type(value) is int)
@@ -53,20 +56,22 @@ class Server:
                 reply['error']={'code':-32602,'message':'Unknown tool or invalid arguments'}
             else:
                 try:
-                    fn={'expand_output':self.state.expand,'get_task':self.state.get,'stuck_recommendation':self.state.recommend}[name]
-                    result=fn(**args)
-                    reply['result']={'content':[{'type':'text','text':json.dumps(result)}],'isError':False}
+                    reply['result']={'content':[{'type':'text','text':json.dumps(self.call(name,args))}],'isError':False}
                 except (ValueError,TypeError):
-                    reply['result']={'content':[{'type':'text','text':'Invalid handle, task or pagination arguments.'}],'isError':True}
+                    reply['result']={'content':[{'type':'text','text':self.invalid}],'isError':True}
         else:
             reply['error']={'code':-32601,'message':'Method not found'}
         return reply
 
+    invalid='Invalid handle, task or pagination arguments.'
 
-def main():
-    parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--db',type=Path,required=True)
-    args=parser.parse_args(); state=State(args.db); server=Server(state)
+    def call(self,name,args):
+        fn={'expand_output':self.state.expand,'get_task':self.state.get,'stuck_recommendation':self.state.recommend}[name]
+        return fn(**args)
+
+
+def serve(server,close):
+    """Newline-delimited JSON-RPC over stdio until EOF."""
     try:
         while True:
             line=sys.stdin.buffer.readline(65537)
@@ -80,7 +85,14 @@ def main():
                     response={'jsonrpc':'2.0','id':None,'error':{'code':-32700,'message':'Parse error'}}
             if response is not None:
                 print(json.dumps(response),flush=True)
-    finally: state.close()
+    finally: close()
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--db',type=Path,required=True)
+    args=parser.parse_args(); state=State(args.db)
+    serve(Server(state),state.close)
 
 
 if __name__=='__main__': main()

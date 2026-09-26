@@ -90,3 +90,23 @@ Validation (`tests/test_policy_session.py`, 7 tests, $0): real client, six ident
 Full regression: **303 tests, OK, 85.686 seconds** on Python 3.12 (`runs/policy-dispatch-regression.log`). The known connection-reset traceback still appears in fixture output. System Python 3.9 shows the two known `test_transport` HTTPError errors. No paid calls.
 
 Not covered: provider acceptance of any rewritten request, thinking-history changes, the worker/reference-output tools in a benchmark trial, and active mode in `bench.py` (the ModelPilot adapter still refuses it). Next: connect the worker/reference-output tools in an isolated fixture benchmark trial.
+
+## ModelPilot arm tools in a fixture bench trial — September 25
+
+`modelpilot/bench_tools.py` is the arm's stdio MCP server (policy R5, lever 1). It exposes `run_tests`, `search` and `expand_output`. All three are host operations: no model calls, and no model-chosen commands.
+
+- `run_tests` takes no arguments. It runs the task's own `suite_command` in the trial workspace through `bench_tasks.run_tests` (credential-free environment, the trial's HOME/TMPDIR, the grader's timeout). It returns counts, failing IDs and the output. Each completed run is recorded as a `suite`/`failures` ladder observation, so stalled tests are host evidence for R2.
+- `search` is a literal search of tracked and new non-ignored files (1 MiB per file, 300 characters per line).
+- Output over the threshold `T` (default 8 KB) is stored in the ledger and returned as a head/tail excerpt plus a handle. `expand_output` pages it. Every call is journaled (`bench_tool`: counts, bytes, truncation, never content).
+
+`ModelPilotAdapter(tools=True)` writes the per-trial MCP config, adds the three tools to `--allowedTools` and adds one prompt paragraph naming them. `fixture_policy=<FixtureServer>` passes a `ProxyPolicy` to the trial proxy. Everything else is unchanged: the arm stays dry-run, `benchmark_eligible` stays false, and the observer exclusion still applies. `m2_mcp.Server` is now reusable (`tools`, `call`, `serve`), and its argument check no longer assumes a `required` list.
+
+Validation (`tests/test_bench_tools.py`, 9 tests, $0). Server level: the excerpt stays within the threshold and pages back in full; three stalled suite runs produce `increase_effort`; tests see no provider key; invalid arguments are refused; a correction refuses stale observations. Two `bench.run_trial` trials use the real client (2.1.282) and the synthetic task, and both pass the hidden grader:
+- A 200-match search enters context only as an excerpt. The next request carries the full text only after `expand_output`, with tokens and governor = proxy matching.
+- A broken edit plus three `run_tests` calls escalates Sonnet 5 medium → high through the fixture policy. The fix is then made at high, 2 kept requests follow, and the cost is complete.
+
+The trial tests passed 3 of 3 repeated runs.
+
+Full regression: **312 tests, OK, 99.358 seconds** on Python 3.12 (`runs/bench-tools-regression.log`). The known connection-reset traceback still appears; Python 3.9 shows the two known `test_transport` errors. No paid calls.
+
+Not covered: M3 worker drafts with M4 verification and `execute_fallback` (lever 3, which makes its own billable calls), test selection in `run_tests`, whether models actually prefer these tools over Bash, R3/R4 cost-motivated switches, and any provider traffic. Remaining gates before a paid ModelPilot arm: thinking-history compatibility across setting changes (probe with the provider), the user's approval of active mode for the benchmark arm, and Jev router pricing for the comparison.
