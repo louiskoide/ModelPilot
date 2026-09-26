@@ -248,3 +248,14 @@ class RebuildTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class IneligibleTrialTests(unittest.TestCase):
+    def test_an_ineligible_trial_is_excluded_with_its_reason(self):
+        base = dict(task='x', complete=True, passed=True, wall_seconds=1, accounting={'cost_usd': .1},
+                    cache={'cold_equivalent_cost_usd': .1})
+        rows = [dict(base, arm='jev-compat-o55', routing={'benchmark_eligible': False, 'ineligible_reason': 'served_outside_model_set'}),
+                dict(base, arm='modelpilot', routing={'benchmark_eligible': False})]
+        result = summarize(rows, ['jev-compat-o55', 'modelpilot'], resamples=10)
+        self.assertEqual([(t['arm'], t['reason']) for t in result['excluded_ineligible_trials']],
+                         [('jev-compat-o55', 'served_outside_model_set'), ('modelpilot', 'adapter_not_benchmark_eligible')])

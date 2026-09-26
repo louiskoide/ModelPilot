@@ -191,11 +191,35 @@ def forecast(request, usage, rates):
             'scenarios': scenarios}
 
 
+def filter_catalog(data, allowed):
+    """Keep only the allowed models, in upstream order; (None, None) when the body is not a catalog."""
+    try:
+        body = json.loads(data)
+        if not isinstance(body, dict) or not isinstance(body.get('data'), list):
+            raise TypeError
+        models = body['data']
+        kept = [m for m in models if isinstance(m, dict) and m.get('id') in allowed]
+    except (ValueError, TypeError):
+        return None, None
+    body.update(data=kept, has_more=False)
+    for field, pick in (('first_id', 0), ('last_id', -1)):
+        if field in body:
+            body[field] = kept[pick]['id'] if kept else None
+    ids = {m['id'] for m in kept}
+    return json.dumps(body).encode(), {'kept': sorted(ids), 'dropped': len(models) - len(kept),
+                                       'missing': sorted(set(allowed) - ids)}
+
+
 class ProxyServer(ThreadingHTTPServer):
     # server_close must join request handlers before closing their shared accounting log.
     # Client and upstream socket operations already have 120-second timeouts.
     daemon_threads = False
-    def __init__(self, address, upstream, log_path, rates, governor=None, policy=None):
+    def __init__(self, address, upstream, log_path, rates, governor=None, policy=None, catalog=None):
+        """catalog: model ids a model-constrained arm may discover; the model catalog is filtered to them."""
+        if catalog is not None and (isinstance(catalog, str) or not catalog or
+                                    not all(isinstance(m, str) and m for m in catalog)):
+            raise ValueError('catalog must be a non-empty collection of model ids')
+        self.catalog = None if catalog is None else tuple(catalog)
         parsed = urlsplit(upstream)
         if not ((parsed.scheme == 'https' and parsed.netloc == 'api.anthropic.com') or
                 (parsed.scheme == 'http' and parsed.hostname == '127.0.0.1')):
@@ -354,6 +378,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
             data = response.read(MAX_BODY + 1)
             if len(data) > MAX_BODY:
                 raise ValueError('catalog too large')
+            if self.server.catalog is not None and response.status == 200:
+                data, row['catalog'] = filter_catalog(data, self.server.catalog)
+                if data is None:
+                    row.update(status='catalog_unreadable', http_status=502)
+                    self.send_error(502, 'Unreadable model catalog')
+                    sent_headers = True
+                    return
             row['http_status'] = response.status
             self.send_response_only(response.status, response.reason)
             for k, v in clean_headers(response.headers).items():

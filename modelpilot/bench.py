@@ -33,6 +33,7 @@ import uuid
 from . import bench_jev, bench_report, bench_tasks
 from .governed_session import client_env
 from .jev_route_check import PATCH, TOKEN_FIELDS, check_anthropic_key, parse_events
+from .policy_actions import MODELS as POLICY_TIERS
 from .proxy import ProxyServer
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +44,7 @@ FOLLOW_UP = "Run the repository's full test suite and fix anything that fails be
 SHAPES = ('single', 'followup')
 ARMS = {
     'opus-5': {'kind': 'fixed', 'model': 'claude-opus-5'},
+    'opus-5.5': {'kind': 'fixed', 'model': 'claude-opus-5-5'},  # the policy's top rung since September 26
     'sonnet-5': {'kind': 'fixed', 'model': 'claude-sonnet-5'},
     'haiku-4.5': {'kind': 'fixed', 'model': 'claude-haiku-4-5-20251001'},
     # Jev picks the served model per turn; the client only sends the sentinel.
@@ -50,6 +52,11 @@ ARMS = {
                   'patch': None},
     'jev-compat': {'kind': 'jev', 'variant': 'compat', 'model': 'jev-router', 'checkout': 'work/jev-router-compat',
                    'patch': PATCH},
+    # Model-constrained compat Jev (recorded separately): it discovers only the policy's tiers, so it routes among the
+    # same models as the fixed and ModelPilot arms. Stock Jev cannot be aligned: it never routes this client and
+    # its fallback is its static claude-opus-5.
+    'jev-compat-o55': {'kind': 'jev', 'variant': 'compat', 'model': 'jev-router', 'checkout': 'work/jev-router-compat',
+                       'patch': PATCH, 'models': POLICY_TIERS},
     # Registered so plans and reports name it; its launcher arrives with work item 4.
     'modelpilot': {'kind': 'modelpilot', 'policy': 'docs/m6-modelpilot-policy.md'},
 }
@@ -75,6 +82,18 @@ def rates():
     merged.update(json.loads((ROOT/'configs/jev-rates.json').read_text())['rates'])
     merged.update(json.loads((ROOT/'configs/opus-5-5-rates.json').read_text())['rates'])
     return merged
+
+
+def model_eligibility(routing, models, catalog):
+    """A model-constrained trial compares only if Jev saw exactly its model set and served nothing else."""
+    routing['model_set'] = list(models)
+    routing['outside_model_set'] = sorted(set(routing['served_models']) - set(models))
+    reason = ('served_outside_model_set' if routing['outside_model_set'] else
+              'catalog_incomplete' if not catalog or catalog.get('status') != 200 or set(catalog['models']) != set(models)
+              else None)
+    if reason:
+        routing.update(benchmark_eligible=False, ineligible_reason=reason)
+    return routing
 
 
 def schedule(tasks, arms, trials, seed):
@@ -369,6 +388,8 @@ class Trial:
         if self.adapter and hasattr(self.adapter, 'setup'):
             self.adapter.setup(self)
         options = self.adapter.proxy_options() if self.adapter and hasattr(self.adapter, 'proxy_options') else {}
+        if self.arm.get('models'):
+            options['catalog'] = self.arm['models']
         self.proxy = ProxyServer(('127.0.0.1', 0), self.upstream, self.log, self.rates, **options)
         self.proxy_thread = threading.Thread(target=self.proxy.serve_forever, daemon=True)
         self.proxy_thread.start()
@@ -377,6 +398,8 @@ class Trial:
             self.route = self.router.start(proxy_url, dirs, self.jev_key, self.dir/'jev.stderr.txt', stub=self.jev_stub)
             self.record['router'] = self.route.get('router')
             env.update(self.route['env'])  # the router's port and the jev-router sentinel
+            if self.arm.get('models'):
+                self.record['catalog'] = bench_jev.prefetch_catalog(self.route['env']['ANTHROPIC_BASE_URL'], self.api_key)
         else:
             env['ANTHROPIC_BASE_URL'] = proxy_url
         self.env = env
@@ -432,6 +455,8 @@ class Trial:
             decisions, stderr = self.dir/'decisions.json', self.dir/'jev.stderr.txt'
             routing = bench_jev.routing(json.loads(decisions.read_text()) if decisions.exists() else [],
                                         stderr.read_text(errors='replace') if stderr.exists() else '', rows, self.sessions)
+            if self.arm.get('models'):
+                model_eligibility(routing, self.arm['models'], self.record.get('catalog'))
             self.record['routing'] = routing
             self.router_unavailable = routing['auth_failure']
         self.record.update(
@@ -674,7 +699,8 @@ def main():
         raise SystemExit(f'Not runnable yet: {", ".join(blocked)} (launchers arrive with work item 4).')
     jev_arms = [a for a in arms if ARMS[a]['kind'] == 'jev']
     table = rates()
-    served = sorted({m for a in arms for m in (bench_jev.JEV_MODELS if a in jev_arms else [ARMS[a]['model']])})
+    served = sorted({m for a in arms for m in (ARMS[a].get('models', bench_jev.JEV_MODELS) if a in jev_arms
+                                                 else [ARMS[a]['model']])})
     missing = [m for m in served if m not in table]
     if missing:
         raise SystemExit(f'No configured rates for {missing}.')

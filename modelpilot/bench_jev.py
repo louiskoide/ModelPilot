@@ -12,6 +12,7 @@ as fixed Opus plus router overhead. Router (TypeSafe) cost is unpriced: Jev doll
 provider cost only, a lower bound.
 """
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -21,11 +22,15 @@ import shutil
 import signal
 import subprocess
 import time
+from urllib.parse import urlsplit
 from .jev_route_check import DECISION, FAILURES, REWRITE, load_decisions, verify_checkout
 
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT/'modelpilot/jev_accounted_launch.mjs'
 # Tiers Jev can serve at the pinned revision (src/config.mjs); Fable needs JEV_ALLOW_FABLE=1, never set here.
+# Jev replaces these with the account catalog only once something fetches /v1/models through it, and
+# Claude Code in -p mode never does (2.1.282, checked offline). A model-constrained arm (bench.ARMS 'models')
+# is prefetched with a catalog filtered to its set instead; see prefetch_catalog.
 JEV_MODELS = ('claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5')
 UNDECIDED = re.compile(r'^\[jev\] \w+ no-jev ', re.M)
 AUTH_FAILURE = re.compile(r'^\[jev\] routing failed.*(?:\b401\b|authenticat)', re.M | re.I)
@@ -129,6 +134,27 @@ class JevRouter:
         decisions = load_decisions(tmp_dir)
         Path(dest).write_text(json.dumps(decisions, indent=2) + '\n')
         return decisions
+
+
+def prefetch_catalog(base_url, key, timeout=10):
+    """GET /v1/models through Jev's proxy, as interactive Claude Code does for its picker, so Jev's catalog
+    is the (filtered) account catalog. The key travels as a request header, like every client request; the
+    router process's environment never holds it. Returns the status and the model ids Jev received."""
+    origin = urlsplit(base_url)
+    conn = http.client.HTTPConnection(origin.hostname, origin.port, timeout=timeout)
+    try:
+        conn.request('GET', '/v1/models?limit=100', headers={'x-api-key': key, 'anthropic-version': '2023-06-01'})
+        response = conn.getresponse()
+        data = response.read()
+    except OSError as e:
+        return {'status': None, 'models': [], 'error': type(e).__name__}
+    finally:
+        conn.close()
+    try:
+        models = [m.get('id') for m in json.loads(data).get('data', []) if isinstance(m, dict)]
+    except (ValueError, AttributeError):
+        models = []
+    return {'status': response.status, 'models': models}
 
 
 def session_of(at_ms, sessions):

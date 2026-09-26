@@ -79,7 +79,7 @@ Opus 5.5 replaced Opus 5 as the top rung on September 26 (user decision). It is 
 - It enforces the preserved-thinking history check on newer accounts.
 - It defaults to medium effort (the proxy always sets effort), rejects forced tool choice, and has broader safety classifiers.
 
-**Gate before any comparison:** this breaks the original rule of using the same models as the Jev arm. The fixed arms (`bench.ARMS` has `opus-5`, not Opus 5.5) and the Jev arm must offer the same top model before policy results are compared. Otherwise the comparison mixes a model upgrade into the policy result. Jev routes among the models in the account's native catalog, so constraining it is a model-constrained Jev variant, recorded separately. This is not done yet.
+**Arm alignment (done offline, September 26):** the comparison set uses the same three models. It has the fixed arms `haiku-4.5`, `sonnet-5` and `opus-5.5`, plus `jev-compat-o55`, a model-constrained compat Jev recorded separately. `jev-compat-o55` discovers only these tiers through a filtered, prefetched catalog, and trials that serve anything else are excluded. Stock Jev cannot be aligned: it never routes and falls back to its static Opus 5. It stays as a reference on Opus 5, with `opus-5` and `jev-compat`. See `docs/m6-benchmark-plan.md`, "Jev model alignment".
 
 **Prerequisite:** a short M0 replication on these three models covering effort and model switches, returns to warm entries, and the 300 s / 330 s TTL points. It extends `modelpilot.cache_probe` and costs a few dollars. If the 5 family behaves differently, R3 and the cache-state model change before anything else is built.
 
