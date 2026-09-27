@@ -31,9 +31,24 @@ class ScheduleTests(unittest.TestCase):
         result = bench.accounting(rows, {})
         self.assertEqual((result['cost_usd'], result['known_cost_usd'], result['rejected_requests']), (None, .01, 1))
 
-    def test_unimplemented_arms_refuse_instead_of_pretending(self):
+    def test_the_modelpilot_arm_needs_its_adapter(self):
         with self.assertRaises(NotImplementedError):
             bench.run_trial({'id': 't'}, 'modelpilot', '/nonexistent', 'claude', 'k', 'http://127.0.0.1:1', RATES)
+
+    def test_the_modelpilot_arm_gets_the_active_policy_and_the_same_limit_per_session(self):
+        self.assertIsNone(bench.arm_adapter('sonnet-5', 1.5, 1))
+        adapter = bench.arm_adapter('modelpilot', 1.5, 2)
+        self.assertEqual((adapter.policy.mode, adapter.tools, adapter.limit), ('active', True, 3.0))
+        table = bench.rates()
+        self.assertTrue(all(m in table for m in bench.ARMS['modelpilot']['served_models']))
+
+    def test_refused_requests_are_counted_apart_from_sent_ones(self):
+        rows = [{'kind': 'messages', 'http_status': 200, 'cost_usd': .01, 'usage': {'input_tokens': 5}},
+                {'kind': 'refused', 'refusal': 'insufficient_budget', 'http_status': 400, 'cost_usd': 0.0}]
+        result = bench.accounting(rows, {})
+        self.assertEqual((result['requests'], result['rejected_requests'], result['refused_requests'], result['cost_usd']),
+                         (1, 0, 1, .01))
+        self.assertEqual(result['refusal_reasons'], {'insufficient_budget': 1})
 
     def test_every_fixed_arm_model_has_rates(self):
         table = bench.rates()
@@ -60,6 +75,10 @@ class ScheduleTests(unittest.TestCase):
                  (('completed', {'subtype': 'error_during_execution', 'is_error': True, 'api_error_status': 400}, []), 'api_error'),
                  (('completed', {'subtype': 'error_during_execution', 'is_error': True}, []), 'client_error'),
                  (('completed', {}, []), 'client_error')]
+        error = {'subtype': 'success', 'is_error': True}  # how the client ends after a proxy refusal
+        for reason, expected in (('insufficient_budget', 'budget_stop'), ('cost_unknown', 'cost_unknown_halt'),
+                                 ('policy_stop:re_diagnose', 'policy_stop'), ('stale_task', 'policy_refused')):
+            cases.append((('completed', error, [{'kind': 'refused', 'refusal': reason}]), expected))
         for args, expected in cases:
             self.assertEqual(bench.stop_reason(*args), expected, args)
 

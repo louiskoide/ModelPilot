@@ -1,8 +1,10 @@
 """ModelPilot benchmark plumbing and conservative switch-cost proposals.
 
 Observe-only by default. tools=True adds the R5 tools (bench_tools MCP server). A
-fixture_policy (the owned fixtures.FixtureServer) applies ladder escalations offline. None of
-this is the active ModelPilot policy, and every trial stays ineligible for savings comparisons.
+fixture_policy (the owned fixtures.FixtureServer) applies ladder escalations offline; those
+trials stay ineligible for comparisons. mode='active' runs the arm's policy
+(active_policy.ActivePolicy, user-approved for the benchmark arm only) with the tools; only
+such trials are benchmark-eligible.
 """
 import hashlib
 import json
@@ -61,14 +63,19 @@ class ModelPilotAdapter:
     key=''
 
     def __init__(self,limit_usd=1.,mode='dry-run',tools=False,threshold=8192,fixture_policy=None):
-        if mode!='dry-run':
-            raise ValueError('Active ModelPilot benchmark policy is not validated')
+        if mode not in ('dry-run','active'):
+            raise ValueError('Mode must be dry-run or active')
+        if mode=='active' and (fixture_policy is not None or not tools):
+            raise ValueError('The active arm runs its own policy with the R5 tools, never a fixture policy')
         if not math.isfinite(limit_usd) or limit_usd<=0:
             raise ValueError('Positive finite budget required')
         if isinstance(threshold,bool) or not isinstance(threshold,int) or threshold<256:
             raise ValueError('Excerpt threshold must be an integer of at least 256 bytes')
         self.policy=None
-        if fixture_policy is not None:
+        if mode=='active':
+            from .active_policy import ActivePolicy
+            self.policy=ActivePolicy(self.model,OWNER)
+        elif fixture_policy is not None:
             from .fixture_dispatch import ProxyPolicy
             self.policy=ProxyPolicy(fixture_policy,self.model,OWNER)  # refuses anything but the fixture
         self.limit,self.tools,self.threshold=limit_usd,tools,threshold
@@ -139,9 +146,11 @@ class ModelPilotAdapter:
             policy=gov.policy()
             hooks=gov.journal('hook_event')
             tool_calls=[e['payload'] for e in gov.journal('bench_tool')]
+            dispatch,keep=(self.policy.Dispatch.journal_kind,self.policy.keep_kind) if self.policy else (None,None)
             escalations=[{k:e['payload'].get(k) for k in ('action','status','target_model','target_effort')}
-                         for e in gov.journal('fixture_dispatch')]
-            kept=len(gov.journal('fixture_keep_escalated'))
+                         for e in gov.journal(dispatch)] if dispatch else []
+            kept=len(gov.journal(keep)) if keep else 0
+            stops=[e['payload'] for e in gov.journal('policy_stop')]
             from .policy_actions import escalation_proposal
             try:
                 row=gov.state.get(self.task)
@@ -153,16 +162,26 @@ class ModelPilotAdapter:
         log=Path(directory)/'observations.jsonl'
         rows=[json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
         messages=[r for r in rows if r.get('kind')=='messages']
+        refused=[r for r in rows if r.get('kind')=='refused']
         settled=all(r.get('governor_status')=='settled' for r in messages)
         known=sum(r.get('cost_usd') or 0 for r in messages)
         policy_file=Path(__file__).resolve().parents[1]/'docs/m6-modelpilot-policy.md'
-        return {'mode':'dry-run' if self.policy is None else 'fixture-policy',
-                'applied':any(r.get('applied') for r in messages),
-                'active_policy_implemented':False,'benchmark_eligible':False,
-                'tools':{'enabled':self.tools,'threshold_bytes':self.threshold,'calls':tool_calls},
-                'fixture_policy':{'escalations':escalations,'kept_requests':kept} if self.policy else None,
-                'policy_sha256':hashlib.sha256(policy_file.read_bytes()).hexdigest(),
-                'governor':policy,'escalation_proposal':proposal,'hook_events':len(hooks),'all_requests_settled':bool(messages) and settled,
-                'accounting_matches':bool(messages) and settled and policy['cost_complete'] and
-                    all(r.get('cost_usd') is not None for r in messages) and abs(known-policy['spent_usd'])<1e-9,
-                'would_refuse':sum(not r.get('governor',{}).get('admitted',False) for r in messages)}
+        mode=self.policy.mode if self.policy else 'dry-run'
+        active=mode=='active'
+        fixture={'escalations':escalations,'kept_requests':kept} if self.policy else None
+        from .active_policy import PARAMETERS
+        out={'kind':'modelpilot_policy','mode':mode,'applied':any(r.get('applied') for r in messages),
+             'active_policy_implemented':active,'benchmark_eligible':active and self.tools,
+             'tools':{'enabled':self.tools,'threshold_bytes':self.threshold,'calls':tool_calls},
+             'fixture_policy':None if active else fixture,
+             'policy':dict(fixture,stops=stops,refusals=[r.get('refusal') for r in refused],parameters=PARAMETERS)
+                 if active else None,
+             'policy_sha256':hashlib.sha256(policy_file.read_bytes()).hexdigest(),
+             'governor':policy,'escalation_proposal':proposal,'hook_events':len(hooks),'all_requests_settled':bool(messages) and settled,
+             'accounting_matches':bool(messages) and settled and policy['cost_complete'] and
+                 all(r.get('cost_usd') is not None for r in messages) and abs(known-policy['spent_usd'])<1e-9,
+             # Requests the governor would have refused; policy tickets carry their own admission.
+             'would_refuse':sum('governor' in r and not r['governor']['admitted'] for r in messages)}
+        if not active:
+            out['ineligible_reason']='fixture_policy' if self.policy else 'observer_only'
+        return out

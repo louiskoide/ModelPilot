@@ -86,7 +86,7 @@ All 40 tasks re-validated under the new grading environment on September 24 (`ru
 
 **Jev arms (done offline, $0, September 24).** `jev-stock` and `jev-compat` run in `bench.py`; see "Jev arms" below. The offline end-to-end tests use the real 2.1.281 client, Jev's real proxy, a stub in place of TypeSafe and the scripted fixture. Compat routes a fixing session, with tokens and wire dollars exact. A follow-up keeps Jev's routing state (the second decision sees the first selection as current), with one Jev process for both sessions. Stock serves everything on Opus without a decision. No live Jev trial has run.
 
-Next: M0 replication on the 5 family and the ModelPilot launcher (item 4). A tuning run on the fixed and Jev arms is possible now. Run `python3 -m modelpilot.jev_check --live` first.
+Next: the 4a tuning run. Every arm in the comparison set runs from the CLI (the ModelPilot arm since September 26, offline-verified only). The Jev credential check passed again on September 26 (`runs/jev-preflight-20260926-171119`), and the benchmark venv's site-packages is locked. 4a uses `--run-budget 25` (user decision).
 
 ## Question
 
@@ -105,7 +105,7 @@ All arms use the same tasks, tools, per-task limits, graders and isolation. Sinc
 | Stock Jev | pinned, unmodified. With current Claude Code it does not route, so it is reported as a fixed-Opus arm plus router overhead |
 | Compat Jev | pinned plus the one-line patch (`work/jev-router-compat`), reported with `rejected_requests`, `extra_decisions` and router usage. It routes among Jev's static tiers, including Opus 5 (reference) |
 | Aligned compat Jev (`jev-compat-o55`) | compat Jev, model-constrained and recorded separately: it discovers only the policy's tiers, so it routes among Haiku 4.5, Sonnet 5 and Opus 5.5 (see "Jev model alignment") |
-| ModelPilot | policy in `docs/m6-modelpilot-policy.md`, active for this arm only, after user approval |
+| ModelPilot (`modelpilot`) | policy in `docs/m6-modelpilot-policy.md`, active for this arm only (approved September 26): Sonnet 5 medium, stuck ladder to Sonnet 5 high and Opus 5.5 medium, R5 tools, limit enforced on wire cost. R3/R4 and worker drafts not implemented. Offline-verified only |
 
 Every arm runs through ModelPilot's proxy for wire accounting. That arrangement already reconciles Jev exactly. Claude Code's own cost figures are never used for Jev or ModelPilot.
 
@@ -208,11 +208,12 @@ While a trial waits out its gap, other trials run. Only one client runs at a tim
 
 Every paid phase prints its plan without `--live`, needs the user's key at a hidden prompt, and reports stop thresholds, which are not billing caps.
 
-## Decisions still needed from the user
+## User decisions (September 26)
 
-1. **Active mode for the ModelPilot arm only**, as described in the policy doc, before 4a.
-2. **A budget for 4a and 4b**, set after the pilot measures cost per session.
-3. **Repository list:** proposed after 3a surveys candidates, including licenses.
+1. **Active mode for the ModelPilot arm only: approved**, as described in the policy doc. It applies to the benchmark arm alone; the governor stays dry-run everywhere else, and the user's normal sessions are unchanged. Paid trials still need `--live` and the key at a hidden prompt.
+2. **Budget:** 4a runs with `--run-budget 25` (forecast about $10–15 at the pilot's per-trial cost). The 4b budget is set after 4a measures cost per trial. A run budget is a stopping threshold, not a billing cap.
+3. **Jev router cost:** keep the September 24 decision. Jev dollars are provider cost only, labeled as a lower bound, with `router_cost_usd: null`. Router pricing no longer blocks the comparison.
+4. **Repository list:** settled by 3d (`bench/splits.json`).
 
 ## Existing code reused
 

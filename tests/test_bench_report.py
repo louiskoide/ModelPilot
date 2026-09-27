@@ -259,3 +259,24 @@ class IneligibleTrialTests(unittest.TestCase):
         result = summarize(rows, ['jev-compat-o55', 'modelpilot'], resamples=10)
         self.assertEqual([(t['arm'], t['reason']) for t in result['excluded_ineligible_trials']],
                          [('jev-compat-o55', 'served_outside_model_set'), ('modelpilot', 'adapter_not_benchmark_eligible')])
+
+
+class ModelPilotPolicySummaryTests(unittest.TestCase):
+    def test_the_active_arm_is_summarized_as_policy_not_routing(self):
+        def policy(escalations=(), stops=(), refusals=(), kept=0):
+            return {'kind': 'modelpilot_policy', 'mode': 'active', 'benchmark_eligible': True,
+                    'policy': {'escalations': [{'action': a, 'status': s} for a, s in escalations],
+                               'kept_requests': kept, 'stops': list(stops), 'refusals': list(refusals)}}
+        base = dict(complete=True, passed=True, wall_seconds=1, accounting={'cost_usd': .1},
+                    cache={'cold_equivalent_cost_usd': .1}, arm='modelpilot')
+        rows = [dict(base, task='a', routing=policy([('increase_effort', 'confirmed')], kept=3)),
+                dict(base, task='b', passed=False,
+                     routing=policy([('increase_effort', 'confirmed'), ('stronger_model', 'confirmed')],
+                                    stops=[{'reason': 'policy_stop:re_diagnose'}], refusals=['policy_stop:re_diagnose'])),
+                dict(base, task='c', routing=policy(refusals=['insufficient_budget']))]
+        arm, = summarize(rows, ['modelpilot'], resamples=10)['arms']
+        self.assertNotIn('routing', arm)
+        self.assertEqual(arm['policy'], {'trials': 3, 'escalated_trials': 2, 'kept_requests': 3, 'policy_stops': 1,
+                                         'escalations': {'increase_effort:confirmed': 2, 'stronger_model:confirmed': 1},
+                                         'refusals': {'policy_stop:re_diagnose': 1, 'insufficient_budget': 1}})
+        self.assertEqual(summarize(rows, ['modelpilot'], resamples=10)['excluded_ineligible_trials'], [])

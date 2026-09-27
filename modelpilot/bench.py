@@ -15,9 +15,15 @@ must pass as many hidden tests as its reference did. Costs are reported cold-equ
 Jev arms (see bench_jev) run Jev's own proxy for the whole trial in front of the trial's
 ModelPilot proxy, with the jev-router sentinel instead of --model. Their dollars are provider
 cost only: router (TypeSafe) cost is unpriced, so they are a lower bound.
+
+The ModelPilot arm runs its active policy (active_policy; user-approved for this arm only)
+through modelpilot_adapter. Its governor enforces the same per-session limit on wire cost; a
+request it refuses never reaches the provider and ends the session.
 """
 import argparse
+from collections import Counter
 import getpass
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -57,13 +63,16 @@ ARMS = {
     # its fallback is its static claude-opus-5.
     'jev-compat-o55': {'kind': 'jev', 'variant': 'compat', 'model': 'jev-router', 'checkout': 'work/jev-router-compat',
                        'patch': PATCH, 'models': POLICY_TIERS},
-    # Registered so plans and reports name it; its launcher arrives with work item 4.
-    'modelpilot': {'kind': 'modelpilot', 'policy': 'docs/m6-modelpilot-policy.md'},
+    # The client asks for Sonnet 5 at medium effort (S0); the policy's proxy may serve the ladder's rungs.
+    'modelpilot': {'kind': 'modelpilot', 'model': 'claude-sonnet-5', 'effort': 'medium',
+                   'served_models': ['claude-sonnet-5', 'claude-opus-5-5'], 'policy': 'docs/m6-modelpilot-policy.md'},
 }
 RUNNABLE = ('fixed', 'jev')
 IDLE_SECONDS = 130  # the proxy's upstream socket timeout (120 s) bounds any request still in flight
 # Client result subtypes, pinned by the offline tests against Claude Code 2.1.281.
 STOPS = {'error_max_turns': 'turn_limit', 'error_max_budget_usd': 'budget_stop'}
+# ModelPilot arm: why its proxy refused a request, which ends the session.
+REFUSALS = {'insufficient_budget': 'budget_stop', 'cost_unknown': 'cost_unknown_halt'}
 # Files outside the restored test directory that can change which tests run, or how.
 TEST_CONFIG = ('conftest.py', 'pytest.ini', 'tox.ini', 'setup.cfg', 'pyproject.toml', 'sitecustomize.py', 'usercustomize.py')
 
@@ -96,6 +105,14 @@ def model_eligibility(routing, models, catalog):
     return routing
 
 
+def arm_adapter(arm, budget_usd, sessions):
+    """The ModelPilot arm's adapter: active policy, R5 tools, and the per-session limit for each session."""
+    if ARMS[arm]['kind'] != 'modelpilot':
+        return None
+    from .modelpilot_adapter import ModelPilotAdapter
+    return ModelPilotAdapter(limit_usd=budget_usd * sessions, mode='active', tools=True)
+
+
 def schedule(tasks, arms, trials, seed):
     order = [(t['id'], a, n) for t in tasks for a in arms for n in range(trials)]
     random.Random(seed).shuffle(order)
@@ -106,6 +123,7 @@ def accounting(rows, final, jev=False):
     """Wire accounting for one trial. Jev arms: provider cost only (router unpriced), and the
     client prices the jev-router sentinel with its own guess, so only its tokens are compared."""
     messages = [r for r in rows if r.get('kind') == 'messages']
+    refused = Counter(r.get('refusal') for r in rows if r.get('kind') == 'refused')  # ModelPilot arm; never sent
     ok = [r for r in messages if r.get('http_status') == 200]
     # Sensitivity only: requests the API answered with an error, counted as free. A transport
     # failure or an unpriced success is never a rejection.
@@ -121,6 +139,7 @@ def accounting(rows, final, jev=False):
            # Answered by the API with an error; a transport failure (no status) is not a rejection.
            'rejected_requests': sum(isinstance(r.get('http_status'), int) and r['http_status'] != 200 for r in messages),
            'transport_failures': sum(r.get('http_status') is None for r in messages),
+           'refused_requests': sum(refused.values()), 'refusal_reasons': dict(refused),
            'models': [r.get('model') for r in messages], 'unpriced_requests': unpriced,
            # Unknown cost stays unknown: a trial with any unpriced request has no dollar total.
            'cost_usd': known if unpriced == 0 and messages else None, 'known_cost_usd': known,
@@ -147,6 +166,9 @@ def stop_reason(status, final, rows):
         return 'success'
     if subtype in STOPS:
         return STOPS[subtype]
+    refusal = next((r.get('refusal') or '' for r in rows if r.get('kind') == 'refused'), None)
+    if refusal is not None:
+        return REFUSALS.get(refusal, 'policy_stop' if refusal.startswith('policy_stop') else 'policy_refused')
     if any(r.get('status') in ('transport_error', 'connection_closed') for r in rows):
         return 'transport_error'
     if final.get('api_error_status'):
@@ -604,6 +626,19 @@ def jev_manifest(arms):
             'add_dir': 'the Jev checkout, as the stock launcher passes it'} if jev else None
 
 
+def modelpilot_manifest(arms, budget_usd, sessions):
+    """What the ModelPilot arm ran, for the manifest; None without it."""
+    if 'modelpilot' not in arms:
+        return None
+    from .active_policy import PARAMETERS
+    policy = ROOT/ARMS['modelpilot']['policy']
+    return {'mode': 'active (user-approved September 26, benchmark arm only)', 'parameters': PARAMETERS,
+            'policy_sha256': hashlib.sha256(policy.read_bytes()).hexdigest(),
+            'governor_limit_usd': budget_usd * sessions,
+            'limit_basis': 'wire cost, admitted while measured spend is below the limit (the client budget-stop rule); '
+                           'the client threshold also applies, priced by Claude Code as the Sonnet 5 it asked for'}
+
+
 def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *, client_version=None, shape='single',
               gap=0, run_budget=None, expected=None, jev_key=None, trial_factory=None, clock=time.monotonic,
               sleep=time.sleep, **limits):
@@ -622,13 +657,15 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
                 'follow_up_prompt': FOLLOW_UP if shape == 'followup' else None, 'run_budget_usd': run_budget,
                 'reference_preflight': expected, 'cost_basis': 'cold-equivalent; measured alongside',
                 'jev': jev_manifest(arms),
+                'modelpilot': modelpilot_manifest(arms, limits.get('budget_usd', 1.0), 2 if shape == 'followup' else 1),
                 'note': 'Stop thresholds are not billing caps: per session, and the run threshold between sessions. No retries.'}
     with (out/'manifest.json').open('x') as f:
         json.dump(manifest, f, indent=2)
 
     def default_factory(task, arm, trial_dir, n):
+        adapter = arm_adapter(arm, limits.get('budget_usd', 1.0), 2 if shape == 'followup' else 1)
         return Trial(task, arm, trial_dir, cli, key, upstream, price_table, trial=n, shape=shape, gap=gap,
-                     client_version=client_version, jev_key=jev_key,
+                     client_version=client_version, jev_key=jev_key, adapter=adapter,
                      expected_hidden_passed=((expected or {}).get(task['id']) or {}).get('hidden_passed'), **limits)
     factory = trial_factory or default_factory
     executed = []
@@ -694,13 +731,13 @@ def main():
         changed = bench_tasks.check_lock(bench_tasks.load())
         if final and changed:
             raise SystemExit(f'Final task specs changed since the lock: {changed}. Not running.')
-    blocked = [a for a in arms if ARMS[a]['kind'] not in RUNNABLE]
+    blocked = [a for a in arms if ARMS[a]['kind'] not in RUNNABLE + ('modelpilot',)]
     if blocked:
-        raise SystemExit(f'Not runnable yet: {", ".join(blocked)} (launchers arrive with work item 4).')
+        raise SystemExit(f'Not runnable yet: {", ".join(blocked)}.')
     jev_arms = [a for a in arms if ARMS[a]['kind'] == 'jev']
     table = rates()
     served = sorted({m for a in arms for m in (ARMS[a].get('models', bench_jev.JEV_MODELS) if a in jev_arms
-                                                 else [ARMS[a]['model']])})
+                                                 else ARMS[a].get('served_models', [ARMS[a]['model']]))})
     missing = [m for m in served if m not in table]
     if missing:
         raise SystemExit(f'No configured rates for {missing}.')
@@ -738,6 +775,11 @@ def main():
                   'so their dollars are a lower bound; the client stop threshold is priced on the jev-router sentinel. '
                   'Stock Jev is expected not to route on this client (run as Opus plus router overhead). '
                   '--live asks for a TypeSafe key; consider python3 -m modelpilot.jev_check --live first.')
+        if 'modelpilot' in arms:
+            print(f'ModelPilot arm: active policy (benchmark arm only): starts at Sonnet 5 medium, escalates on the stuck '
+                  f'ladder to Sonnet 5 high then Opus 5.5 medium, stops a task stuck beyond that, and refuses any request '
+                  f'once wire spend reaches ${args.budget * sessions:.2f} per trial or cost is unknown. '
+                  'No cost-motivated switches, Haiku targets or worker drafts.')
         return
     cli, version = resolve_client(args.claude or shutil.which('claude') or 'claude')
     writable = bench_tasks.writable_site_packages(python)

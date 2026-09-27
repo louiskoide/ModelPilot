@@ -1,6 +1,8 @@
 # ModelPilot arm policy (proposal, not implemented)
 
-Status: design proposal written September 22, 2026. Nothing here is implemented or enabled. The governor stays dry-run. Running this policy in the M6 benchmark needs an explicit exception from the user: active mode for the **benchmark arm only**. It would not apply to the user's normal sessions.
+Status: design proposal written September 22, 2026. The governor stays dry-run. On September 26 the user approved the exception this policy needs: active mode for the **benchmark arm only**. It does not apply to the user's normal sessions. R1, R2, R5 and R6 now run in the arm (`modelpilot/active_policy.py`), verified offline only; R3, R4 and worker drafts are not implemented. See "Active ModelPilot arm" in `docs/bench-adapters.md`.
+
+**Admission as built (September 26).** R6's limit is enforced on measured spend: a request is admitted while wire spend is below the per-task limit and cost is known, which is the rule of the client's own `--max-budget-usd` in the other arms. An R2 rung also needs the limit to cover its full rebuild (request bytes/3 tokens at the dearest write rate), but not its output allowance: Claude Code sends `max_tokens: 64000`, whose Opus 5.5 price alone exceeds the $1 default limit. When R2 says `re_diagnose` or `human_review`, the proxy refuses the next main-loop request, so the session ends and the trial is recorded as unfinished (`policy_stop`).
 
 ## Why a policy is needed
 

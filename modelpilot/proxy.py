@@ -1,7 +1,9 @@
 """Loopback Messages API pass-through proxy. Policy decisions are logs only.
 
-The one exception is a fixture_dispatch.ProxyPolicy, which applies ladder escalations and is
-only accepted when the upstream is the owned in-process fixture server (tests, never live).
+Two exceptions. A fixture_dispatch.ProxyPolicy applies ladder escalations and is only accepted
+when the upstream is the owned in-process fixture server (tests, never live). An
+active_policy.ActivePolicy, the ModelPilot benchmark arm only, applies escalations live and
+enforces admission: a refused request gets an API-style error from the proxy and is never sent.
 """
 import argparse
 import hashlib
@@ -261,8 +263,13 @@ class ProxyServer(ThreadingHTTPServer):
         g = self.governor
         return Governor(g['db'], g['session'], g['limit_usd'])
 
+    @property
+    def active(self):
+        return bool(self.governor) and getattr(self.policy, 'active', False)
+
     def admit(self, row, raw, request):
-        """Reserve under a fresh shared ID. Dry-run: the decision never blocks forwarding."""
+        """Reserve under a fresh shared ID. Dry-run: the decision never blocks forwarding.
+        Active: enforced on measured spend (the other arms' stop rule); a refusal reserves nothing."""
         request_id = row['governor_request_id'] = 'mp-' + uuid.uuid4().hex
         gov = self.open_governor()
         try:
@@ -270,11 +277,11 @@ class ProxyServer(ThreadingHTTPServer):
             # The client works from the revision it acknowledged; an undelivered correction is stale work.
             revision = None if task is None else (gov.state.get(task)['ack_revision'] or -1)
             decision = gov.admit(request_id, reservation_estimate(raw, request, self.rates), task, revision,
-                                 ttl=600, enforce=False)
+                                 ttl=600, enforce=self.active, gate='spent' if self.active else 'reservation')
         finally:
             gov.close()
         row['governor'] = {k: decision[k] for k in ('admitted', 'reason', 'estimate_usd', 'enforced')}
-        row['governor_status'] = 'reserved'
+        row['governor_status'] = 'reserved' if decision['reserved'] else 'refused'
 
     def settle(self, row):
         gov = self.open_governor()
@@ -407,6 +414,26 @@ class ProxyHandler(BaseHTTPRequestHandler):
             row['wall_seconds'] = time.monotonic()-start
             self.server.record(row)
 
+    def refuse(self, row, reason):
+        """Active arm only: answer with an API-style error instead of forwarding. Nothing is billed."""
+        body = json.dumps({'type': 'error', 'error': {'type': 'invalid_request_error',
+                           'message': f'ModelPilot benchmark arm refused this request ({reason}).'}}).encode()
+        try:
+            self.send_response_only(400, 'Bad Request')
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        self.close_connection = True
+        # Its own kind, so request counts, accounting and cache attribution see only sent requests.
+        # governor_status 'refused' also keeps reconcile_log() from recording a reservation for it.
+        row.update(kind='refused', status='refused', refusal=reason, http_status=400, cost_usd=0.0, wall_seconds=0.0,
+                   governor_status='refused')
+        self.server.record(row)
+
     def do_POST(self):
         path = urlsplit(self.path)
         if path.path not in ('/v1/messages', '/v1/messages/count_tokens') or path.scheme or path.netloc:
@@ -456,6 +483,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 ticket, request = outcome, outcome['request']
                 raw = json.dumps(request).encode()
                 policy_row = {'kind': ticket['kind'], 'status': 'reserved'}
+                if ticket.get('escalation_deferred'):
+                    policy_row['escalation_deferred'] = ticket['escalation_deferred']
             else:
                 policy_row = {k: outcome[k] for k in ('status', 'reason') if k in outcome}
         headers = clean_headers(self.headers)
@@ -463,10 +492,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # Negotiate identity so usage inspection does not depend on client compression support.
         headers = {k: v for k, v in headers.items() if k.lower() != 'accept-encoding'}
         headers['Accept-Encoding'] = 'identity'
-        conn = self.upstream_connection()
-        start = time.monotonic()
         tools = request.get('tools')
-        row = {'started_unix': time.time(), 'kind': 'messages', 'mode': 'dry-run' if ticket is None else 'fixture-policy',
+        mode = self.server.policy.mode if ticket is not None else 'active' if self.server.active else 'dry-run'
+        row = {'started_unix': time.time(), 'kind': 'messages', 'mode': mode,
                'applied': ticket is not None,
                'tool_count': len(tools) if isinstance(tools, list) else 0,
                'request_sha256': hashlib.sha256(raw).hexdigest(),
@@ -479,11 +507,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
             row.update(client_request_sha256=client_sha, governor_request_id=ticket['request_id'],
                        governor_status='reserved')
         elif governed:
-            try:
-                self.server.admit(row, raw, request)
-            except Exception as e:
-                # Never block traffic; reconcile_log() later records this row's spend.
-                row.update(governor_status='untracked', governor_error=type(e).__name__)
+            stop = self.server.active and outcome['status'] == 'stop'
+            if not stop:
+                try:
+                    self.server.admit(row, raw, request)
+                except Exception as e:
+                    # Dry-run never blocks traffic; reconcile_log() later records this row's spend.
+                    row.update(governor_status='untracked', governor_error=type(e).__name__)
+            if self.server.active and row.get('governor_status') != 'reserved':
+                # Active arm fails closed: a policy stop, a refused admission, or no admission at all.
+                reason = outcome['reason'] if stop else (row.get('governor') or {}).get('reason') or 'governor_error'
+                self.refuse(row, reason)
+                return
+        conn = self.upstream_connection()
+        start = time.monotonic()
         sent_headers = False
         observer = UsageObserver(bool(request.get('stream')))
         try:

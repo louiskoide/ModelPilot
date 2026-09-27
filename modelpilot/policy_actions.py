@@ -95,7 +95,10 @@ def escalation_proposal(state,task,revision,owner,model,effort):
                 'target_model':target,'target_effort':target_effort,'action':action,'applied':False}
 
 
-def prepare_action(state,proposal,owner,request,available_usd,rates):
+def prepare_action(state,proposal,owner,request,available_usd,rates,reserve_output=True):
+    """reserve_output=False reserves the target's full rebuild (every request byte written at the
+    dearest write rate) without the output allowance: the active arm's rule, since none of its
+    requests reserves max_tokens (Claude Code sends 64000, $1.28 of Opus 5.5 output)."""
     fresh=escalation_proposal(state,proposal['task'],proposal['revision'],owner,
                              proposal['source_model'],proposal['source_effort'])
     if fresh!=proposal:raise ValueError('Proposal no longer matches host ledger evidence')
@@ -113,7 +116,8 @@ def prepare_action(state,proposal,owner,request,available_usd,rates):
         result['reason']='unknown_rates';return result
     if type(transformed.get('max_tokens')) is not int or transformed['max_tokens']<1:
         result['reason']='invalid_output_limit';return result
-    reserve=reservation_estimate(json.dumps(transformed).encode(),transformed,rates)
+    reserve=reservation_estimate(json.dumps(transformed).encode(),
+                                 transformed if reserve_output else dict(transformed,max_tokens=0),rates)
     result.update(reserve_usd=reserve,reason='insufficient_write_reservation')
     if reserve<=available_usd:
         result.update(action='prepared_offline',reason='requires_dispatch_time_fence_and_reservation',request=transformed)
