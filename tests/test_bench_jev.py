@@ -8,15 +8,20 @@ import tempfile
 import threading
 import unittest
 from unittest import mock
-from modelpilot import bench, bench_jev, jev_route_check
+from modelpilot import bench, bench_jev, fixtures, jev_route_check
 from modelpilot.fixtures import USAGE, fixture_server
+from modelpilot.policy_actions import MODELS as POLICY_TIERS
 from modelpilot.jev_route_check import load_decisions
 from tests import test_bench_tasks as synthetic
 from tests.test_bench import OfflineTrialTests
 
 ROOT = Path(__file__).resolve().parents[1]
 SONNET, OPUS, HAIKU = 'claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5-20251001'
+OPUS_5_5 = 'claude-opus-5-5'
 RATES = {SONNET: dict(input=2, output=10, read=.2, write_5m=2.5, write_1h=4)}
+# An account catalog, newest first, as GET /v1/models returns it.
+ACCOUNT_CATALOG = {'data': [{'id': m, 'type': 'model'} for m in (OPUS_5_5, OPUS, SONNET, 'claude-sonnet-4-6', HAIKU,
+                                                                  'claude-fable-5-1')], 'has_more': False}
 AUTH = '[jev] routing failed, keeping claude-opus-5: 401 Cannot authenticate with the server.'
 
 
@@ -132,6 +137,30 @@ class ArmTests(unittest.TestCase):
         self.assertEqual((compat['model'], compat['checkout'], compat['patch']),
                          ('jev-router', 'work/jev-router-compat', jev_route_check.PATCH))
 
+    def test_the_aligned_compat_arm_offers_only_the_policy_tiers(self):
+        aligned, compat = bench.ARMS['jev-compat-o55'], bench.ARMS['jev-compat']
+        self.assertEqual(aligned['models'], POLICY_TIERS)
+        self.assertEqual({k: v for k, v in aligned.items() if k != 'models'}, compat)
+        self.assertNotIn('models', bench.ARMS['jev-stock'])  # stock pins its static Opus 5 and cannot be aligned
+        self.assertTrue(all(m in bench.rates() for m in aligned['models']))
+
+    def test_the_catalog_prefetch_goes_through_the_given_proxy_with_the_client_key(self):
+        upstream = fixture_server()
+        thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
+                result = bench_jev.prefetch_catalog(f'http://127.0.0.1:{upstream.server_port}', 'sk-ant-client')
+            self.assertEqual(result, {'status': 200, 'models': [m['id'] for m in ACCOUNT_CATALOG['data']]})
+            self.assertEqual((upstream.received[-1]['path'], upstream.received[-1]['key']), ('/v1/models?limit=100', 'sk-ant-client'))
+        finally:
+            upstream.shutdown()
+            upstream.server_close()
+            thread.join()
+        result = bench_jev.prefetch_catalog('http://127.0.0.1:1', 'sk-ant-client')
+        self.assertEqual((result['status'], result['models']), (None, []))
+        self.assertIn('error', result)
+
     def test_every_model_jev_can_serve_has_rates(self):
         self.assertEqual(set(bench_jev.JEV_MODELS), {HAIKU, SONNET, OPUS})
         table = bench.rates()
@@ -210,13 +239,13 @@ class JevTrialTests(unittest.TestCase):
         self.thread.join()
         self.repo_case.tearDown()
 
-    def stub(self):
+    def stub(self, model=SONNET):
         def run_client(command, env, cwd, timeout, **_):
             self.calls.append(command)
             self.envs.append(env)
             host, port = env['ANTHROPIC_BASE_URL'].rsplit('/', 1)[1].split(':')
             conn = http.client.HTTPConnection(host, int(port), timeout=5)
-            conn.request('POST', '/v1/messages', json.dumps({'model': SONNET, 'max_tokens': 8, 'messages': [],
+            conn.request('POST', '/v1/messages', json.dumps({'model': model, 'max_tokens': 8, 'messages': [],
                                                              'tools': [{'name': 'Read'}]}),
                          {'Content-Type': 'application/json'})
             conn.getresponse().read()
@@ -227,9 +256,9 @@ class JevTrialTests(unittest.TestCase):
             return {'status': 'completed', 'returncode': 0, 'stdout': json.dumps(final) + '\n', 'stderr': ''}
         return mock.patch.object(bench, 'run_client', run_client)
 
-    def trial(self, router, **options):
-        return bench.Trial(self.task, 'jev-compat', self.repo_case.root/'trial', '/fake/claude', 'sk-ant-client',
-                           f'http://127.0.0.1:{self.upstream.server_port}', RATES, python=sys.executable,
+    def trial(self, router, arm='jev-compat', rates=RATES, **options):
+        return bench.Trial(self.task, arm, self.repo_case.root/'trial', '/fake/claude', 'sk-ant-client',
+                           f'http://127.0.0.1:{self.upstream.server_port}', rates, python=sys.executable,
                            router=router, jev_key='ts-secret', **options)
 
     def test_a_jev_session_is_routed_without_a_model_and_keeps_keys_apart(self):
@@ -258,6 +287,39 @@ class JevTrialTests(unittest.TestCase):
         self.assertTrue((self.repo_case.root/'trial'/'decisions.json').exists())
         self.assertTrue((self.repo_case.root/'trial'/'jev.stderr.txt').exists())
         self.assertTrue(record['complete'])
+
+    def aligned(self, catalog, model):
+        trial = self.trial(FakeRouter(ROUTED, [decision(model, 1)]), arm='jev-compat-o55', rates=bench.rates())
+        with mock.patch.object(fixtures, 'CATALOG', catalog), self.stub(model):
+            trial.step()
+        return trial.record
+
+    def test_the_aligned_arm_filters_and_prefetches_the_catalog(self):
+        record = self.aligned(ACCOUNT_CATALOG, SONNET)
+        self.assertEqual(record['catalog'], {'status': 200, 'models': [OPUS_5_5, SONNET, HAIKU]})
+        routing = record['routing']
+        self.assertEqual((routing['model_set'], routing['outside_model_set']), (list(POLICY_TIERS), []))
+        self.assertNotIn('benchmark_eligible', routing)
+
+    def test_serving_a_model_outside_the_set_makes_the_trial_ineligible(self):
+        routing = self.aligned(ACCOUNT_CATALOG, OPUS)['routing']
+        self.assertEqual((routing['benchmark_eligible'], routing['ineligible_reason'], routing['outside_model_set']),
+                         (False, 'served_outside_model_set', [OPUS]))
+
+    def test_an_incomplete_catalog_makes_the_trial_ineligible(self):
+        partial = dict(ACCOUNT_CATALOG, data=[m for m in ACCOUNT_CATALOG['data'] if m['id'] != OPUS_5_5])
+        record = self.aligned(partial, SONNET)
+        self.assertEqual(record['catalog']['models'], [SONNET, HAIKU])
+        self.assertEqual((record['routing']['benchmark_eligible'], record['routing']['ineligible_reason']),
+                         (False, 'catalog_incomplete'))
+
+    def test_unconstrained_arms_are_not_prefetched(self):
+        trial = self.trial(FakeRouter(ROUTED, [decision(SONNET, 1)]))
+        with self.stub():
+            trial.step()
+        self.assertNotIn('catalog', trial.record)
+        self.assertNotIn('model_set', trial.record['routing'])
+        self.assertEqual([r for r in self.upstream.received if r.get('method') == 'GET'], [])
 
     def test_keys_are_redacted_from_the_router_log(self):
         trial = self.trial(FakeRouter(ROUTED + 'echo ts-secret sk-ant-client\n', [decision(SONNET, 1)]))
@@ -333,6 +395,19 @@ class OfflineJevTrialTests(unittest.TestCase):
         self.assertIn('rewrite jev-router -> claude-sonnet-5', (trial_dir/'jev.stderr.txt').read_text())
         self.assertFalse((trial_dir/'workspace').exists())
         self.assert_gone(record['sessions'][0]['router_pid'])
+
+    def test_aligned_compat_jev_serves_opus_5_5_from_the_filtered_catalog(self):
+        with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
+            record = self.trial('jev-compat-o55', 'aligned', self.FIX, jev_stub=OPUS_5_5)
+        self.assertTrue(record['passed'], record['grade'])
+        self.assertEqual(record['catalog'], {'status': 200, 'models': [OPUS_5_5, SONNET, HAIKU]})
+        routing = record['routing']
+        self.assertTrue(routing['routed'], routing)
+        # Jev's real proxy resolved the stub's choice from the filtered catalog, not its static claude-opus-5.
+        self.assertEqual((routing['decisions'], routing['served_models'], routing['outside_model_set']), (1, [OPUS_5_5], []))
+        self.assertNotIn('benchmark_eligible', routing)
+        self.assertTrue(record['accounting']['tokens_match'], record['accounting'])
+        self.assertAlmostEqual(record['accounting']['cost_usd'], 4 * (100*4 + 4*20) / 1e6)
 
     def test_compat_jev_carries_its_routing_state_into_the_follow_up(self):
         script = self.FIX + [{'tool': 'Bash', 'input': {'command': 'python3 -m unittest discover -q -s tests -t .',

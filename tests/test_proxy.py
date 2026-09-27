@@ -6,6 +6,8 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
+from modelpilot import fixtures
 from modelpilot.cache_probe import cost
 from modelpilot.governor import Governor, reconcile_log
 from modelpilot.proxy import ProxyServer, UsageObserver, forecast, logged_usage, measured_cost, request_effort
@@ -414,3 +416,52 @@ class JevAccountingProxyTests(unittest.TestCase):
         self.assertEqual(self.raw_post([('Transfer-Encoding', 'chunked')], b'zz\r\nhello\r\n0\r\n\r\n'), 400)
         self.assertEqual(self.raw_post([('Transfer-Encoding', 'gzip, chunked')], b'0\r\n\r\n'), 400)
         self.assertEqual(self.upstream.received, [])
+
+
+ALLOWED = ('claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5-5')
+FULL_CATALOG = {'data': [{'id': m, 'type': 'model'} for m in ('claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5',
+                                                              'claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-fable-5-1')],
+                'has_more': True, 'first_id': 'claude-opus-5-5', 'last_id': 'claude-fable-5-1'}
+
+
+class CatalogFilterTests(unittest.TestCase):
+    """A model-constrained arm: the catalog Jev discovers holds only the arm's models."""
+    get, rows, tearDown = JevAccountingProxyTests.get, JevAccountingProxyTests.rows, ProxyTests.tearDown
+
+    def setUp(self):
+        ProxyTests.setUp(self)
+        self.proxy.shutdown()
+        self.proxy.server_close()
+        self.threads[1].join()
+        self.proxy = ProxyServer(('127.0.0.1', 0), f'http://127.0.0.1:{self.upstream.server_port}', self.log, RATES,
+                                 catalog=ALLOWED)
+        self.threads[1] = threading.Thread(target=self.proxy.serve_forever, daemon=True)
+        self.threads[1].start()
+
+    def test_the_catalog_keeps_only_the_model_set_in_upstream_order(self):
+        with mock.patch.object(fixtures, 'CATALOG', FULL_CATALOG):
+            response, data = self.get('/v1/models?limit=100')
+        body = json.loads(data)
+        self.assertEqual(response.status, 200)
+        self.assertEqual([m['id'] for m in body['data']], ['claude-opus-5-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'])
+        self.assertEqual((body['has_more'], body['first_id'], body['last_id']),
+                         (False, 'claude-opus-5-5', 'claude-haiku-4-5-20251001'))
+        self.assertEqual(self.rows()[-1]['catalog'], {'kept': sorted(ALLOWED), 'dropped': 3, 'missing': []})
+
+    def test_a_model_missing_upstream_is_reported(self):
+        partial = dict(FULL_CATALOG, data=[m for m in FULL_CATALOG['data'] if m['id'] != 'claude-opus-5-5'])
+        with mock.patch.object(fixtures, 'CATALOG', partial):
+            self.get('/v1/models')
+        self.assertEqual(self.rows()[-1]['catalog']['missing'], ['claude-opus-5-5'])
+
+    def test_an_unreadable_catalog_fails_closed(self):
+        with mock.patch.object(fixtures, 'CATALOG', ['not', 'a', 'catalog']):
+            response, _ = self.get('/v1/models')
+        self.assertEqual(response.status, 502)
+        self.assertEqual(self.rows()[-1]['status'], 'catalog_unreadable')
+
+    def test_the_model_set_must_be_model_ids(self):
+        upstream = f'http://127.0.0.1:{self.upstream.server_port}'
+        for bad in ((), ('claude-sonnet-5', 3), 'claude-sonnet-5'):
+            with self.assertRaises(ValueError):
+                ProxyServer(('127.0.0.1', 0), upstream, Path(self.temp.name)/'x.jsonl', RATES, catalog=bad)

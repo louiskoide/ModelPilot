@@ -1,0 +1,8 @@
+{
+  "source": "Claude API skill (bundled with Claude Code 2.1.283): Opus 5.5 at $4 input / $20 output per MTok and cache reads at $0.20 (0.05x input). Cache writes are derived from the standard multipliers (5m 1.25x, 1h 2x input) and are not yet confirmed on the pricing page. Same values as cache_replication.RATES. Derived, not invoice-reconciled.",
+  "retrieved": "2026-09-26",
+  "units": "USD per million tokens",
+  "rates": {
+    "claude-opus-5-5": {"input": 4, "output": 20, "write_5m": 5, "write_1h": 8, "read": 0.2}
+  }
+}

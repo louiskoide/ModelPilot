@@ -5,8 +5,17 @@ import json
 import math
 from .proxy import reservation_estimate
 
-MODELS=('claude-haiku-4-5-20251001','claude-sonnet-5','claude-opus-5')
+# The ladder's tiers, cheapest first. Opus 5.5 replaced Opus 5 as the top rung on September 26: it is
+# cheaper on every rate (docs/m6-modelpilot-policy.md, "Tier set").
+MODELS=('claude-haiku-4-5-20251001','claude-sonnet-5','claude-opus-5-5')
 EFFORTS=('low','medium','high')
+# (source model, target model) changes the provider accepted with thinking history, from
+# thinking_probe evidence only; the same model twice means an effort change (docs/thinking-history-probe.md).
+# Sonnet 5 effort: 8/8 in runs/thinking-probe-transitions-20260926-131953. Sonnet 5 <-> Opus 5.5 and Opus 5.5
+# effort: 4/4 each in runs/thinking-probe-top-rung-20260926-153723. Opus 5.5 -> Sonnet 5 is accepted, but the
+# API drops Opus 5.5's thinking there (unbilled). Haiku targets are refused by the transform itself.
+THINKING_HISTORY_VERIFIED=frozenset({('claude-sonnet-5','claude-sonnet-5'),('claude-sonnet-5','claude-opus-5-5'),
+                                     ('claude-opus-5-5','claude-sonnet-5'),('claude-opus-5-5','claude-opus-5-5')})
 
 
 def setting(model,effort):
@@ -14,7 +23,8 @@ def setting(model,effort):
         raise ValueError('Unsupported model/effort combination')
 
 
-def transform_request(request,model,effort):
+def transform_request(request,model,effort,allow_thinking_history=False):
+    """allow_thinking_history is for thinking_probe only; the policy relies on THINKING_HISTORY_VERIFIED."""
     setting(model,effort)
     if request.get('model') not in MODELS:
         raise ValueError('Unknown source model')
@@ -22,7 +32,8 @@ def transform_request(request,model,effort):
     changed=request['model']!=model or source_effort!=effort
     messages=request.get('messages')
     if not isinstance(messages,list):raise ValueError('Messages must be an array')
-    if changed and any(block.get('type') in ('thinking','redacted_thinking')
+    gated=not (allow_thinking_history or (request['model'],model) in THINKING_HISTORY_VERIFIED)
+    if changed and gated and any(block.get('type') in ('thinking','redacted_thinking')
             for message in messages for block in (message.get('content') if isinstance(message.get('content'),list) else [])
             if isinstance(block,dict)):
         raise ValueError('Thinking history across setting changes is not validated')

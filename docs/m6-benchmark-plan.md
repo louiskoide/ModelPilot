@@ -94,18 +94,35 @@ Across realistic Claude Code repository tasks, what does each arm cost per passe
 
 ## Arms
 
-All arms use the same tasks, tools, per-task limits, graders and isolation, and the same models (Haiku 4.5, Sonnet 5, Opus 5).
+All arms use the same tasks, tools, per-task limits, graders and isolation. Since September 26 the compared models are the policy's tiers: **Haiku 4.5, Sonnet 5 and Opus 5.5** (`policy_actions.MODELS`). The comparison set is the three fixed arms (with `opus-5.5`), `jev-compat-o55` and ModelPilot. `opus-5`, `jev-stock` and `jev-compat` remain registered as references on Opus 5.
 
 | Arm | Setup |
 | --- | --- |
-| Fixed Opus 5 | `--model claude-opus-5`, default effort |
+| Fixed Opus 5.5 (`opus-5.5`) | `--model claude-opus-5-5`, default effort (Opus 5.5 defaults to medium) |
+| Fixed Opus 5 (`opus-5`, reference) | `--model claude-opus-5`, default effort |
 | Fixed Sonnet 5 | `--model claude-sonnet-5`, default effort |
 | Fixed Haiku 4.5 | `--model claude-haiku-4-5-20251001` (lower bound on cost) |
 | Stock Jev | pinned, unmodified. With current Claude Code it does not route, so it is reported as a fixed-Opus arm plus router overhead |
-| Compat Jev | pinned plus the one-line patch (`work/jev-router-compat`), reported with `rejected_requests`, `extra_decisions` and router usage |
+| Compat Jev | pinned plus the one-line patch (`work/jev-router-compat`), reported with `rejected_requests`, `extra_decisions` and router usage. It routes among Jev's static tiers, including Opus 5 (reference) |
+| Aligned compat Jev (`jev-compat-o55`) | compat Jev, model-constrained and recorded separately: it discovers only the policy's tiers, so it routes among Haiku 4.5, Sonnet 5 and Opus 5.5 (see "Jev model alignment") |
 | ModelPilot | policy in `docs/m6-modelpilot-policy.md`, active for this arm only, after user approval |
 
 Every arm runs through ModelPilot's proxy for wire accounting. That arrangement already reconciles Jev exactly. Claude Code's own cost figures are never used for Jev or ModelPilot.
+
+### Jev model alignment (September 26)
+
+Jev's proxy replaces its static tiers (Haiku 4.5, Sonnet 5, Opus 5) with the account catalog only when a `GET /v1/models` passes through it. Interactive Claude Code sends one for its model picker. Claude Code in `-p` mode never does (2.1.282, checked offline), and Jev's own launcher doesn't either. So every bench Jev trial routes among the static tiers.
+
+`jev-compat-o55` aligns compat Jev with the policy's tiers without changing Jev:
+- The trial's ModelPilot proxy filters the catalog to `policy_actions.MODELS` (`ProxyServer(catalog=...)`), keeping upstream order and reporting kept, dropped and missing models.
+- Before Claude Code starts, the bench sends one catalog request through Jev's proxy (`bench_jev.prefetch_catalog`), as interactive Claude Code would. The client's key travels only as a request header; the router process's environment still never holds it.
+- Jev then offers its router exactly Haiku 4.5, Sonnet 5 and Opus 5.5, and resolves the "opus" tier to Opus 5.5.
+
+A trial is marked `benchmark_eligible: false` if Jev served a model outside the set (`served_outside_model_set`), or if the prefetched catalog wasn't exactly the set (`catalog_incomplete`). The report then excludes it and names the reason.
+
+Stock Jev cannot be aligned: it never routes this client, and its fallback is its static `claude-opus-5`.
+
+Offline evidence: a real-client trial through Jev's real proxy with a stub router served Opus 5.5 from the filtered catalog, with exact tokens and dollars. No live Jev trial has run, and TypeSafe's actual choices among the three models are untested.
 
 ### Jev arms (`modelpilot/bench_jev.py`)
 

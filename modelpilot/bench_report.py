@@ -248,7 +248,8 @@ def summarize(records, arms, seed=0, resamples=10000):
     summaries = [arm_summary(arm, complete[arm], incomplete[arm], by_arm[arm], rng, resamples) for arm in arms]
     scope = {s['arm']: s['cost_scope'] for s in summaries}
     return {'excluded_ineligible_trials': [{'task': r['task'], 'arm': r['arm'],
-                'reason': 'adapter_not_benchmark_eligible', 'cost_usd': (r.get('accounting') or {}).get('cost_usd')} for r in excluded],
+                'reason': r['routing'].get('ineligible_reason', 'adapter_not_benchmark_eligible'),
+                'cost_usd': (r.get('accounting') or {}).get('cost_usd')} for r in excluded],
             'arms': summaries,
             'paired': [pair_summary(a, b, by_arm[a], by_arm[b], rng, resamples, (scope[a], scope[b]))
                        for i, a in enumerate(arms) for b in arms[i + 1:]],
