@@ -2,7 +2,7 @@
 
 Everywhere else the governor stays dry-run. This policy applies rules R1, R2, R5 and R6 of
 docs/m6-modelpilot-policy.md in the trial's proxy:
-- R1: the client starts at the arm's S0: Sonnet 5 medium (`modelpilot`) or Opus 5.5 medium
+- R1: the client starts at the arm's S0: Sonnet 5.5 medium (`modelpilot`) or Opus 5.5 medium
   (`modelpilot-o55`); the tuning split chooses between them.
 - R2: the stuck ladder raises effort, then the model (Opus 5.5), one rung per window, each
   escalation admitted only if the limit covers its full rebuild, and kept for the task revision. A

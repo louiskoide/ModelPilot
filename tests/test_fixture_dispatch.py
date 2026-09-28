@@ -5,7 +5,7 @@ from modelpilot.governor import Governor
 from modelpilot.policy_actions import escalation_proposal
 from modelpilot.fixture_dispatch import FixtureDispatcher,StrictFixture
 
-S='claude-sonnet-5'
+S='claude-sonnet-5-5'
 RATES={S:dict(input=2,write_5m=2.5,write_1h=4,read=.2,output=10)}
 class DispatchTests(unittest.TestCase):
     def setUp(self):

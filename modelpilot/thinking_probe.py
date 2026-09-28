@@ -1,6 +1,6 @@
 """Thinking history across setting changes, direct API. Planning is free; --live prompts for a local key.
 
-Real Claude Code requests carry `thinking`, and Sonnet 5 / Opus 5 replies carry thinking blocks, so
+Real Claude Code requests carry `thinking`, and Sonnet / Opus replies carry thinking blocks, so
 the policy's ladder rewrites requests whose history holds another setting's thinking. This probe
 sends exactly what `policy_actions.transform_request` would forward and records whether the API
 accepts it, what the cache does and whether the target thinks. Blocks are always passed back
@@ -22,14 +22,13 @@ import time
 import urllib.error
 import uuid
 from . import cache_probe as probe
-from .cache_replication import HAIKU as H, OPUS_5_5, RATES, SOURCE, Budget
+from .cache_replication import HAIKU as H, OPUS_5_5, RATES, SONNET_5_5, SOURCE, Budget
 from .policy_actions import MODELS as POLICY_MODELS, transform_request
 
 ROOT = Path(__file__).resolve().parents[1]
-SHAPE_FIXTURE = ROOT/'tests/fixtures/claude-2.1.282-shape.json'
-S, O = 'claude-sonnet-5', 'claude-opus-5'
+SHAPE_FIXTURE = ROOT/'tests/fixtures/claude-2.1.284-shape.json'
 FAKE_KEY = 'sk-ant-offline-fixture-not-a-key'
-SUITES = ('smoke', 'transitions', 'top-rung', 'opus-5-5-effort')
+SUITES = ('smoke', 'transitions', 'top-rung', 'opus-5-5-effort', 'sonnet-5-5')
 SHAPES = ('tool_continuation', 'new_turn')
 PREFIX_LINES, SEED_MAX_TOKENS, SWITCH_MAX_TOKENS = 260, 4096, 2048
 PUZZLE = ('Find the smallest positive integer n that leaves remainder 3 when divided by 7, remainder 4 when '
@@ -44,8 +43,9 @@ TOOL = {'name': 'record_answer', 'description': 'Record the final integer answer
 THINKING_TYPES = ('thinking', 'redacted_thinking')
 # case: (source setting, target setting). Controls continue on the same setting; they check that the
 # request shape itself is accepted, so a rejected transition can be attributed to the change.
-# "opus" is the policy's top rung: Opus 5.5 since September 26 (the first transitions run used Opus 5).
-TOP = OPUS_5_5
+# "sonnet" and "opus" are the policy's tiers: Opus 5.5 since September 26 (the first transitions run used Opus 5)
+# and Sonnet 5.5 since September 28 (every run before then used Sonnet 5).
+S, TOP = SONNET_5_5, OPUS_5_5
 CONTROLS = {'control/sonnet': ((S, 'medium'), (S, 'medium')), 'control/opus': ((TOP, 'medium'), (TOP, 'medium'))}
 # The ladder's rungs, correction resets to the client's setting and R3 downgrades.
 TRANSITIONS = {'effort_up/sonnet': ((S, 'medium'), (S, 'high')), 'effort_down/sonnet': ((S, 'high'), (S, 'medium')),
@@ -53,7 +53,10 @@ TRANSITIONS = {'effort_up/sonnet': ((S, 'medium'), (S, 'high')), 'effort_down/so
                'effort_up/opus': ((TOP, 'medium'), (TOP, 'high')),
                'to_haiku/sonnet': ((S, 'medium'), (H, None)), 'to_haiku/opus': ((TOP, 'medium'), (H, None))}
 TOP_RUNG = ('model_up', 'model_down', 'effort_up/opus')
-SUITE_TRANSITIONS = {'transitions': tuple(TRANSITIONS), 'top-rung': TOP_RUNG}
+# What the Sonnet 5.5 ladder needs: its effort rung, its model rung and the Opus 5.5 correction reset (Opus 5.5
+# effort is verified). The API docs say no other model reads Sonnet 5.5's thinking blocks.
+SONNET_5_5_CASES = ('effort_up/sonnet', 'effort_down/sonnet', 'model_up', 'model_down')
+SUITE_TRANSITIONS = {'transitions': tuple(TRANSITIONS), 'top-rung': TOP_RUNG, 'sonnet-5-5': SONNET_5_5_CASES}
 # Opus 5.5 is not a policy tier: this answers the replication's open effort/cache question with real thinking.
 O55_CASES = {'o55/control_high': ((OPUS_5_5, 'high'), (OPUS_5_5, 'high')),
              'o55/high_to_low': ((OPUS_5_5, 'high'), (OPUS_5_5, 'low')),
@@ -113,7 +116,7 @@ def summarize_shape(bodies, betas, client_version):
             'scope': 'Structure of what the client sent to an owned fixture upstream; no text, IDs or provider traffic.'}
 
 
-def capture_shape(cli, models=(S, O), timeout=180):
+def capture_shape(cli, models=(S, TOP), timeout=180):
     """Run the real client against the owned fixture ($0) once per model; return the structure."""
     from .fixtures import fixture_server
     from .governed_session import client_env
@@ -203,12 +206,12 @@ def plan(run_id, suite, repeats, client_shape):
     for repeat in range(repeats):
         if suite == 'opus-5-5-effort':
             for case, (source, target) in O55_CASES.items():
-                groups.append(_group(run_id, case, 'new_turn', repeat, source, target, client_shape, spec_model=O))
+                groups.append(_group(run_id, case, 'new_turn', repeat, source, target, client_shape))
             continue
         cases = dict(CONTROLS, **{case: TRANSITIONS[case] for case in SUITE_TRANSITIONS.get(suite, ())})
         for shape_name in (('tool_continuation',) if suite == 'smoke' else SHAPES):
             for case, (source, target) in cases.items():
-                # The arm's client is Sonnet 5 (S0): the top rung is reached only by the proxy rewriting its
+                # The arm's client is the Sonnet tier (S0): the top rung is reached only by the proxy rewriting its
                 # requests, which keeps the client's headers. So top-rung seeds carry Sonnet's betas.
                 groups.append(_group(run_id, case, shape_name, repeat, source, target, client_shape,
                                      spec_model=S if source[0] == TOP else None))
@@ -332,13 +335,16 @@ def verdicts(groups, outcomes):
 
 
 def verified_transitions(summary):
-    """(source, target) model pairs accepted in every case, shape and repeat of the suite's transitions."""
+    """(source, target) model pairs accepted in every case, shape and repeat of the suite's transitions. A case's
+    pair comes from its recorded verdicts, so a run keeps its evidence after the probe's tiers are retargeted."""
     cases = SUITE_TRANSITIONS.get(summary.get('suite'), ())
     expected, accepted, bad = {}, set(), set()
     for case in cases:
+        recorded = {(v['source'][0], v['target'][0]) for v in summary['verdicts'] if v['case'] == case}
         source, target = TRANSITIONS[case]
-        expected.setdefault((source[0], target[0]), set()).update(
-            (case, shape_name, repeat) for shape_name in SHAPES for repeat in range(summary['repeats']))
+        for pair in recorded or {(source[0], target[0])}:
+            expected.setdefault(pair, set()).update(
+                (case, shape_name, repeat) for shape_name in SHAPES for repeat in range(summary['repeats']))
     for v in summary['verdicts']:
         if v['case'] in cases:
             pair = (v['source'][0], v['target'][0])

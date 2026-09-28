@@ -1,6 +1,6 @@
 # Thinking-history probe
 
-Status (September 26, 2026): four live runs, $2.90 in total. **Every ladder rung and correction reset between Sonnet 5 and Opus 5.5 (the top rung since September 26) is verified across thinking history and unlocked.** Haiku targets stay refused by the transform, and Opus 5 refused every request in its run. See Results and "Opus 5.5 as the top rung".
+Status (September 28, 2026): four live runs, $2.90 in total. **Sonnet 5.5 replaced Sonnet 5 as the middle tier on September 28, so only Opus 5.5 effort changes remain verified for the current ladder.** The `sonnet-5-5` suite (48 requests, about $1) must pass before the Sonnet 5.5 rungs and the Opus 5.5 → Sonnet 5.5 correction reset can rewrite requests whose history holds thinking. See "Sonnet 5.5 as the middle tier". Earlier status (September 26): every ladder rung and correction reset between Sonnet 5 and Opus 5.5 was verified. Haiku targets stay refused by the transform, and Opus 5 refused every request in its run. See Results and "Opus 5.5 as the top rung".
 
 ## Why
 
@@ -10,7 +10,7 @@ The API reference says regular (Sonnet 5 / Opus 5) thinking blocks replay across
 
 ## Client shape (captured at $0)
 
-`python3 -m modelpilot.thinking_probe capture-shape` runs the pinned client (`work/claude-client`, 2.1.282) against the owned fixture upstream with a fake key. It writes `tests/fixtures/claude-2.1.282-shape.json`, which holds structure only: no text, IDs or provider traffic. `tests/test_client_shape.py` recaptures it and compares whenever the pinned client is installed. What 2.1.282 sends on Sonnet 5 and Opus 5 main-loop requests:
+`python3 -m modelpilot.thinking_probe capture-shape` runs the pinned client (`work/claude-client`, 2.1.284 since September 28; 2.1.282 before) against the owned fixture upstream with a fake key. It writes `tests/fixtures/claude-2.1.284-shape.json` (Sonnet 5.5 and Opus 5.5). Every run before September 28 used `tests/fixtures/claude-2.1.282-shape.json` (Sonnet 5 and Opus 5), which is kept. Each fixture holds structure only: no text, IDs or provider traffic. `tests/test_client_shape.py` recaptures it and compares whenever the pinned client is installed. What 2.1.282 sends on Sonnet 5 and Opus 5 main-loop requests:
 
 - `thinking: {"type": "adaptive"}` and `output_config: {"effort": ...}` on every request.
 - `context_management: {"edits": [{"type": "clear_thinking_20251015", "keep": "all"}]}`, so earlier thinking stays in context.
@@ -168,3 +168,33 @@ Run `runs/thinking-probe-top-rung-20260926-153723` (client shape 2.1.282): 40/40
 Evidence SHA-256: `summary.json` `08ba4941f6d2b2c1a6b0780b1359675fcf200db623c78f4dfae359d25d5d642d`, `observations.jsonl` `3bc8de2b7ee768442298a059fa2cdfd2ccef7c7254eb807eff65491c7d37f4ee`.
 
 Limits: one puzzle, short conversations and 4 samples per case. Acceptance is structural, and the cache figures are observations rather than a calibrated rate. Whether the dropped Opus reasoning matters for task quality after a correction reset is a benchmark question.
+
+## Sonnet 5.5 as the middle tier (September 28)
+
+`policy_actions.MODELS` is now Haiku 4.5, Sonnet 5.5 and Opus 5.5 (user decision; same prices as Sonnet 5, see `docs/m6-modelpilot-policy.md`, "Tier set"). The probe's "sonnet" cases (`control/sonnet`, `effort_up/sonnet`, `effort_down/sonnet`, `model_up`, `model_down`, `to_haiku/sonnet`) now target Sonnet 5.5. Every earlier run recorded Sonnet 5. `verified_transitions` now takes each case's pair from the run's recorded verdicts, not from the current constants, so those runs keep their Sonnet 5 pairs.
+
+The Sonnet 5 pairs are not carried over. Transform sources must be current tiers, so they can't apply, and the API docs say no other model reads Sonnet 5.5's thinking blocks, while Sonnet 5.5 doesn't read Opus 5.5's. `THINKING_HISTORY_VERIFIED` is therefore just Opus 5.5 → Opus 5.5. Until the new suite passes, the `modelpilot` arm (S0 Sonnet 5.5 medium) defers its effort and model rungs and its correction reset whenever the history holds thinking, which is every real Claude Code request. `modelpilot-o55` is unaffected.
+
+**Client repin.** The pinned 2.1.282 client doesn't know Sonnet 5.5. Checked at $0 against the owned fixture:
+
+| Client | Sonnet 5.5 price (same usage as Sonnet 5's $0.00048) | Main-loop request | `max_tokens` |
+| --- | --- | --- | --- |
+| 2.1.282 | $0.00096 (twice its rates; it charges an unknown model like Opus 5.5) | ~40 KB, like Sonnet 5 | 32,000 |
+| 2.1.284 | $0.00048 (correct) | ~10.6 KB, like Opus 5.5 | 128,000 |
+
+So `work/claude-client` is pinned to 2.1.284, and 2.1.282 is kept in `work/claude-client-2.1.282` for the earlier runs. On 2.1.284, Sonnet 5.5 requests carry the same thinking and context-management fields as before and a system message after every user turn. Their betas add `per-turn-control-2026-07-01`; Opus 5.5 also adds `mid-conversation-tool-changes-2026-07-01`. Like 2.1.282, 2.1.284 in `-p` mode never fetches `/v1/models`, so the Jev arms' catalog handling is unchanged.
+
+The `sonnet-5-5` suite covers what the new ladder needs, each in both request shapes with two repeats, plus the two controls:
+- `effort_up/sonnet`: Sonnet 5.5 medium → high (ladder rung 1),
+- `effort_down/sonnet`: Sonnet 5.5 high → medium (correction reset),
+- `model_up`: Sonnet 5.5 high → Opus 5.5 medium (ladder rung 2),
+- `model_down`: Opus 5.5 medium → Sonnet 5.5 medium (correction reset).
+
+Opus 5.5 seeds carry Sonnet 5.5's betas, because the arm's client is Sonnet 5.5 and the proxy keeps its headers.
+
+```sh
+python3 -m modelpilot.thinking_probe --suite sonnet-5-5                                  # plan only, $0
+python3 -m modelpilot.thinking_probe --suite sonnet-5-5 --repeats 2 --live --budget 4    # 48 requests
+```
+
+The dry-run plan's admission bound is $6.90 (a conservative upper bound, not a forecast). The `top-rung` run cost $1.09 for 40 requests with more Opus seeds, so expect about $1. If the suite passes, add its run and pairs to `THINKING_HISTORY_VERIFIED` and to the evidence table in `tests/test_policy_actions.py`. Two outcomes need attention. A `model_down` verdict of "accepted" with the Opus reasoning dropped is expected and unbilled. A refusal (`stop_details` category) gets its own verdict: Sonnet 5.5 declines in five categories, more than Sonnet 5.

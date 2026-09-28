@@ -52,6 +52,7 @@ ARMS = {
     'opus-5': {'kind': 'fixed', 'model': 'claude-opus-5'},
     'opus-5.5': {'kind': 'fixed', 'model': 'claude-opus-5-5'},  # the policy's top rung since September 26
     'sonnet-5': {'kind': 'fixed', 'model': 'claude-sonnet-5'},
+    'sonnet-5.5': {'kind': 'fixed', 'model': 'claude-sonnet-5-5'},  # the policy's middle tier since September 28
     'haiku-4.5': {'kind': 'fixed', 'model': 'claude-haiku-4-5-20251001'},
     # Jev picks the served model per turn; the client only sends the sentinel.
     'jev-stock': {'kind': 'jev', 'variant': 'stock', 'model': 'jev-router', 'checkout': 'work/jev-router-baseline',
@@ -64,9 +65,9 @@ ARMS = {
     'jev-compat-o55': {'kind': 'jev', 'variant': 'compat', 'model': 'jev-router', 'checkout': 'work/jev-router-compat',
                        'patch': PATCH, 'models': POLICY_TIERS},
     # The client asks for the arm's start setting (S0); the policy's proxy may serve the ladder's rungs. The tuning
-    # split chooses S0: Claude Code sends Opus 5.5 a much smaller request than Sonnet 5 (docs/m6-benchmark-plan.md).
-    'modelpilot': {'kind': 'modelpilot', 'model': 'claude-sonnet-5', 'effort': 'medium',
-                   'served_models': ['claude-sonnet-5', 'claude-opus-5-5'], 'policy': 'docs/m6-modelpilot-policy.md'},
+    # split chooses S0 (docs/m6-benchmark-plan.md).
+    'modelpilot': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'medium',
+                   'served_models': ['claude-sonnet-5-5', 'claude-opus-5-5'], 'policy': 'docs/m6-modelpilot-policy.md'},
     'modelpilot-o55': {'kind': 'modelpilot', 'model': 'claude-opus-5-5', 'effort': 'medium',
                        'served_models': ['claude-opus-5-5'], 'policy': 'docs/m6-modelpilot-policy.md'},
 }
@@ -89,10 +90,11 @@ class PreflightError(RuntimeError):
 
 
 def rates():
-    """Rates for every benchmark model: the 5-family table, the policy's Opus 5.5 top rung and M0's 4.6 entries."""
+    """Rates for every benchmark model: the 5-family table, the policy's Sonnet 5.5 and Opus 5.5 tiers and M0's 4.6 entries."""
     merged = json.loads((ROOT/'configs/m0.json').read_text())['rates']
     merged.update(json.loads((ROOT/'configs/jev-rates.json').read_text())['rates'])
     merged.update(json.loads((ROOT/'configs/opus-5-5-rates.json').read_text())['rates'])
+    merged.update(json.loads((ROOT/'configs/sonnet-5-5-rates.json').read_text())['rates'])
     return merged
 
 

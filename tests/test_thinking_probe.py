@@ -8,8 +8,8 @@ import urllib.error
 from modelpilot import thinking_probe as tp
 from modelpilot.cache_replication import Budget
 
-S, H = 'claude-sonnet-5', 'claude-haiku-4-5-20251001'
-O, O5 = 'claude-opus-5-5', 'claude-opus-5'  # O: the policy's top rung; O5: captured client shape only
+S, H = 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001'  # S: the policy's middle tier since September 28
+O, O5, S5 = 'claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5'  # O: the top rung; O5, S5: earlier runs' tiers
 SHAPE = json.loads(tp.SHAPE_FIXTURE.read_text())
 USAGE = {'input_tokens': 50, 'output_tokens': 200, 'cache_creation_input_tokens': 7000, 'cache_read_input_tokens': 0,
          'cache_creation': {'ephemeral_5m_input_tokens': 7000, 'ephemeral_1h_input_tokens': 0},
@@ -73,6 +73,12 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(tp.planned_calls(tp.plan('r', 'top-rung', 2, SHAPE)), 40)
         self.assertEqual({g['case'] for g in tp.plan('r', 'top-rung', 1, SHAPE)},
                          {'control/sonnet', 'control/opus', 'model_up', 'model_down', 'effort_up/opus'})
+        # sonnet-5-5: 2 repeats x 2 shapes x (2 controls + 4 Sonnet 5.5 transitions) x 2 requests.
+        self.assertEqual(tp.planned_calls(tp.plan('r', 'sonnet-5-5', 2, SHAPE)), 48)
+        self.assertEqual({(g['case'], tuple(g['source']), tuple(g['target'])) for g in tp.plan('r', 'sonnet-5-5', 1, SHAPE)},
+                         {('control/sonnet', (S, 'medium'), (S, 'medium')), ('control/opus', (O, 'medium'), (O, 'medium')),
+                          ('effort_up/sonnet', (S, 'medium'), (S, 'high')), ('effort_down/sonnet', (S, 'high'), (S, 'medium')),
+                          ('model_up', (S, 'high'), (O, 'medium')), ('model_down', (O, 'medium'), (S, 'medium'))})
         for suite in tp.SUITES:  # every run gets a fresh run id, so uniqueness matters within a plan
             firsts = [g['request']['system'][0]['text'].split('\n', 1)[0] for g in tp.plan('r', suite, 2, SHAPE)]
             self.assertEqual(len(firsts), len(set(firsts)), suite)
@@ -82,11 +88,11 @@ class PlanTests(unittest.TestCase):
             tp.plan('r', 'transitions', 0, SHAPE)
 
     def test_seeds_mirror_the_captured_client_shape(self):
-        for g in tp.plan('r', 'transitions', 1, SHAPE) + tp.plan('r', 'top-rung', 1, SHAPE):
+        for g in tp.plan('r', 'transitions', 1, SHAPE) + tp.plan('r', 'top-rung', 1, SHAPE) + tp.plan('r', 'sonnet-5-5', 1, SHAPE):
             if g['case'] == 'control/haiku':
                 continue
             model, effort = g['source']
-            # The arm's client is Sonnet 5: an Opus 5.5 request is its request rewritten, with its headers.
+            # The arm's client is Sonnet 5.5: an Opus 5.5 request is its request rewritten, with its headers.
             spec = SHAPE['requests'][S if model == O else model]
             p = g['request']
             self.assertEqual((p['model'], p['output_config']), (model, {'effort': effort}))
@@ -154,7 +160,7 @@ class SwitchedRequestTests(unittest.TestCase):
         groups = tp.plan('r', 'opus-5-5-effort', 1, SHAPE)
         g = group(groups, 'o55/high_to_low', shape='new_turn')
         self.assertEqual(g['request']['model'], tp.OPUS_5_5)
-        self.assertEqual(g['betas'], SHAPE['requests'][O5]['anthropic_beta'])
+        self.assertEqual(g['betas'], SHAPE['requests'][O]['anthropic_beta'])  # the modelpilot-o55 client's own
         p = tp.switched_request(g, seed_response(tp.OPUS_5_5, tool=False))
         self.assertEqual((p['model'], p['output_config']['effort']), (tp.OPUS_5_5, 'low'))
         self.assertEqual(p['thinking'], g['request']['thinking'])
@@ -343,6 +349,24 @@ class VerifiedTransitionTests(unittest.TestCase):
                 v['verdict'] = 'inconclusive'
         self.assertEqual(tp.verified_transitions(s), [[S, H], [S, S]])
 
+    def test_sonnet_5_5_suite_verifies_only_its_pairs(self):
+        s = self.summary(suite='sonnet-5-5')
+        s['verdicts'] = [v for v in s['verdicts'] if v['case'] in tp.SONNET_5_5_CASES]
+        self.assertEqual(tp.verified_transitions(s), [[O, S], [S, O], [S, S]])
+        s['verdicts'][0]['verdict'] = 'rejected'  # effort_up/sonnet
+        self.assertEqual(tp.verified_transitions(s), [[O, S], [S, O]])
+
+    def test_earlier_runs_keep_the_pairs_they_recorded(self):
+        # Runs before September 28 recorded Sonnet 5; retargeting the probe's "sonnet" must not move their evidence.
+        s = self.summary(suite='top-rung')
+        s['verdicts'] = [v for v in s['verdicts'] if v['case'] in tp.TOP_RUNG]
+        for v in s['verdicts']:
+            for side in ('source', 'target'):
+                v[side] = [S5 if v[side][0] == S else v[side][0]] + v[side][1:]
+        self.assertEqual(tp.verified_transitions(s), [[O, O], [O, S5], [S5, O]])
+        s['verdicts'] = [v for v in s['verdicts'] if not (v['case'] == 'model_down' and v['repeat'] == 1)]
+        self.assertEqual(tp.verified_transitions(s), [[O, O], [S5, O]])
+
 
 class MainTests(unittest.TestCase):
     def test_dry_run_writes_the_plan_and_sends_nothing(self):
@@ -352,7 +376,7 @@ class MainTests(unittest.TestCase):
             plan = json.loads((Path(tmp)/'run'/'plan.json').read_text())
             self.assertEqual((plan['suite'], plan['repeats'], plan['calls'], plan['live']), ('transitions', 2, 58, False))
             self.assertGreater(plan['max_reserve_usd'], 0)
-            self.assertEqual(plan['shape']['client_version'], '2.1.282 (Claude Code)')
+            self.assertEqual(plan['shape']['client_version'], '2.1.284 (Claude Code)')
 
     def test_live_refuses_without_the_shape_fixture(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(tp.probe, 'send') as send, \

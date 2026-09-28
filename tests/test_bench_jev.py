@@ -17,11 +17,11 @@ from tests.test_bench import OfflineTrialTests
 
 ROOT = Path(__file__).resolve().parents[1]
 SONNET, OPUS, HAIKU = 'claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5-20251001'
-OPUS_5_5 = 'claude-opus-5-5'
+OPUS_5_5, SONNET_5_5 = 'claude-opus-5-5', 'claude-sonnet-5-5'  # the policy's tiers with HAIKU
 RATES = {SONNET: dict(input=2, output=10, read=.2, write_5m=2.5, write_1h=4)}
 # An account catalog, newest first, as GET /v1/models returns it.
-ACCOUNT_CATALOG = {'data': [{'id': m, 'type': 'model'} for m in (OPUS_5_5, OPUS, SONNET, 'claude-sonnet-4-6', HAIKU,
-                                                                  'claude-fable-5-1')], 'has_more': False}
+ACCOUNT_CATALOG = {'data': [{'id': m, 'type': 'model'} for m in (OPUS_5_5, SONNET_5_5, OPUS, SONNET, 'claude-sonnet-4-6',
+                                                                  HAIKU, 'claude-fable-5-1')], 'has_more': False}
 AUTH = '[jev] routing failed, keeping claude-opus-5: 401 Cannot authenticate with the server.'
 
 
@@ -295,8 +295,8 @@ class JevTrialTests(unittest.TestCase):
         return trial.record
 
     def test_the_aligned_arm_filters_and_prefetches_the_catalog(self):
-        record = self.aligned(ACCOUNT_CATALOG, SONNET)
-        self.assertEqual(record['catalog'], {'status': 200, 'models': [OPUS_5_5, SONNET, HAIKU]})
+        record = self.aligned(ACCOUNT_CATALOG, SONNET_5_5)
+        self.assertEqual(record['catalog'], {'status': 200, 'models': [OPUS_5_5, SONNET_5_5, HAIKU]})
         routing = record['routing']
         self.assertEqual((routing['model_set'], routing['outside_model_set']), (list(POLICY_TIERS), []))
         self.assertNotIn('benchmark_eligible', routing)
@@ -306,10 +306,15 @@ class JevTrialTests(unittest.TestCase):
         self.assertEqual((routing['benchmark_eligible'], routing['ineligible_reason'], routing['outside_model_set']),
                          (False, 'served_outside_model_set', [OPUS]))
 
+    def test_serving_sonnet_5_makes_the_trial_ineligible(self):
+        routing = self.aligned(ACCOUNT_CATALOG, SONNET)['routing']  # Jev's static tier, no longer a policy tier
+        self.assertEqual((routing['benchmark_eligible'], routing['ineligible_reason'], routing['outside_model_set']),
+                         (False, 'served_outside_model_set', [SONNET]))
+
     def test_an_incomplete_catalog_makes_the_trial_ineligible(self):
         partial = dict(ACCOUNT_CATALOG, data=[m for m in ACCOUNT_CATALOG['data'] if m['id'] != OPUS_5_5])
-        record = self.aligned(partial, SONNET)
-        self.assertEqual(record['catalog']['models'], [SONNET, HAIKU])
+        record = self.aligned(partial, SONNET_5_5)
+        self.assertEqual(record['catalog']['models'], [SONNET_5_5, HAIKU])
         self.assertEqual((record['routing']['benchmark_eligible'], record['routing']['ineligible_reason']),
                          (False, 'catalog_incomplete'))
 
@@ -400,7 +405,7 @@ class OfflineJevTrialTests(unittest.TestCase):
         with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
             record = self.trial('jev-compat-o55', 'aligned', self.FIX, jev_stub=OPUS_5_5)
         self.assertTrue(record['passed'], record['grade'])
-        self.assertEqual(record['catalog'], {'status': 200, 'models': [OPUS_5_5, SONNET, HAIKU]})
+        self.assertEqual(record['catalog'], {'status': 200, 'models': [OPUS_5_5, SONNET_5_5, HAIKU]})
         routing = record['routing']
         self.assertTrue(routing['routed'], routing)
         # Jev's real proxy resolved the stub's choice from the filtered catalog, not its static claude-opus-5.
@@ -408,6 +413,16 @@ class OfflineJevTrialTests(unittest.TestCase):
         self.assertNotIn('benchmark_eligible', routing)
         self.assertTrue(record['accounting']['tokens_match'], record['accounting'])
         self.assertAlmostEqual(record['accounting']['cost_usd'], 4 * (100*4 + 4*20) / 1e6)
+
+    def test_aligned_compat_jev_serves_sonnet_5_5_from_the_filtered_catalog(self):
+        with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
+            record = self.trial('jev-compat-o55', 'aligned-sonnet', self.FIX, jev_stub=SONNET_5_5)
+        self.assertTrue(record['passed'], record['grade'])
+        routing = record['routing']
+        # Jev's real proxy recognises Sonnet 5.5 as its sonnet tier and serves it through the real client.
+        self.assertEqual((routing['decisions'], routing['served_models'], routing['outside_model_set']), (1, [SONNET_5_5], []))
+        self.assertNotIn('benchmark_eligible', routing)
+        self.assertTrue(record['accounting']['tokens_match'], record['accounting'])
 
     def test_compat_jev_carries_its_routing_state_into_the_follow_up(self):
         script = self.FIX + [{'tool': 'Bash', 'input': {'command': 'python3 -m unittest discover -q -s tests -t .',

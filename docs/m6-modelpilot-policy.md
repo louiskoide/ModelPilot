@@ -41,7 +41,7 @@ These are hypotheses. Only the benchmark can confirm them.
 
 ## Rules
 
-- **R1 Start setting.** Each task starts at a fixed setting `S0` from the arm's tier set (for example Sonnet 5 at medium effort). `S0` is chosen on the tuning split only (see the benchmark plan) and frozen before final evaluation.
+- **R1 Start setting.** Each task starts at a fixed setting `S0` from the arm's tier set (for example Sonnet 5.5 at medium effort). `S0` is chosen on the tuning split only (see the benchmark plan) and frozen before final evaluation.
 - **R2 Escalation.** A stuck recommendation of `increase_effort` raises effort one step. `stronger_model` moves up one tier. `re_diagnose` or `human_review` stops the task and records it as unfinished, with no retry. The change applies at the next request. There is at most one step per stuck window: the M2 ladder resets its window after each confirmed escalation.
 - **R3 Cost-motivated switches** (downgrades, and returning to `S0` after escalated work shows verified progress). Allowed only when one of these holds:
   - **cold:** the current cache has been idle for at least 300 s, or a compaction just happened. Staying would also pay a full write, so any cheaper setting wins.
@@ -74,14 +74,20 @@ Each item gets an offline, zero-cost probe with the real client first, the same 
 
 ## Tier set
 
-The ladder's tiers are **Haiku 4.5, Sonnet 5 and Opus 5.5** (`policy_actions.MODELS`). Rates come from `configs/jev-rates.json` and `configs/opus-5-5-rates.json`. Fable stays excluded, as it is in Jev.
+The ladder's tiers are **Haiku 4.5, Sonnet 5.5 and Opus 5.5** (`policy_actions.MODELS`). Rates come from `configs/jev-rates.json` (Haiku), `configs/sonnet-5-5-rates.json` and `configs/opus-5-5-rates.json`. Fable stays excluded, as it is in Jev.
+
+Sonnet 5.5 replaced Sonnet 5 as the middle tier on September 28 (user decision). It costs the same on every rate: $2 input, $10 output, 5-minute writes $2.50, 1-hour writes $4 and cache reads $0.20, all stated at launch rather than derived. It uses the same tokenizer. Anthropic reports that it scores higher at medium effort than Sonnet 5 at high on most agentic coding evaluations, in fewer requests. That is the vendor's claim; this benchmark hasn't measured it. Trade-offs:
+- No other model reads its thinking blocks, so the model rung to Opus 5.5 drops Sonnet 5.5's reasoning (unbilled). Sonnet 5.5 doesn't read Opus 5.5's blocks either. Until the probe's `sonnet-5-5` suite verifies its pairs, `THINKING_HISTORY_VERIFIED` holds only Opus 5.5 effort. Every real Claude Code request carries thinking, so until then the `modelpilot` arm's rungs and its correction reset defer, and the arm stays on its start setting.
+- Its effort levels are recalibrated from Sonnet 5's (the API default stays high). Medium is the vendor's suggested start for agentic coding. The tuning split still chooses `S0`.
+- Like Opus 5.5, it enforces the preserved-thinking history check on newer accounts, rejects forced tool choice and `thinking: disabled`, and declines in five safety categories (cyber, bio, frontier_llm, reasoning_extraction, general_harms).
+- Claude Code 2.1.282 doesn't know it: that client prices it at twice its rates and sends the unknown-model request (the ~40 KB prompt, `max_tokens` 32,000). 2.1.284 knows it: correct prices and the same ~10.6 KB prompt as Opus 5.5, with `max_tokens` 128,000. The benchmark client is pinned to 2.1.284 since this change (checked at $0 against the owned fixture).
 
 Opus 5.5 replaced Opus 5 as the top rung on September 26 (user decision). It is cheaper on every rate: $4 input and $20 output against $5/$25, and cache reads $0.20 against $0.50. Its 5-minute write, $5 against $6.25, is derived and still to be confirmed. It uses the same tokenizer. In our runs it had no early cache misses, and its effort changes kept the tools and system cache warm. Trade-offs:
-- Only Fable 5.1 and Mythos 5.1 can read its thinking blocks, so a correction reset from Opus 5.5 to Sonnet 5 drops that reasoning. The API does this silently, with no error and no charge.
+- Only Fable 5.1 and Mythos 5.1 can read its thinking blocks, so a correction reset from Opus 5.5 to Sonnet 5.5 drops that reasoning. The API does this silently, with no error and no charge.
 - It enforces the preserved-thinking history check on newer accounts.
 - It defaults to medium effort (the proxy always sets effort), rejects forced tool choice, and has broader safety classifiers.
 
-**Arm alignment (done offline, September 26):** the comparison set uses the same three models. It has the fixed arms `haiku-4.5`, `sonnet-5` and `opus-5.5`, plus `jev-compat-o55`, a model-constrained compat Jev recorded separately. `jev-compat-o55` discovers only these tiers through a filtered, prefetched catalog, and trials that serve anything else are excluded. Stock Jev cannot be aligned: it never routes and falls back to its static Opus 5. It stays as a reference on Opus 5, with `opus-5` and `jev-compat`. See `docs/m6-benchmark-plan.md`, "Jev model alignment".
+**Arm alignment (done offline, September 26; Sonnet 5.5 since September 28):** the comparison set uses the same three models. It has the fixed arms `haiku-4.5`, `sonnet-5.5` and `opus-5.5`, plus `jev-compat-o55`, a model-constrained compat Jev recorded separately. `jev-compat-o55` discovers only these tiers through a filtered, prefetched catalog, and trials that serve anything else are excluded. Stock Jev cannot be aligned: it never routes and falls back to its static Opus 5. It stays as a reference on Opus 5, with `opus-5` and `jev-compat`. The `sonnet-5` fixed arm stays registered for earlier runs but is no longer in the comparison set. See `docs/m6-benchmark-plan.md`, "Jev model alignment".
 
 **Prerequisite:** a short M0 replication on these three models covering effort and model switches, returns to warm entries, and the 300 s / 330 s TTL points. It extends `modelpilot.cache_probe` and costs a few dollars. If the 5 family behaves differently, R3 and the cache-state model change before anything else is built.
 
@@ -89,7 +95,7 @@ Opus 5.5 replaced Opus 5 as the top rung on September 26 (user decision). It is 
 
 | Parameter | Proposed start | Chosen on |
 | --- | --- | --- |
-| `S0` start setting | Sonnet 5 medium (`modelpilot`) or Opus 5.5 medium (`modelpilot-o55`); both run in 4a | tuning split |
+| `S0` start setting | Sonnet 5.5 medium (`modelpilot`) or Opus 5.5 medium (`modelpilot-o55`); both run in 4a | tuning split |
 | `H` forecast horizon | 3 requests | tuning split |
 | `M` margin | 1.5 | tuning split |
 | `T` excerpt threshold | 8 KB | tuning split |
