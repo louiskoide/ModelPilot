@@ -5,17 +5,18 @@ import json
 import math
 from .proxy import reservation_estimate
 
-# The ladder's tiers, cheapest first. Opus 5.5 replaced Opus 5 as the top rung on September 26: it is
-# cheaper on every rate (docs/m6-modelpilot-policy.md, "Tier set").
-MODELS=('claude-haiku-4-5-20251001','claude-sonnet-5','claude-opus-5-5')
+# The ladder's tiers, cheapest first. Opus 5.5 replaced Opus 5 as the top rung on September 26 and Sonnet 5.5
+# replaced Sonnet 5 as the middle tier on September 28, each at the same or a lower price on every rate
+# (docs/m6-modelpilot-policy.md, "Tier set").
+MODELS=('claude-haiku-4-5-20251001','claude-sonnet-5-5','claude-opus-5-5')
 EFFORTS=('low','medium','high')
 # (source model, target model) changes the provider accepted with thinking history, from
 # thinking_probe evidence only; the same model twice means an effort change (docs/thinking-history-probe.md).
-# Sonnet 5 effort: 8/8 in runs/thinking-probe-transitions-20260926-131953. Sonnet 5 <-> Opus 5.5 and Opus 5.5
-# effort: 4/4 each in runs/thinking-probe-top-rung-20260926-153723. Opus 5.5 -> Sonnet 5 is accepted, but the
-# API drops Opus 5.5's thinking there (unbilled). Haiku targets are refused by the transform itself.
-THINKING_HISTORY_VERIFIED=frozenset({('claude-sonnet-5','claude-sonnet-5'),('claude-sonnet-5','claude-opus-5-5'),
-                                     ('claude-opus-5-5','claude-sonnet-5'),('claude-opus-5-5','claude-opus-5-5')})
+# Opus 5.5 effort: 4/4 in runs/thinking-probe-top-rung-20260926-153723. Its Sonnet 5 pairs (and Sonnet 5 effort,
+# runs/thinking-probe-transitions-20260926-131953) left with the Sonnet 5 tier; no other model reads Sonnet 5.5's
+# thinking blocks, so its pairs need their own probe run (suite sonnet-5-5) before its rungs and the Opus 5.5
+# correction reset can rewrite requests whose history holds thinking. Haiku targets are refused by the transform itself.
+THINKING_HISTORY_VERIFIED=frozenset({('claude-opus-5-5','claude-opus-5-5')})
 
 
 def setting(model,effort):
@@ -51,8 +52,8 @@ def transform_request(request,model,effort,allow_thinking_history=False):
             if not context:out.pop('context_management',None)
     else:
         out.setdefault('output_config',{})['effort']=effort
-    # Claude Code 2.1.282 itself sends system-role messages (after every user turn) to Sonnet 5
-    # and Opus 5, so they are kept. Haiku rejects them (Jev finding): relocate trailing ones only.
+    # Claude Code 2.1.284 itself sends system-role messages (after every user turn) to Sonnet 5.5 and Opus 5.5,
+    # as 2.1.282 did to Sonnet 5 and Opus 5, so they are kept. Haiku rejects them (Jev finding): relocate trailing ones only.
     if model==MODELS[0]:
         messages=out['messages'];tail=[]
         while messages and messages[-1].get('role')=='system':tail.insert(0,messages.pop())

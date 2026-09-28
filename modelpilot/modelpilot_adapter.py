@@ -59,15 +59,15 @@ TOOLS_NOTE=('ModelPilot tools: run the test suite with mcp__modelpilot__run_test
 
 class ModelPilotAdapter:
     arm_id='modelpilot'
-    model='claude-sonnet-5'
+    model='claude-sonnet-5-5'
     key=''
 
     def __init__(self,limit_usd=1.,mode='dry-run',tools=False,threshold=8192,fixture_policy=None,
-                 arm_id='modelpilot',model='claude-sonnet-5',effort='medium'):
+                 arm_id='modelpilot',model='claude-sonnet-5-5',effort='medium'):
         from .policy_actions import MODELS,setting
         setting(model,effort)
         if model==MODELS[0]:
-            raise ValueError('The arm starts on Sonnet 5 or Opus 5.5; Haiku targets are not implemented')
+            raise ValueError('The arm starts on Sonnet 5.5 or Opus 5.5; Haiku targets are not implemented')
         self.arm_id,self.model,self.effort=arm_id,model,effort
         if mode not in ('dry-run','active'):
             raise ValueError('Mode must be dry-run or active')

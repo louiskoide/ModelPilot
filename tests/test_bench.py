@@ -14,7 +14,8 @@ from modelpilot import bench, bench_tasks
 from modelpilot.fixtures import fixture_server, scripted_response
 from tests import test_bench_tasks as synthetic
 
-RATES = {'claude-sonnet-5': dict(input=2, output=10, read=.2, write_5m=2.5, write_1h=4)}
+# Sonnet 5 serves the harness tests' fixed arm; Sonnet 5.5 is the ModelPilot arm's start tier. Same rates.
+RATES = {m: dict(input=2, output=10, read=.2, write_5m=2.5, write_1h=4) for m in ('claude-sonnet-5', 'claude-sonnet-5-5')}
 
 
 class ScheduleTests(unittest.TestCase):
@@ -39,7 +40,8 @@ class ScheduleTests(unittest.TestCase):
         self.assertIsNone(bench.arm_adapter('sonnet-5', 1.5, 1))
         adapter = bench.arm_adapter('modelpilot', 1.5, 2)
         self.assertEqual((adapter.policy.mode, adapter.tools, adapter.limit), ('active', True, 3.0))
-        self.assertEqual((adapter.arm_id, adapter.model, adapter.effort), ('modelpilot', 'claude-sonnet-5', 'medium'))
+        self.assertEqual((adapter.arm_id, adapter.model, adapter.effort), ('modelpilot', 'claude-sonnet-5-5', 'medium'))
+        self.assertEqual(bench.ARMS['modelpilot']['served_models'], ['claude-sonnet-5-5', 'claude-opus-5-5'])
         variant = bench.arm_adapter('modelpilot-o55', 1, 1)
         self.assertEqual((variant.arm_id, variant.model, variant.effort, variant.policy.client_model),
                          ('modelpilot-o55', 'claude-opus-5-5', 'medium', 'claude-opus-5-5'))
@@ -69,13 +71,18 @@ class ScheduleTests(unittest.TestCase):
     def test_fixed_arms_cover_the_policy_tiers(self):
         from modelpilot.policy_actions import MODELS
         self.assertEqual(bench.ARMS['opus-5.5'], {'kind': 'fixed', 'model': 'claude-opus-5-5'})
+        self.assertEqual(bench.ARMS['sonnet-5.5'], {'kind': 'fixed', 'model': 'claude-sonnet-5-5'})
         fixed = {arm['model'] for arm in bench.ARMS.values() if arm['kind'] == 'fixed'}
         self.assertTrue(set(MODELS) <= fixed)
 
-    def test_policy_top_rung_has_rates_with_provenance(self):
-        self.assertEqual(bench.rates()['claude-opus-5-5'], dict(input=4, output=20, write_5m=5, write_1h=8, read=.2))
-        config = json.loads((bench.ROOT/'configs/opus-5-5-rates.json').read_text())
-        self.assertTrue(config['source'] and config['retrieved'])
+    def test_policy_tiers_have_rates_with_provenance(self):
+        from modelpilot.cache_replication import RATES
+        for model, name, rate in (('claude-opus-5-5', 'opus-5-5', dict(input=4, output=20, write_5m=5, write_1h=8, read=.2)),
+                                  ('claude-sonnet-5-5', 'sonnet-5-5', dict(input=2, output=10, write_5m=2.5, write_1h=4, read=.2))):
+            self.assertEqual(bench.rates()[model], rate)
+            self.assertEqual(RATES[model], rate)  # the probe's table
+            config = json.loads((bench.ROOT/f'configs/{name}-rates.json').read_text())
+            self.assertTrue(config['source'] and config['retrieved'])
 
     def test_session_end_reasons(self):
         ok = {'subtype': 'success', 'is_error': False}

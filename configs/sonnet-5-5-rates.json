@@ -1,0 +1,8 @@
+{
+  "source": "Claude API skill (bundled with Claude Code 2.1.284), 'Migrating to Claude Sonnet 5.5': the same prices as Sonnet 5, $2 input / $10 output per MTok, 5-minute cache writes $2.50, 1-hour cache writes $4, cache reads $0.20. Stated rates, not derived; not invoice-reconciled.",
+  "retrieved": "2026-09-28",
+  "units": "USD per million tokens",
+  "rates": {
+    "claude-sonnet-5-5": {"input": 2, "output": 10, "write_5m": 2.5, "write_1h": 4, "read": 0.2}
+  }
+}

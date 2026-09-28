@@ -11,8 +11,8 @@ from modelpilot.fixtures import fixture_server
 from modelpilot.governed_session import OWNER, run_session
 from modelpilot.proxy import ProxyServer
 
-S, O = 'claude-sonnet-5', 'claude-opus-5-5'  # O: the ladder's top rung
-RATES = {S: dict(input=2, output=10, read=.2, write_5m=2.5, write_1h=4),  # configs/jev-rates.json
+S, O = 'claude-sonnet-5-5', 'claude-opus-5-5'  # the ladder's tiers
+RATES = {S: dict(input=2, output=10, read=.2, write_5m=2.5, write_1h=4),  # configs/sonnet-5-5-rates.json
          O: dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)}  # configs/opus-5-5-rates.json
 FAIL = {'tool': 'Bash', 'input': {'command': 'exit 3', 'description': 'fail on purpose'}}
 
@@ -194,6 +194,13 @@ class ProxyPolicyPathTests(Upstream, unittest.TestCase):
         self.assertFalse(row['applied'])
         self.assertIn('Thinking history', row['policy']['reason'])
 
+    def test_sonnet_5_5_rungs_wait_for_probe_evidence(self):
+        self.post(messages=self.THINKING)  # the real verified set: no Sonnet 5.5 pair yet
+        row, = self.rows()
+        self.assertFalse(row['applied'])
+        self.assertIn('Thinking history', row['policy']['reason'])
+
+    @mock.patch.object(policy_actions, 'THINKING_HISTORY_VERIFIED', frozenset({(S, S)}))
     def test_verified_sonnet_effort_rung_applies_across_thinking_history(self):
         self.post(messages=self.THINKING)
         row, = self.rows()

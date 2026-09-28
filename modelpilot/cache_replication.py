@@ -15,12 +15,14 @@ import uuid
 from . import cache_probe as probe
 
 ROOT = Path(__file__).resolve().parents[1]
-HAIKU, OPUS_5_5 = 'claude-haiku-4-5-20251001', 'claude-opus-5-5'
+HAIKU, SONNET_5_5, OPUS_5_5 = 'claude-haiku-4-5-20251001', 'claude-sonnet-5-5', 'claude-opus-5-5'
 MODELS = [HAIKU, 'claude-sonnet-5', 'claude-opus-5']
 RATES = {m: dict(input=i, output=o, write_5m=i*1.25, write_1h=i*2, read=i*.1)
          for m, i, o in zip(MODELS, [1, 2, 5], [5, 10, 25])}
 # Opus 5.5 reads are 0.05x input, not 0.1x; writes use the standard multipliers (derived; confirm at launch).
 RATES[OPUS_5_5] = dict(input=4, output=20, write_5m=5, write_1h=8, read=.2)
+# Sonnet 5.5: Sonnet 5's prices, as stated at launch (configs/sonnet-5-5-rates.json).
+RATES[SONNET_5_5] = dict(input=2, output=10, write_5m=2.5, write_1h=4, read=.2)
 SOURCE = 'https://platform.claude.com/docs/en/build-with-claude/prompt-caching'
 SUITES = ('three-model', 'opus-5-5')
 

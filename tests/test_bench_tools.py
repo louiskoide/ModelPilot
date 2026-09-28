@@ -162,17 +162,18 @@ class ToolTrialTests(unittest.TestCase):
                   [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
                    {'tool': 'mcp__modelpilot__run_tests', 'input': {}},
                    {'text': 'Done.'}])
-        adapter = ModelPilotAdapter(limit_usd=1, tools=True, fixture_policy=self.upstream)
+        # The fixture policy reserves the rung's output allowance: 2.1.284 sends Sonnet 5.5 max_tokens 128000 ($1.28).
+        adapter = ModelPilotAdapter(limit_usd=2, tools=True, fixture_policy=self.upstream)
         record = self.modelpilot_trial('policy', script, adapter)
         self.assertTrue(record['passed'], record['grade'])
         main = [(json.loads(b)['model'], json.loads(b)['output_config']['effort'])
                 for b in self.upstream.bodies if b'"tools"' in b]
         # Three stalled suite runs (host evidence from run_tests) -> one effort rung, then kept.
-        self.assertEqual(main, [('claude-sonnet-5', 'medium')]*4 + [('claude-sonnet-5', 'high')]*3, main)
+        self.assertEqual(main, [('claude-sonnet-5-5', 'medium')]*4 + [('claude-sonnet-5-5', 'high')]*3, main)
         routing = record['routing']
         self.assertEqual(routing['fixture_policy']['escalations'],
                          [{'action': 'increase_effort', 'status': 'fixture_confirmed',
-                           'target_model': 'claude-sonnet-5', 'target_effort': 'high'}])
+                           'target_model': 'claude-sonnet-5-5', 'target_effort': 'high'}])
         self.assertEqual(routing['fixture_policy']['kept_requests'], 2)
         self.assertTrue(routing['applied'])
         self.assertTrue(routing['accounting_matches'], routing)
@@ -191,13 +192,13 @@ class ToolTrialTests(unittest.TestCase):
                    {'text': 'Done.'}])
         record = self.modelpilot_trial('active', script, bench.arm_adapter('modelpilot', 1, 1))
         self.assertTrue(record['passed'], record['grade'])
-        self.assertEqual(self.main_loop(), [('claude-sonnet-5', 'medium')]*4 + [('claude-sonnet-5', 'high')]*3)
+        self.assertEqual(self.main_loop(), [('claude-sonnet-5-5', 'medium')]*4 + [('claude-sonnet-5-5', 'high')]*3)
         routing = record['routing']
         self.assertEqual((routing['mode'], routing['benchmark_eligible'], routing['active_policy_implemented']),
                          ('active', True, True))
         self.assertEqual(routing['policy']['escalations'],
                          [{'action': 'increase_effort', 'status': 'confirmed',
-                           'target_model': 'claude-sonnet-5', 'target_effort': 'high'}])
+                           'target_model': 'claude-sonnet-5-5', 'target_effort': 'high'}])
         self.assertEqual((routing['policy']['kept_requests'], routing['policy']['stops']), (2, []))
         self.assertTrue(routing['accounting_matches'], routing)
         self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
@@ -225,7 +226,7 @@ class ToolTrialTests(unittest.TestCase):
         record = self.modelpilot_trial('stuck', script, bench.arm_adapter('modelpilot', 1, 1), max_turns=20, rates=rates)
         self.assertFalse(record['passed'])
         self.assertEqual(record['sessions'][0]['stop'], 'policy_stop', record['sessions'])
-        self.assertEqual(self.main_loop(), [('claude-sonnet-5', 'medium')]*4 + [('claude-sonnet-5', 'high')]*3 +
+        self.assertEqual(self.main_loop(), [('claude-sonnet-5-5', 'medium')]*4 + [('claude-sonnet-5-5', 'high')]*3 +
                          [('claude-opus-5-5', 'medium')]*3)
         policy = record['routing']['policy']
         self.assertEqual([e['action'] for e in policy['escalations']], ['increase_effort', 'stronger_model'])
