@@ -402,7 +402,10 @@ def execute(groups, out, budget, suite, repeats, transport=probe.send):
                     details = probe.error_details(exc)
                     details['error_hint'] = probe.redact_message(details.get('error_hint', ''))
                     row.update(http_status=exc.code, error_type='HTTPError', **details)
-                    if exc.code != 400 or role == 'seed':
+                    if getattr(exc, 'api_error_type', None):
+                        row['api_error_type'] = exc.api_error_type
+                    # A billing or authentication failure says nothing about the transition: stop, never a verdict.
+                    if exc.code != 400 or role == 'seed' or probe.account_problem(exc):
                         row['status'] = 'error'  # a seed is our own construction: its rejection is a bug
                         raise
                     row.update(status='rejected', cost_usd=None, budget_charged_usd=reserve,

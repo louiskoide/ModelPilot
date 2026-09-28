@@ -3,8 +3,8 @@
 Observe-only by default. tools=True adds the R5 tools (bench_tools MCP server). A
 fixture_policy (the owned fixtures.FixtureServer) applies ladder escalations offline; those
 trials stay ineligible for comparisons. mode='active' runs the arm's policy
-(active_policy.ActivePolicy, user-approved for the benchmark arm only) with the tools; only
-such trials are benchmark-eligible.
+(active_policy.ActivePolicy, user-approved for the benchmark arm only) with the tools and Jev as
+its advisor; only such trials with a live advisor and the complete catalog are benchmark-eligible.
 """
 import hashlib
 import json
@@ -63,7 +63,7 @@ class ModelPilotAdapter:
     key=''
 
     def __init__(self,limit_usd=1.,mode='dry-run',tools=False,threshold=8192,fixture_policy=None,
-                 arm_id='modelpilot',model='claude-sonnet-5-5',effort='medium'):
+                 arm_id='modelpilot',model='claude-sonnet-5-5',effort='medium',advisor=None,models=None):
         from .policy_actions import MODELS,setting
         setting(model,effort)
         if model==MODELS[0]:
@@ -77,10 +77,10 @@ class ModelPilotAdapter:
             raise ValueError('Positive finite budget required')
         if isinstance(threshold,bool) or not isinstance(threshold,int) or threshold<256:
             raise ValueError('Excerpt threshold must be an integer of at least 256 bytes')
-        self.policy=None
+        self.policy,self.advisor,self.models,self.catalog=None,advisor,models,None
         if mode=='active':
             from .active_policy import ActivePolicy
-            self.policy=ActivePolicy(self.model,OWNER)
+            self.policy=ActivePolicy(self.model,OWNER,advisor=advisor)
         elif fixture_policy is not None:
             from .fixture_dispatch import ProxyPolicy
             self.policy=ProxyPolicy(fixture_policy,self.model,OWNER)  # refuses anything but the fixture
@@ -88,7 +88,19 @@ class ModelPilotAdapter:
         self.binding={}
 
     def verify(self):
-        pass  # No external router checkout or credential is used.
+        problem=self.advisor.problem() if self.advisor is not None and self.advisor.live else None
+        if problem:
+            raise RuntimeError(problem)
+
+    def use_catalog(self,catalog):
+        """The account catalog prefetched through the trial's (filtered) proxy: Jev describes its models from it."""
+        self.catalog={k:catalog.get(k) for k in ('status','models','error') if k in catalog}
+        if self.policy is not None and hasattr(self.policy,'catalog'):
+            self.policy.catalog=catalog.get('entries') or []
+
+    def prefix(self):
+        """What the adapter adds before the task prompt; Jev's advisor is given the prompt without it."""
+        return channel_declaration(self.task,self.code)+'\n\n'+(TOOLS_NOTE+'\n\n' if self.tools else '')
 
     def setup(self,trial):
         self.directory=trial.dir
@@ -112,6 +124,8 @@ class ModelPilotAdapter:
             self.mcp.write_text(json.dumps(mcp_config(sys.executable,self.db,self.session,self.limit,self.task,trial.work,
                                                       spec,trial.python,trial.dir/'home',trial.dir/'tmp',
                                                       self.threshold),indent=2)+'\n')
+        if self.policy is not None and hasattr(self.policy,'prompt_prefix'):
+            self.policy.prompt_prefix=self.prefix()
         self.binding={'MODELPILOT_DB':str(self.db),'MODELPILOT_SESSION':self.session,
                       'MODELPILOT_LIMIT_USD':str(self.limit),'MODELPILOT_TASK':self.task,
                       'MODELPILOT_OWNER':OWNER,'MODELPILOT_HOOK_ERRORS':str(trial.dir/'hook-errors.jsonl')}
@@ -125,10 +139,9 @@ class ModelPilotAdapter:
     def command(self,command,proxy_url):
         result=list(command)
         i=result.index('-p')+1
-        prompt=channel_declaration(self.task,self.code)+'\n\n'
+        prompt=self.prefix()
         if self.tools:
             from .bench_tools import TOOL_NAMES
-            prompt+=TOOLS_NOTE+'\n\n'
             result[result.index('--mcp-config')+1]=str(self.mcp)
             j=result.index('--allowedTools')+1
             result[j]=','.join([result[j]]+TOOL_NAMES)
@@ -144,6 +157,8 @@ class ModelPilotAdapter:
         report['cost_complete']=report['cost_usd'] is not None and report['tokens_match'] and not report['rejected_requests']
         if not report['cost_complete']:
             report['cost_usd']=None
+        if self.advisor is not None and self.advisor.live:
+            report['cost_scope']='provider_only_router_unpriced'  # Jev's TypeSafe calls are billed separately, unpriced
         return report
 
     def evidence(self,directory):
@@ -153,8 +168,12 @@ class ModelPilotAdapter:
             hooks=gov.journal('hook_event')
             tool_calls=[e['payload'] for e in gov.journal('bench_tool')]
             dispatch,keep=(self.policy.Dispatch.journal_kind,self.policy.keep_kind) if self.policy else (None,None)
-            escalations=[{k:e['payload'].get(k) for k in ('action','status','target_model','target_effort')}
-                         for e in gov.journal(dispatch)] if dispatch else []
+            escalations=[{k:e['payload'].get(k) for k in ('action','status','target_model','target_effort','trigger')
+                          if k in e['payload']} for e in gov.journal(dispatch)] if dispatch else []
+            decisions=[{k:e['payload'].get(k) for k in ('point','trigger','action','reason','current','target',
+                                                          'benefit_usd','required_usd','jev','profile')}
+                       for e in gov.journal('advisor_decision')]
+            advice=[e['payload'].get('advice') or {} for e in gov.journal('advisor_decision')]
             kept=len(gov.journal(keep)) if keep else 0
             stops=[e['payload'] for e in gov.journal('policy_stop')]
             from .policy_actions import escalation_proposal
@@ -176,12 +195,18 @@ class ModelPilotAdapter:
         active=mode=='active'
         fixture={'escalations':escalations,'kept_requests':kept} if self.policy else None
         from .active_policy import parameters
+        live=self.advisor is not None and self.advisor.live
+        catalog_ok=bool(self.catalog) and self.catalog.get('status')==200 and set(self.catalog.get('models') or [])==set(self.models or ())
+        eligible=active and self.tools and live and catalog_ok
         out={'kind':'modelpilot_policy','mode':mode,'applied':any(r.get('applied') for r in messages),
-             'active_policy_implemented':active,'benchmark_eligible':active and self.tools,
+             'active_policy_implemented':active,'benchmark_eligible':eligible,
              'tools':{'enabled':self.tools,'threshold_bytes':self.threshold,'calls':tool_calls},
              'fixture_policy':None if active else fixture,
-             'policy':dict(fixture,stops=stops,refusals=[r.get('refusal') for r in refused],
+             'policy':dict(fixture,stops=stops,refusals=[r.get('refusal') for r in refused],decisions=decisions,
                            parameters=parameters(self.model,self.effort))
+                 if active else None,
+             'advisor':{'live':live,'calls':sum(bool(a) for a in advice),'failures':sum(bool(a.get('error')) for a in advice),
+                        'router_usage':[a['usage'] for a in advice if a.get('usage')],'catalog':self.catalog}
                  if active else None,
              'policy_sha256':hashlib.sha256(policy_file.read_bytes()).hexdigest(),
              'governor':policy,'escalation_proposal':proposal,'hook_events':len(hooks),'all_requests_settled':bool(messages) and settled,
@@ -191,4 +216,7 @@ class ModelPilotAdapter:
              'would_refuse':sum('governor' in r and not r['governor']['admitted'] for r in messages)}
         if not active:
             out['ineligible_reason']='fixture_policy' if self.policy else 'observer_only'
+        elif not eligible:  # a stub advisor is never evidence of Jev's advice
+            out['ineligible_reason']=('no_advisor' if self.advisor is None else 'advisor_stub' if not live
+                                      else 'catalog_incomplete')
         return out

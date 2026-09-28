@@ -1,6 +1,28 @@
-# ModelPilot arm policy (proposal, not implemented)
+# ModelPilot arm policy
 
-Status: design proposal written September 22, 2026. The governor stays dry-run. On September 26 the user approved the exception this policy needs: active mode for the **benchmark arm only**. It does not apply to the user's normal sessions. R1, R2, R5 and R6 now run in the arm (`modelpilot/active_policy.py`), verified offline only; R3, R4 and worker drafts are not implemented. See "Active ModelPilot arm" in `docs/bench-adapters.md`.
+## Architecture since September 28: Jev advises, ModelPilot decides
+
+User decision, September 28: ModelPilot no longer climbs a ladder (Sonnet medium → Sonnet high → Opus medium). Each wrong step cost wasted turns, a cache rewrite and, on a model switch, the reasoning so far. There are now two layers, built and verified offline only:
+
+1. **Jev predicts where the task should run** (`modelpilot/advisor.py`, `modelpilot/jev_advisor.mjs`). A bridge imports the pinned compat Jev checkout's own code without changing it: its prompt extraction, its model descriptions, its three complexity questions and its model question. So Jev's model answer comes from the same question the `jev-compat-o55` arm asks. One effort question is added to the same TypeSafe call. Each answer carries a choice, a confidence and a probability for every option. Jev never applies anything. It gets only the TypeSafe key, never the Anthropic key, and a failure or timeout means "stay".
+2. **ModelPilot decides whether moving there pays** (`modelpilot/switch_policy.py`). For staying and for each direct move (Jev's setting, or just its model, or just its effort) it computes
+
+   expected(c) = switch(current → c) + P_ok(c) × run(c) + (1 − P_ok(c)) × recover(c)
+
+   - **run(c)** is the remaining work on c: the horizon × (prefix at the cache-read price + new input + output scaled by the effort's output factor).
+   - **switch** is the one-time rewrite beyond the read it replaces. A model change rewrites the whole prefix. An effort change rewrites what that model rewrites: all of it on Sonnet (as Sonnet 5 did), only the messages on Opus 5.5 (measured). It is free when the cache is cold (idle over 300 s, or the session's first request).
+   - **P_ok(c)** comes from Jev's distributions. The model answer is "the cheapest model that can finish in one pass" and the effort answer is "the lowest effort that can", so c is enough when both are at or below c's. The two are treated as independent and smoothed, so nothing is certain.
+   - **recover(c)** is a failure: part of run(c) wasted, then the task redone where Jev says it needs to be, or on the strongest setting.
+
+   - **The redo can fail too.** Staying on a setting that will likely fail carries the same downstream risk as moving now. Without this, a hard task stayed on Sonnet in 11 of 27 combinations of the guessed parameters. With it, a clear prediction jumps in all 27.
+
+   It jumps straight to the cheapest option when that beats staying by the hysteresis. The margin is scaled by how plausible the current setting is, so it protects a setting that may well be enough from marginal moves, not one that is almost certain to fail. When Jev is confident of both model and effort (0.6 or more), only staying and Jev's exact setting are weighed, and nothing cheaper is tried first. A partial move (Jev's model or effort alone) is weighed only in a dimension Jev is unsure of. A downgrade must also beat a multiple of its rewrite and needs enough confidence, so downgrades in long, warm sessions rarely pay.
+3. **Decision points, not every request:** the start of each user turn (where Jev itself decides), and evidence from the M2 stuck detector that the current setting isn't enough. On evidence, Jev is asked again, with a factual progress note in its session state. The probabilities are conditioned on the current setting having failed, and only settings at least as strong in both model and effort are considered. Stuck with nothing stronger, the task stops (`policy_stop:no_stronger_setting`). A jump is kept for the task revision. Each decision is journaled with every candidate's numbers.
+4. **Configurable:** models, capability order, efforts (including xhigh and max), what each effort change rewrites, output factors, horizon, recovery, hysteresis and downgrade rules are in `configs/modelpilot-policy.json`. Prices come from the rate files. `policy_actions.MODELS` and each model's efforts are read from the same config.
+
+Haiku 4.5 is not a candidate: Claude Code's mid-history system messages can't be kept on it. Jev's probability for Haiku still counts toward the stronger models being enough. The effort output factors, horizon, recovery fraction, hysteresis and downgrade multiplier are starting guesses, which the 4a tuning run calibrates. Every Sonnet 5.5 ↔ Opus 5.5 move whose history holds thinking still waits for the `sonnet-5-5` thinking probe. The rules below (R1–R6) are the September 22 design. R2's ladder is replaced by the above. R3's cost-motivated switches are now part of the gate. R4, the cache-state model beyond cache warmth, and worker drafts are still not built.
+
+Status of the original design: proposal written September 22, 2026. The governor stays dry-run. On September 26 the user approved the exception this policy needs: active mode for the **benchmark arm only**. It does not apply to the user's normal sessions. R1, R2, R5 and R6 now run in the arm (`modelpilot/active_policy.py`), verified offline only; R3, R4 and worker drafts are not implemented. See "Active ModelPilot arm" in `docs/bench-adapters.md`.
 
 **Admission as built (September 26).** R6's limit is enforced on measured spend: a request is admitted while wire spend is below the per-task limit and cost is known, which is the rule of the client's own `--max-budget-usd` in the other arms. An R2 rung also needs the limit to cover its full rebuild (request bytes/3 tokens at the dearest write rate), but not its output allowance: Claude Code sends `max_tokens: 64000`, whose Opus 5.5 price alone exceeds the $1 default limit. When R2 says `re_diagnose` or `human_review`, the proxy refuses the next main-loop request, so the session ends and the trial is recorded as unfinished (`policy_stop`).
 
@@ -95,9 +117,8 @@ Opus 5.5 replaced Opus 5 as the top rung on September 26 (user decision). It is 
 
 | Parameter | Proposed start | Chosen on |
 | --- | --- | --- |
-| `S0` start setting | Sonnet 5.5 medium (`modelpilot`) or Opus 5.5 medium (`modelpilot-o55`); both run in 4a | tuning split |
-| `H` forecast horizon | 3 requests | tuning split |
-| `M` margin | 1.5 | tuning split |
+| `S0` fallback start | Sonnet 5.5 medium, used only while Jev is unavailable (the start is Jev's prediction since September 28) | fixed |
+| switch-policy guesses | `configs/modelpilot-policy.json`: horizon 15 requests, effort output factors, recovery fraction 0.5, hysteresis $0.02, downgrade multiplier 2 | tuning split |
 | `T` excerpt threshold | 8 KB | tuning split |
 | stuck threshold | M2 heuristic-v1 (score ≥ 3, window 6) | fixed |
 

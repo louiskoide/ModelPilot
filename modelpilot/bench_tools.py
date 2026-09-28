@@ -102,7 +102,10 @@ class ToolServer(Server):
 
     def call(self, name, args):
         if name == 'expand_output':
-            return self.state.expand(**args)
+            page = self.state.expand(**args)
+            self.gov.note('bench_tool', {'tool': name, 'characters': len(page['text']), 'offset': page['offset'],
+                                         'more': page['next_offset'] is not None}, self.task)
+            return page
         result = self.run_tests() if name == 'run_tests' else self.search(**args)
         self.note(name, result)
         return result

@@ -54,8 +54,9 @@ class Dispatcher:
                                 self.reserve_output)
         if prepared['action']!='prepared_offline':
             return {'status':'deferred','reason':prepared['reason'],'applied':False}
-        # One attempt per escalation window, even if new observations arrive before completion.
-        identity=[self.gov.session,proposal['task'],proposal['revision'],proposal['level']]
+        # One attempt per escalation window (or per decision, for a jump), even if new observations arrive.
+        identity=[self.gov.session,proposal['task'],proposal['revision'],proposal['level']]+(
+            [proposal['decision']] if proposal.get('action')=='jump' else [])
         request_id=self.prefix+hashlib.sha256(json.dumps(identity).encode()).hexdigest()
         def fence():
             checked=prepare_action(self.gov.state,proposal,owner,request,self.available(self.gov._policy()),self.rates,
@@ -86,9 +87,16 @@ class Dispatcher:
         # A transport failure/unknown model never means zero cost. Persistent unknown spend halts admission.
         self.gov.settle(ticket['request_id'],actual)
         result['cost_usd']=actual
+        if proposal.get('action')=='jump':
+            result.update(trigger=proposal['trigger'],decision=proposal['decision'],
+                          source_model=proposal['source_model'],source_effort=proposal['source_effort'])
         if actual is not None:
             try:
-                self.gov.state.confirm_escalation(proposal['task'],proposal['revision'],ticket['owner'],proposal['last_event'])
+                if proposal.get('action')=='jump' and proposal['trigger']!='stuck_evidence':
+                    self.gov.state._owned(proposal['task'],proposal['revision'],ticket['owner'])  # revision fence only
+                else:  # the stuck window that justified it is closed, so evidence has to build up again
+                    self.gov.state.confirm_escalation(proposal['task'],proposal['revision'],ticket['owner'],
+                                                      proposal['last_event'])
                 result['status']=self.confirmed
             except ValueError:
                 result['status']='stale_after_send'
@@ -181,9 +189,13 @@ class ProxyPolicy:
             if ticket['status']=='admitted':
                 return dict(ticket,kind='escalation')
             deferral=ticket
+        return self.keep(gov,rates,task,revision,client,setting,current,deferral)
+
+    def keep(self,gov,rates,task,revision,client,setting,current,deferral):
+        """Forward at the client's setting, or keep the confirmed one with a fresh, enforced reservation
+        fenced on the same revision."""
         if setting==client:
             return deferral or {'status':'deferred','reason':'no_executable_escalation'}
-        # Keep the confirmed setting: a fresh, enforced reservation fenced on the same revision.
         request_id='mp-'+uuid.uuid4().hex
         def fence():
             gov.state._owned(task,revision,self.owner)

@@ -10,8 +10,9 @@ S5='claude-sonnet-5'  # the middle tier until September 28
 # Probe summaries whose verified_transitions fill THINKING_HISTORY_VERIFIED (docs/thinking-history-probe.md), for
 # the pairs whose models are both current tiers.
 EVIDENCE={'thinking-probe-transitions-20260926-131953':('349303b64a924350bf911fe189ad95c9635ee58aca6a1d82f5615f0c955b7c32',{(S5,S5)}),
-          'thinking-probe-top-rung-20260926-153723':('08ba4941f6d2b2c1a6b0780b1359675fcf200db623c78f4dfae359d25d5d642d',{(S5,O),(O,S5),(O,O)})}
-# What a passing sonnet-5-5 probe run would add: the Sonnet 5.5 rungs and the Opus 5.5 correction reset.
+          'thinking-probe-top-rung-20260926-153723':('08ba4941f6d2b2c1a6b0780b1359675fcf200db623c78f4dfae359d25d5d642d',{(S5,O),(O,S5),(O,O)}),
+          'thinking-probe-sonnet-5-5-20260928-133426':('6632f4e2184f1169bab69d4b124337792c5b488b944bba4353b4bf1f2d2bc176',{(S,S),(S,O),(O,S)})}
+# Every move between the current tiers, including the Opus 5.5 -> Sonnet 5.5 correction reset.
 SONNET_5_5_PAIRS=frozenset({(S,S),(S,O),(O,S),(O,O)})
 class TransformTests(unittest.TestCase):
     def request(self):
@@ -45,12 +46,12 @@ class TransformTests(unittest.TestCase):
         self.assertEqual(out['messages'][0],old['messages'][0])
         self.assertEqual((out['model'],out['output_config']['effort']),(S,'medium'))
     def test_verified_pairs_come_from_the_probe_evidence(self):
-        # Only Opus 5.5 effort: the Sonnet 5 pairs left with that tier, and no Sonnet 5.5 pair has run yet. Never
-        # Haiku (its targets are refused by the transform for mid-history system messages) and never Opus 5.
+        # Every move between Sonnet 5.5 and Opus 5.5; the Sonnet 5 pairs left with that tier. Never Haiku (its
+        # targets are refused by the transform for mid-history system messages) and never Opus 5.
         tiers=set(policy_actions.MODELS)
         self.assertEqual(policy_actions.THINKING_HISTORY_VERIFIED,
                          frozenset(p for pairs in EVIDENCE.values() for p in pairs[1] if set(p)<=tiers))
-        self.assertEqual(policy_actions.THINKING_HISTORY_VERIFIED,frozenset({(O,O)}))
+        self.assertEqual(policy_actions.THINKING_HISTORY_VERIFIED,SONNET_5_5_PAIRS)
         import hashlib,json
         from modelpilot.thinking_probe import verified_transitions
         for run,(digest,pairs) in EVIDENCE.items():
@@ -58,14 +59,14 @@ class TransformTests(unittest.TestCase):
             if summary.exists():  # raw evidence is ignored by Git; check it wherever it was copied
                 self.assertEqual(hashlib.sha256(summary.read_bytes()).hexdigest(),digest,run)
                 self.assertEqual({tuple(p) for p in verified_transitions(json.loads(summary.read_text()))},pairs,run)
-    def test_sonnet_5_5_pairs_wait_for_probe_evidence(self):
+    @mock.patch.object(policy_actions,'THINKING_HISTORY_VERIFIED',frozenset({(O,O)}))
+    def test_an_unverified_pair_is_refused_with_thinking_history(self):
         p=self.with_thinking(); p['model']=S; p['output_config']={'effort':'medium'}
         for model,effort in [(S,'high'),(O,'medium')]:
             with self.assertRaises(ValueError):transform_request(p,model,effort)
         p['model']=O
         with self.assertRaises(ValueError):transform_request(p,S,'medium')  # correction reset
         self.assertEqual(transform_request(p,O,'high')['model'],O)
-    @mock.patch.object(policy_actions,'THINKING_HISTORY_VERIFIED',SONNET_5_5_PAIRS)
     def test_verified_changes_keep_thinking_history_unchanged(self):
         p=self.with_thinking(); p['model']=S; p['output_config']={'effort':'medium'}
         for model,effort in [(S,'high'),(O,'medium')]:
@@ -162,7 +163,7 @@ class EscalationTests(unittest.TestCase):
 
 
 class LadderRuleTests(unittest.TestCase):
-    def test_each_start_setting_walks_its_own_ladder(self):
+    def test_the_fixture_ladder_walks_effort_then_model(self):
         from modelpilot.policy_actions import next_setting
         self.assertEqual(next_setting('increase_effort',S,'medium'),('increase_effort',S,'high'))
         self.assertEqual(next_setting('stronger_model',S,'high'),('stronger_model',O,'medium'))
@@ -170,6 +171,4 @@ class LadderRuleTests(unittest.TestCase):
         self.assertEqual(next_setting('stronger_model',O,'high'),('re_diagnose',O,'high'))  # no stronger rung left
         self.assertEqual(next_setting('human_review',O,'high'),('human_review',O,'high'))
         self.assertEqual(next_setting('hold',S,'medium'),('hold',S,'medium'))
-        from modelpilot.active_policy import parameters
-        self.assertEqual(parameters(S,'medium')['ladder'],[f'{S}/medium',f'{S}/high',f'{O}/medium'])
-        self.assertEqual(parameters(O,'medium')['ladder'],[f'{O}/medium',f'{O}/high'])
+        # This ladder is the fixture-only ProxyPolicy's; the active arm jumps instead (tests/test_active_policy.py).
