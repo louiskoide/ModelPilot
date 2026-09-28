@@ -7,8 +7,8 @@
     },
     "claude-sonnet-5-5": {
       "rank": 1, "efforts": ["low", "medium", "high", "xhigh", "max"], "mid_conversation_system": true,
-      "effort_switch_rewrite": "full", "candidate": true,
-      "effort_switch_evidence": "Sonnet 5 effort changes rewrote the whole cache (runs/thinking-probe-transitions-20260926-131953); assumed for Sonnet 5.5 until measured."
+      "effort_switch_rewrite": "messages", "candidate": true,
+      "effort_switch_evidence": "Sonnet 5.5 effort changes read the tools and system (7,871-7,873 tokens) and rewrote only the messages (465-504), 8/8 (runs/thinking-probe-sonnet-5-5-20260928-133426); Sonnet 5 had rewritten everything."
     },
     "claude-opus-5-5": {
       "rank": 2, "efforts": ["low", "medium", "high", "xhigh", "max"], "mid_conversation_system": true,

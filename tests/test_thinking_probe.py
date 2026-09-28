@@ -263,6 +263,19 @@ class ExecuteTests(unittest.TestCase):
         row = [json.loads(line) for line in (self.out/'observations.jsonl').read_text().splitlines()][5]
         self.assertEqual((row['status'], row['http_status'], row['cost_usd']), ('rejected', 400, None))
 
+    def test_an_account_error_on_a_switched_request_stops_the_run_and_is_no_verdict(self):
+        # runs/thinking-probe-sonnet-5-5-20260928-150023: the credit ran out on a switched request, which was
+        # recorded as a rejected transition.
+        credit = 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing.'
+        fake = Fake(lambda p, c: http_error(400, credit) if len(fake.calls) == 6 else None)
+        groups = [group(tp.plan('r', 'transitions', 1, SHAPE), name)
+                  for name in ('control/sonnet', 'control/opus', 'model_up', 'model_down')]
+        summary = self.run_probe(groups, fake)
+        self.assertEqual((summary['status'], summary['error'], len(fake.calls)), ('stopped', 'HTTPError', 6))
+        self.assertNotIn('model_up', {v['case'] for v in summary['verdicts'] if v['verdict'] == 'rejected'})
+        row = [json.loads(line) for line in (self.out/'observations.jsonl').read_text().splitlines()][5]
+        self.assertEqual((row['status'], row['http_status']), ('error', 400))
+
     def test_control_rejection_makes_the_transition_inconclusive(self):
         fake = Fake(lambda p, c: http_error(400) if len(fake.calls) == 2 else None)  # control/opus switched
         groups = [group(tp.plan('r', 'transitions', 1, SHAPE), name) for name in ('control/opus', 'model_up')]

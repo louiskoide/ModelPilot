@@ -38,6 +38,7 @@ import time
 import uuid
 from . import bench_jev, bench_report, bench_tasks, switch_policy
 from .governed_session import client_env
+from .cache_probe import ACCOUNT_MESSAGE
 from .jev_route_check import PATCH, TOKEN_FIELDS, check_anthropic_key, parse_events
 from .policy_actions import MODELS as POLICY_TIERS
 from .proxy import ProxyServer
@@ -184,6 +185,8 @@ def stop_reason(status, final, rows):
         return REFUSALS.get(refusal, 'policy_stop' if refusal.startswith('policy_stop') else 'policy_refused')
     if any(r.get('status') in ('transport_error', 'connection_closed') for r in rows):
         return 'transport_error'
+    if final.get('api_error_status') and ACCOUNT_MESSAGE.search(str(final.get('result') or '')):
+        return 'account_error'  # the Anthropic account can't pay or authenticate: not a model result
     if final.get('api_error_status'):
         return 'api_error'
     return 'client_error'
@@ -360,7 +363,7 @@ class Trial:
         self.prompts = [PREAMBLE + task['instruction']] + ([FOLLOW_UP] if shape == 'followup' else [])
         self.session_id = str(uuid.uuid4())
         self.sessions, self.final = [], {}
-        self.started = self.finished = self.router_unavailable = False
+        self.started = self.finished = self.router_unavailable = self.account_error = False
         self.proxy = self.proxy_thread = self.route = None
         self.router = (router or bench_jev.JevRouter(arm)) if arm['kind'] == 'jev' else None
         self.jev_key, self.jev_stub = jev_key, jev_stub
@@ -478,6 +481,7 @@ class Trial:
                   'rows': [first_row, first_row + len(rows)], 'wall_seconds': round(wall, 3),
                   'started_unix': started_unix, 'ended_unix': time.time(), 'first_read_tokens': first_read,
                   'proxy_idle': idle}
+        self.account_error = self.account_error or record['stop'] == 'account_error'
         if self.router:
             record['router_pid'] = self.router.pid
             self.router.collect(self.dir/'tmp', self.dir/'decisions.json')
@@ -554,7 +558,10 @@ class Trial:
         # Keep the diff and records; drop copies that only cost disk.
         for name in ('workspace', 'grade', 'home', 'tmp'):
             shutil.rmtree(self.dir/name, ignore_errors=True)
-        self.record['complete'] = stopped is None
+        # A trial the account couldn't pay for is not a model result: counted as incomplete, never as a failure.
+        self.record['complete'] = stopped is None and not self.account_error
+        if self.account_error:
+            self.record['excluded_reason'] = 'anthropic_account_error'
         self.finished = True
         self.save('graded')
         return self.record
@@ -697,6 +704,9 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
         # A rejected TypeSafe key would make every later Jev trial fail open onto Opus.
         if any(item.trial.router_unavailable for item in lazy if item.trial):
             return 'jev_router_unavailable'
+        # An Anthropic account that can't pay or authenticate fails every later trial the same way.
+        if any(item.trial.account_error for item in lazy if item.trial):
+            return 'anthropic_account_error'
         return 'run_budget' if run_budget is not None and spend() >= run_budget else None
     reason = error = None
     try:

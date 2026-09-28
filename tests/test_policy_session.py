@@ -194,8 +194,9 @@ class ProxyPolicyPathTests(Upstream, unittest.TestCase):
         self.assertFalse(row['applied'])
         self.assertIn('Thinking history', row['policy']['reason'])
 
-    def test_sonnet_5_5_rungs_wait_for_probe_evidence(self):
-        self.post(messages=self.THINKING)  # the real verified set: no Sonnet 5.5 pair yet
+    @mock.patch.object(policy_actions, 'THINKING_HISTORY_VERIFIED', frozenset({(O, O)}))
+    def test_an_unverified_rung_waits_for_probe_evidence(self):
+        self.post(messages=self.THINKING)
         row, = self.rows()
         self.assertFalse(row['applied'])
         self.assertIn('Thinking history', row['policy']['reason'])

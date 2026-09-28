@@ -105,7 +105,11 @@ class SwitchPolicyTests(unittest.TestCase):
         sonnet_effort = sp.switch_cost(self.cfg, self.rates, (S, 'medium'), (S, 'high'), prof)
         self.assertAlmostEqual(model_change, prof['prefix_tokens'] * (5 - .2) / 1e6)
         self.assertAlmostEqual(opus_effort, prof['messages_tokens'] * (5 - .2) / 1e6)  # Opus 5.5 keeps tools and system
-        self.assertAlmostEqual(sonnet_effort, prof['prefix_tokens'] * (2.5 - .2) / 1e6)  # Sonnet rewrites everything
+        cfg = copy.deepcopy(self.cfg)
+        cfg['models'][S]['effort_switch_rewrite'] = 'full'  # as Sonnet 5 did
+        self.assertAlmostEqual(sp.switch_cost(cfg, self.rates, (S, 'medium'), (S, 'high'), prof),
+                               prof['prefix_tokens'] * (2.5 - .2) / 1e6)
+        self.assertAlmostEqual(sonnet_effort, prof['messages_tokens'] * (2.5 - .2) / 1e6)  # so does Sonnet 5.5 (probe)
         self.assertLess(opus_effort, model_change)
         self.assertEqual(sp.switch_cost(self.cfg, self.rates, (S, 'medium'), (O, 'medium'), dict(prof, warm=False)), 0)
 

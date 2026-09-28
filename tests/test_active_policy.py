@@ -5,6 +5,7 @@ from pathlib import Path
 import threading
 import unittest
 from unittest import mock
+from modelpilot import policy_actions
 from modelpilot.active_policy import ActivePolicy
 from modelpilot.governed_session import OWNER
 from modelpilot.governor import Governor
@@ -268,6 +269,7 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertEqual((last['effort'], last['policy']['kind'], last['policy']['escalation_deferred']),
                          ('xhigh', 'keep_escalated', 'insufficient_write_reservation'))
 
+    @mock.patch.object(policy_actions, 'THINKING_HISTORY_VERIFIED', frozenset({(O, O)}))
     def test_thinking_history_blocks_an_unverified_jump(self):
         self.start()
         self.advise(O, 'xhigh')
@@ -276,7 +278,7 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
                                                            {'type': 'text', 'text': 'done'}]},
                          {'role': 'user', 'content': 'next'}]
         self.post(messages=with_thinking)
-        self.assertEqual(self.sent(), [(S, 'medium')])  # Sonnet 5.5 -> Opus 5.5 has no probe evidence yet
+        self.assertEqual(self.sent(), [(S, 'medium')])  # a pair without probe evidence
         row, = self.rows()
         self.assertIn('Thinking history', row['policy']['reason'])
 

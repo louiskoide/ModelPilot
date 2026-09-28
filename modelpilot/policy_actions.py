@@ -18,11 +18,11 @@ MID_CONVERSATION_SYSTEM={m:_CONFIG['models'][m]['mid_conversation_system'] for m
 LADDER_EFFORTS=('low','medium','high')  # the fixture-only ladder (ProxyPolicy); the active arm never climbs
 # (source model, target model) changes the provider accepted with thinking history, from
 # thinking_probe evidence only; the same model twice means an effort change (docs/thinking-history-probe.md).
-# Opus 5.5 effort: 4/4 in runs/thinking-probe-top-rung-20260926-153723. Its Sonnet 5 pairs (and Sonnet 5 effort,
-# runs/thinking-probe-transitions-20260926-131953) left with the Sonnet 5 tier; no other model reads Sonnet 5.5's
-# thinking blocks, so its pairs need their own probe run (suite sonnet-5-5) before its rungs and the Opus 5.5
-# correction reset can rewrite requests whose history holds thinking. Haiku targets are refused by the transform itself.
-THINKING_HISTORY_VERIFIED=frozenset({('claude-opus-5-5','claude-opus-5-5')})
+# Opus 5.5 effort: 4/4 in runs/thinking-probe-top-rung-20260926-153723. Sonnet 5.5 effort and Sonnet 5.5 <-> Opus 5.5:
+# 8/8, 4/4 and 4/4 in runs/thinking-probe-sonnet-5-5-20260928-133426 (the API drops the other model's thinking on a
+# switch, unbilled). The Sonnet 5 pairs left with that tier. Haiku targets are refused by the transform itself.
+THINKING_HISTORY_VERIFIED=frozenset({('claude-opus-5-5','claude-opus-5-5'),('claude-sonnet-5-5','claude-sonnet-5-5'),
+                                     ('claude-sonnet-5-5','claude-opus-5-5'),('claude-opus-5-5','claude-sonnet-5-5')})
 
 
 def setting(model,effort):

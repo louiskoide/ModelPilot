@@ -96,6 +96,11 @@ class ScheduleTests(unittest.TestCase):
                  (('completed', {'subtype': 'error_max_budget_usd', 'is_error': True}, []), 'budget_stop'),
                  (('completed', {}, [{'kind': 'messages', 'status': 'transport_error'}]), 'transport_error'),
                  (('completed', {'subtype': 'error_during_execution', 'is_error': True, 'api_error_status': 400}, []), 'api_error'),
+                 # runs/bench-20260928-150510: every trial ended like this when the account ran out of credit
+                 (('completed', {'subtype': 'success', 'is_error': True, 'api_error_status': 400,
+                                 'result': 'Credit balance is too low'}, []), 'account_error'),
+                 (('completed', {'subtype': 'success', 'is_error': True, 'api_error_status': 401,
+                                 'result': 'Invalid API key · Fix external API key'}, []), 'account_error'),
                  (('completed', {'subtype': 'error_during_execution', 'is_error': True}, []), 'client_error'),
                  (('completed', {}, []), 'client_error')]
         error = {'subtype': 'success', 'is_error': True}  # how the client ends after a proxy refusal
@@ -178,10 +183,11 @@ class Clock:
 
 class FakeTrial:
     """Stands in for bench.Trial on a fake clock: fixed sessions, duration and cost."""
-    def __init__(self, name, clock, sessions=2, seconds=100, cost=.4, fail_on=None, unavailable_after=None):
+    def __init__(self, name, clock, sessions=2, seconds=100, cost=.4, fail_on=None, unavailable_after=None, account_error=False):
         self.key, self.clock, self.sessions, self.seconds, self.cost, self.fail_on = (name, 'sonnet-5', 0), clock, sessions, seconds, cost, fail_on
         self.ran, self.started, self.finished, self.record = 0, False, False, None
         self.unavailable_after, self.router_unavailable, self.closed = unavailable_after, False, False
+        self.account_error_after, self.account_error = account_error, False
 
     def step(self):
         if self.fail_on == self.ran + 1:
@@ -191,6 +197,7 @@ class FakeTrial:
         self.clock.log.append((self.key[0], self.ran + 1))
         self.ran += 1
         self.router_unavailable = self.ran == self.unavailable_after
+        self.account_error = bool(self.account_error_after)
         if self.ran == self.sessions:
             self.finish()
         return self.ran < self.sessions
@@ -284,6 +291,11 @@ class RunBenchTests(unittest.TestCase):
         self.assertEqual(len(self.made), 1)
         saved = json.loads((self.out/'summary.json').read_text())
         self.assertEqual(saved['stopped'], 'jev_router_unavailable')
+
+    def test_an_anthropic_account_error_stops_the_run(self):
+        first = bench.schedule([{'id': n} for n in 'ABC'], ['sonnet-5'], 1, 0)[0][0]
+        summary = self.run_fake('ABC', fake={first: {'account_error': True, 'sessions': 1}}, shape='single')
+        self.assertEqual((summary['stopped'], summary['complete'], len(self.made)), ('anthropic_account_error', False, 1))
 
 
 class TrialTests(unittest.TestCase):
