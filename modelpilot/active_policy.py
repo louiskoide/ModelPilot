@@ -2,7 +2,8 @@
 
 Everywhere else the governor stays dry-run. This policy applies rules R1, R2, R5 and R6 of
 docs/m6-modelpilot-policy.md in the trial's proxy:
-- R1: the client starts at S0 (Sonnet 5, medium).
+- R1: the client starts at the arm's S0: Sonnet 5 medium (`modelpilot`) or Opus 5.5 medium
+  (`modelpilot-o55`); the tuning split chooses between them.
 - R2: the stuck ladder raises effort, then the model (Opus 5.5), one rung per window, each
   escalation admitted only if the limit covers its full rebuild, and kept for the task revision. A
   further stuck window (re_diagnose or human_review) stops the task: the proxy refuses the
@@ -13,11 +14,20 @@ docs/m6-modelpilot-policy.md in the trial's proxy:
   by the proxy with an API-style error and never reaches the provider.
 Not implemented: R3/R4 cost-motivated switches (including every Haiku target) and worker drafts.
 """
-from .fixture_dispatch import Dispatcher, ProxyPolicy
+from .fixture_dispatch import STOPS, Dispatcher, ProxyPolicy
+from .m2 import LADDER
+from .policy_actions import next_setting
 
-S0=('claude-sonnet-5','medium')
-PARAMETERS={'S0':list(S0),'ladder':['claude-sonnet-5/medium','claude-sonnet-5/high','claude-opus-5-5/medium'],
-            'stop_on':['re_diagnose','human_review'],'stuck':'m2 heuristic-v1 (score >= 3, window 6)',
+
+def parameters(model,effort):
+    """The arm's frozen parameters, with the ladder the stuck recommendations walk from its start setting."""
+    ladder,setting=[f'{model}/{effort}'],(model,effort)
+    for action in LADDER:
+        action,*setting=next_setting(action,*setting)
+        if action in STOPS:
+            break
+        ladder.append('/'.join(setting))
+    return {'S0':[model,effort],'ladder':ladder,'stop_on':list(STOPS),'stuck':'m2 heuristic-v1 (score >= 3, window 6)',
             'admission':'measured spend below the per-task limit; an escalation also needs the limit to cover '
                         'its full rebuild (request bytes/3 tokens at the dearest write rate), not its output allowance',
             'rules':['R1','R2','R5','R6'],'not_implemented':['R3','R4','Haiku targets','worker drafts (lever 3)']}

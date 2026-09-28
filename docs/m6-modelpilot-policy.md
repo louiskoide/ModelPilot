@@ -89,7 +89,7 @@ Opus 5.5 replaced Opus 5 as the top rung on September 26 (user decision). It is 
 
 | Parameter | Proposed start | Chosen on |
 | --- | --- | --- |
-| `S0` start setting | Sonnet 5, medium | tuning split |
+| `S0` start setting | Sonnet 5 medium (`modelpilot`) or Opus 5.5 medium (`modelpilot-o55`); both run in 4a | tuning split |
 | `H` forecast horizon | 3 requests | tuning split |
 | `M` margin | 1.5 | tuning split |
 | `T` excerpt threshold | 8 KB | tuning split |

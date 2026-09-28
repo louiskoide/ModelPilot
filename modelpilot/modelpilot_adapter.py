@@ -62,7 +62,13 @@ class ModelPilotAdapter:
     model='claude-sonnet-5'
     key=''
 
-    def __init__(self,limit_usd=1.,mode='dry-run',tools=False,threshold=8192,fixture_policy=None):
+    def __init__(self,limit_usd=1.,mode='dry-run',tools=False,threshold=8192,fixture_policy=None,
+                 arm_id='modelpilot',model='claude-sonnet-5',effort='medium'):
+        from .policy_actions import MODELS,setting
+        setting(model,effort)
+        if model==MODELS[0]:
+            raise ValueError('The arm starts on Sonnet 5 or Opus 5.5; Haiku targets are not implemented')
+        self.arm_id,self.model,self.effort=arm_id,model,effort
         if mode not in ('dry-run','active'):
             raise ValueError('Mode must be dry-run or active')
         if mode=='active' and (fixture_policy is not None or not tools):
@@ -127,7 +133,7 @@ class ModelPilotAdapter:
             j=result.index('--allowedTools')+1
             result[j]=','.join([result[j]]+TOOL_NAMES)
         result[i]=prompt+result[i]
-        return result+['--effort','medium','--settings',str(self.settings)]
+        return result+['--effort',self.effort,'--settings',str(self.settings)]
 
     def environment(self,env):
         return dict(env,**self.binding)
@@ -154,7 +160,7 @@ class ModelPilotAdapter:
             from .policy_actions import escalation_proposal
             try:
                 row=gov.state.get(self.task)
-                proposal=escalation_proposal(gov.state,self.task,row['revision'],OWNER,self.model,'medium')
+                proposal=escalation_proposal(gov.state,self.task,row['revision'],OWNER,self.model,self.effort)
             except ValueError:
                 proposal={'action':'defer','reason':'task_not_owned_or_acknowledged','applied':False}
         finally:
@@ -169,12 +175,13 @@ class ModelPilotAdapter:
         mode=self.policy.mode if self.policy else 'dry-run'
         active=mode=='active'
         fixture={'escalations':escalations,'kept_requests':kept} if self.policy else None
-        from .active_policy import PARAMETERS
+        from .active_policy import parameters
         out={'kind':'modelpilot_policy','mode':mode,'applied':any(r.get('applied') for r in messages),
              'active_policy_implemented':active,'benchmark_eligible':active and self.tools,
              'tools':{'enabled':self.tools,'threshold_bytes':self.threshold,'calls':tool_calls},
              'fixture_policy':None if active else fixture,
-             'policy':dict(fixture,stops=stops,refusals=[r.get('refusal') for r in refused],parameters=PARAMETERS)
+             'policy':dict(fixture,stops=stops,refusals=[r.get('refusal') for r in refused],
+                           parameters=parameters(self.model,self.effort))
                  if active else None,
              'policy_sha256':hashlib.sha256(policy_file.read_bytes()).hexdigest(),
              'governor':policy,'escalation_proposal':proposal,'hook_events':len(hooks),'all_requests_settled':bool(messages) and settled,

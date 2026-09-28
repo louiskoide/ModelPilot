@@ -107,7 +107,13 @@ All 40 tasks re-validated under the new grading environment on September 24 (`ru
 
 **Jev arms (done offline, $0, September 24).** `jev-stock` and `jev-compat` run in `bench.py`; see "Jev arms" below. The offline end-to-end tests use the real 2.1.281 client, Jev's real proxy, a stub in place of TypeSafe and the scripted fixture. Compat routes a fixing session, with tokens and wire dollars exact. A follow-up keeps Jev's routing state (the second decision sees the first selection as current), with one Jev process for both sessions. Stock serves everything on Opus without a decision. No live Jev trial has run.
 
-Next: the 4a tuning run. Every arm in the comparison set runs from the CLI (the ModelPilot arm since September 26, offline-verified only). The Jev credential check passed again on September 26 (`runs/jev-preflight-20260926-171119`), and the benchmark venv's site-packages is locked. 4a uses `--run-budget 25` (user decision).
+Next: the 4a tuning run, designed as below (user decisions, September 27). Every arm runs from the CLI; the ModelPilot arms are offline-verified plus the smoke test. The Jev credential check passed again on September 26 (`runs/jev-preflight-20260926-171119`), and the benchmark venv's site-packages is locked.
+
+**4a design (user decisions, September 27).**
+- **Two ModelPilot start settings.** The policy chooses S0 on the tuning split, which needs more than one candidate. `modelpilot` starts on Sonnet 5 medium (ladder Sonnet 5 high, then Opus 5.5 medium). `modelpilot-o55` starts on Opus 5.5 medium (ladder Opus 5.5 high; stuck again, the task stops, since no stronger model is left). The smoke test showed why: Claude Code sends Opus 5.5 about a third of the prompt it sends Sonnet 5, at the same cache-read price.
+- **Main run:** 16 tuning tasks × 6 arms (`haiku-4.5`, `sonnet-5`, `opus-5.5`, `jev-compat-o55`, `modelpilot`, `modelpilot-o55`) × 1 trial, seed 0, `--run-budget 25`: 96 trials, about $9–18.
+- **Variance check:** a second trial of 4 tasks × the same 6 arms, seed 1, `--run-budget 6`: 24 trials, about $2–4.5. The tasks were fixed before any 4a data, the first task of each tuning repository alphabetically: `cachetools-cache-key`, `mi-is-sorted-lt-only`, `parse-decimal-grouping`, `tomli-hex-escape`. Paired with the main run's trial, each (task, arm) has two runs, which estimates the run-to-run cost variation.
+- **Rule for the number of final trials (proposed; the user confirms it before 4b, and it is applied before any final task runs).** From the two runs, estimate the within-task variance of each arm's cost; from the main run, the between-task variance of the paired cost difference between the chosen ModelPilot variant and the cheapest fixed arm. 4b uses the smallest n in {1, 2, 3} whose projected 95% half-width of that paired difference, over 24 final tasks, is at most 15% of the fixed arm's mean cost, and 3 if none is.
 
 ## Question
 
@@ -127,6 +133,7 @@ All arms use the same tasks, tools, per-task limits, graders and isolation. Sinc
 | Compat Jev | pinned plus the one-line patch (`work/jev-router-compat`), reported with `rejected_requests`, `extra_decisions` and router usage. It routes among Jev's static tiers, including Opus 5 (reference) |
 | Aligned compat Jev (`jev-compat-o55`) | compat Jev, model-constrained and recorded separately: it discovers only the policy's tiers, so it routes among Haiku 4.5, Sonnet 5 and Opus 5.5 (see "Jev model alignment") |
 | ModelPilot (`modelpilot`) | policy in `docs/m6-modelpilot-policy.md`, active for this arm only (approved September 26): Sonnet 5 medium, stuck ladder to Sonnet 5 high and Opus 5.5 medium, R5 tools, limit enforced on wire cost. R3/R4 and worker drafts not implemented. Offline-verified only |
+| ModelPilot, Opus 5.5 start (`modelpilot-o55`) | the same policy with S0 = Opus 5.5 medium: one rung (Opus 5.5 high), then a stuck task stops. A tuning-split candidate for S0 (September 27) |
 
 Every arm runs through ModelPilot's proxy for wire accounting. That arrangement already reconciles Jev exactly. Claude Code's own cost figures are never used for Jev or ModelPilot.
 

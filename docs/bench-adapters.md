@@ -146,6 +146,8 @@ Two admission decisions keep the arm's limit the same as the other arms':
 
 The limit is the per-session `--budget` times the number of sessions (a follow-up trial gets two). It is enforced on wire cost. The client's own threshold still applies, priced as the Sonnet 5 it asked for, so after an Opus 5.5 rung the governor is the binding stop. The run manifest records the parameters, the policy doc hash and the limit basis. The report summarizes the arm under `policy` (escalations, kept requests, stops, refusals), not under Jev `routing`.
 
+**Second start setting (September 27).** `modelpilot-o55` is the same policy with the client asking for Opus 5.5 medium (`ModelPilotAdapter(arm_id=, model=, effort=)`), so the tuning split can choose S0. Its ladder, from `policy_actions.next_setting`, is one rung (Opus 5.5 high); stuck again, `stronger_model` has no rung left and becomes `re_diagnose`, which stops the task. `active_policy.parameters(model, effort)` records each arm's ladder in its evidence and in the run manifest. A real-client trial asks for Opus 5.5 medium, escalates to high after three stalled suite runs, and passes.
+
 The fixture path is unchanged. The fence, reserve and settle core moved into `fixture_dispatch.Dispatcher`. `FixtureDispatcher` and `ProxyPolicy` keep their journal kinds, reservation rule and upstream restriction. The active path journals `policy_dispatch`, `policy_keep` and `policy_stop`.
 
 Validation, all $0 with no provider traffic:

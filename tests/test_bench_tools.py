@@ -127,7 +127,7 @@ class ToolTrialTests(unittest.TestCase):
         self.upstream.script = [dict(step, input={k: (str(work/v) if k == 'file_path' else v)
                                                   for k, v in step['input'].items()})
                                 if 'tool' in step and isinstance(step['input'], dict) else step for step in script]
-        return bench.run_trial(self.task, 'modelpilot', self.out/name, self.cli, 'sk-ant-offline-not-a-key',
+        return bench.run_trial(self.task, adapter.arm_id, self.out/name, self.cli, 'sk-ant-offline-not-a-key',
                                f'http://127.0.0.1:{self.upstream.server_port}', rates, python=sys.executable,
                                max_turns=max_turns, client_version=self.version, adapter=adapter)
 
@@ -230,6 +230,23 @@ class ToolTrialTests(unittest.TestCase):
         policy = record['routing']['policy']
         self.assertEqual([e['action'] for e in policy['escalations']], ['increase_effort', 'stronger_model'])
         self.assertEqual((len(policy['stops']), policy['refusals']), (1, ['policy_stop:re_diagnose']))
+        self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
+
+    def test_the_opus_5_5_variant_asks_for_opus_and_raises_only_its_effort(self):
+        script = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': BROKEN}}] +
+                  [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 3 +
+                  [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
+                   {'tool': 'mcp__modelpilot__run_tests', 'input': {}},
+                   {'text': 'Done.'}])
+        rates = dict(test_bench.RATES, **{'claude-opus-5-5': dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)})
+        record = self.modelpilot_trial('o55', script, bench.arm_adapter('modelpilot-o55', 1, 1), rates=rates)
+        self.assertTrue(record['passed'], record['grade'])
+        self.assertEqual(self.main_loop(), [('claude-opus-5-5', 'medium')]*4 + [('claude-opus-5-5', 'high')]*3)
+        self.assertEqual((record['arm'], record['model']), ('modelpilot-o55', 'claude-opus-5-5'))
+        policy = record['routing']['policy']
+        self.assertEqual(policy['parameters']['ladder'], ['claude-opus-5-5/medium', 'claude-opus-5-5/high'])
+        self.assertEqual([e['target_effort'] for e in policy['escalations']], ['high'])
+        self.assertTrue(record['routing']['benchmark_eligible'])
         self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
 
     def test_policy_refuses_a_live_upstream(self):

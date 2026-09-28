@@ -63,9 +63,12 @@ ARMS = {
     # its fallback is its static claude-opus-5.
     'jev-compat-o55': {'kind': 'jev', 'variant': 'compat', 'model': 'jev-router', 'checkout': 'work/jev-router-compat',
                        'patch': PATCH, 'models': POLICY_TIERS},
-    # The client asks for Sonnet 5 at medium effort (S0); the policy's proxy may serve the ladder's rungs.
+    # The client asks for the arm's start setting (S0); the policy's proxy may serve the ladder's rungs. The tuning
+    # split chooses S0: Claude Code sends Opus 5.5 a much smaller request than Sonnet 5 (docs/m6-benchmark-plan.md).
     'modelpilot': {'kind': 'modelpilot', 'model': 'claude-sonnet-5', 'effort': 'medium',
                    'served_models': ['claude-sonnet-5', 'claude-opus-5-5'], 'policy': 'docs/m6-modelpilot-policy.md'},
+    'modelpilot-o55': {'kind': 'modelpilot', 'model': 'claude-opus-5-5', 'effort': 'medium',
+                       'served_models': ['claude-opus-5-5'], 'policy': 'docs/m6-modelpilot-policy.md'},
 }
 RUNNABLE = ('fixed', 'jev')
 IDLE_SECONDS = 130  # the proxy's upstream socket timeout (120 s) bounds any request still in flight
@@ -110,7 +113,8 @@ def arm_adapter(arm, budget_usd, sessions):
     if ARMS[arm]['kind'] != 'modelpilot':
         return None
     from .modelpilot_adapter import ModelPilotAdapter
-    return ModelPilotAdapter(limit_usd=budget_usd * sessions, mode='active', tools=True)
+    return ModelPilotAdapter(limit_usd=budget_usd * sessions, mode='active', tools=True, arm_id=arm,
+                             model=ARMS[arm]['model'], effort=ARMS[arm]['effort'])
 
 
 def schedule(tasks, arms, trials, seed):
@@ -628,16 +632,16 @@ def jev_manifest(arms):
 
 
 def modelpilot_manifest(arms, budget_usd, sessions):
-    """What the ModelPilot arm ran, for the manifest; None without it."""
-    if 'modelpilot' not in arms:
-        return None
-    from .active_policy import PARAMETERS
-    policy = ROOT/ARMS['modelpilot']['policy']
-    return {'mode': 'active (user-approved September 26, benchmark arm only)', 'parameters': PARAMETERS,
-            'policy_sha256': hashlib.sha256(policy.read_bytes()).hexdigest(),
-            'governor_limit_usd': budget_usd * sessions,
-            'limit_basis': 'wire cost, admitted while measured spend is below the limit (the client budget-stop rule); '
-                           'the client threshold also applies, priced by Claude Code as the Sonnet 5 it asked for'}
+    """What each ModelPilot arm ran, for the manifest; None without one."""
+    from .active_policy import parameters
+    return {a: {'mode': 'active (user-approved September 26, benchmark arm only)',
+                'parameters': parameters(ARMS[a]['model'], ARMS[a]['effort']),
+                'policy_sha256': hashlib.sha256((ROOT/ARMS[a]['policy']).read_bytes()).hexdigest(),
+                'governor_limit_usd': budget_usd * sessions,
+                'limit_basis': 'wire cost, admitted while measured spend is below the limit (the client budget-stop '
+                               'rule); the client threshold also applies, priced by Claude Code as the start model it '
+                               'asked for'}
+            for a in arms if ARMS[a]['kind'] == 'modelpilot'} or None
 
 
 def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *, client_version=None, shape='single',
@@ -776,11 +780,12 @@ def main():
                   'so their dollars are a lower bound; the client stop threshold is priced on the jev-router sentinel. '
                   'Stock Jev is expected not to route on this client (run as Opus plus router overhead). '
                   '--live asks for a TypeSafe key; consider python3 -m modelpilot.jev_check --live first.')
-        if 'modelpilot' in arms:
-            print(f'ModelPilot arm: active policy (benchmark arm only): starts at Sonnet 5 medium, escalates on the stuck '
-                  f'ladder to Sonnet 5 high then Opus 5.5 medium, stops a task stuck beyond that, and refuses any request '
-                  f'once wire spend reaches ${args.budget * sessions:.2f} per trial or cost is unknown. '
-                  'No cost-motivated switches, Haiku targets or worker drafts.')
+        from .active_policy import parameters
+        for arm in (a for a in arms if ARMS[a]['kind'] == 'modelpilot'):
+            ladder = parameters(ARMS[arm]['model'], ARMS[arm]['effort'])['ladder']
+            print(f'ModelPilot arm {arm}: active policy (benchmark arm only): stuck ladder {" -> ".join(ladder)}, '
+                  f'then the task stops; any request is refused once wire spend reaches ${args.budget * sessions:.2f} '
+                  'per trial or cost is unknown. No cost-motivated switches, Haiku targets or worker drafts.')
         return
     cli, version = resolve_client(args.claude or shutil.which('claude') or 'claude')
     writable = bench_tasks.writable_site_packages(python)

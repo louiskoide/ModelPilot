@@ -74,6 +74,18 @@ def transform_request(request,model,effort,allow_thinking_history=False):
     return out
 
 
+def next_setting(action,model,effort):
+    """The ladder's rule for one stuck recommendation: (action, model, effort) after it. An effort step,
+    else the next model at medium; with no rung left the action becomes re_diagnose (or human_review)."""
+    if action=='increase_effort' and effort in EFFORTS and effort!='high':
+        return action,model,EFFORTS[EFFORTS.index(effort)+1]
+    if action in ('increase_effort','stronger_model') and model!=MODELS[-1]:
+        return action,MODELS[MODELS.index(model)+1],'medium'
+    if action=='hold':
+        return action,model,effort
+    return ('human_review' if action=='human_review' else 're_diagnose'),model,effort
+
+
 def escalation_proposal(state,task,revision,owner,model,effort):
     setting(model,effort)
     nested=state.db.in_transaction
@@ -82,14 +94,7 @@ def escalation_proposal(state,task,revision,owner,model,effort):
             state.db.execute('BEGIN IMMEDIATE')
         state._owned(task,revision,owner)
         recommendation=state.recommend(task)
-        target,target_effort=model,effort
-        action=recommendation['recommendation']
-        if action=='increase_effort' and effort in EFFORTS and effort!='high':
-            target_effort=EFFORTS[EFFORTS.index(effort)+1]
-        elif action in ('increase_effort','stronger_model') and model!=MODELS[-1]:
-            target=MODELS[MODELS.index(model)+1];target_effort='medium'
-        elif action!='hold':
-            action='human_review' if action=='human_review' else 're_diagnose'
+        action,target,target_effort=next_setting(recommendation['recommendation'],model,effort)
         return {'task':task,'revision':revision,'last_event':recommendation['last_event'],
                 'level':recommendation['level'],'source_model':model,'source_effort':effort,
                 'target_model':target,'target_effort':target_effort,'action':action,'applied':False}

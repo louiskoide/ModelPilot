@@ -27,10 +27,10 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.log = Path(self.tmp.name)/'observations.jsonl'
         self.proxy = None
 
-    def start(self, limit=5):
+    def start(self, limit=5, client=S):
         # The ledger records one limit per session, so each test uses a fresh session for its limit.
         self.session = f's{limit}'
-        self.proxy = ProxyServer(('127.0.0.1', 0), self.url, self.log, RATES, policy=ActivePolicy(S, OWNER),
+        self.proxy = ProxyServer(('127.0.0.1', 0), self.url, self.log, RATES, policy=ActivePolicy(client, OWNER),
                                  governor={'db': self.db, 'session': self.session, 'limit_usd': limit, 'task': self.task})
         self.proxy_thread = threading.Thread(target=self.proxy.serve_forever, daemon=True)
         self.proxy_thread.start()
@@ -148,6 +148,19 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
             self.assertTrue(policy['cost_complete'])
         finally:
             gov.close()
+
+    def test_an_opus_5_5_start_has_one_rung_then_stops(self):
+        self.start(client=O)
+        self.post(model=O)
+        self.stuck()
+        self.post(model=O)  # effort rung
+        self.post(model=O)  # kept
+        self.stuck()
+        status, body = self.post(model=O)  # no stronger model left: re_diagnose stops the task
+        self.assertEqual(status, 400)
+        self.assertIn(b'policy_stop:re_diagnose', body)
+        self.assertEqual(self.sent(), [(O, 'medium'), (O, 'high'), (O, 'high')])
+        self.assertEqual([r.get('policy', {}).get('status') for r in self.rows()], ['deferred', 'confirmed', 'kept', 'stop'])
 
     def test_an_unaffordable_rebuild_keeps_the_client_setting_within_the_limit(self):
         self.start(limit=.001)
