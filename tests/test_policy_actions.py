@@ -162,7 +162,7 @@ class EscalationTests(unittest.TestCase):
 
 
 class LadderRuleTests(unittest.TestCase):
-    def test_each_start_setting_walks_its_own_ladder(self):
+    def test_the_fixture_ladder_walks_effort_then_model(self):
         from modelpilot.policy_actions import next_setting
         self.assertEqual(next_setting('increase_effort',S,'medium'),('increase_effort',S,'high'))
         self.assertEqual(next_setting('stronger_model',S,'high'),('stronger_model',O,'medium'))
@@ -170,6 +170,4 @@ class LadderRuleTests(unittest.TestCase):
         self.assertEqual(next_setting('stronger_model',O,'high'),('re_diagnose',O,'high'))  # no stronger rung left
         self.assertEqual(next_setting('human_review',O,'high'),('human_review',O,'high'))
         self.assertEqual(next_setting('hold',S,'medium'),('hold',S,'medium'))
-        from modelpilot.active_policy import parameters
-        self.assertEqual(parameters(S,'medium')['ladder'],[f'{S}/medium',f'{S}/high',f'{O}/medium'])
-        self.assertEqual(parameters(O,'medium')['ladder'],[f'{O}/medium',f'{O}/high'])
+        # This ladder is the fixture-only ProxyPolicy's; the active arm jumps instead (tests/test_active_policy.py).

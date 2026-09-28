@@ -12,6 +12,7 @@ import unittest
 from unittest import mock
 from modelpilot import bench, bench_tasks
 from modelpilot.fixtures import fixture_server, scripted_response
+from modelpilot.policy_actions import MODELS as POLICY_TIERS
 from tests import test_bench_tasks as synthetic
 
 # Sonnet 5 serves the harness tests' fixed arm; Sonnet 5.5 is the ModelPilot arm's start tier. Same rates.
@@ -36,24 +37,27 @@ class ScheduleTests(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             bench.run_trial({'id': 't'}, 'modelpilot', '/nonexistent', 'claude', 'k', 'http://127.0.0.1:1', RATES)
 
-    def test_the_modelpilot_arm_gets_the_active_policy_and_the_same_limit_per_session(self):
+    def test_the_modelpilot_arm_gets_the_active_policy_jev_as_advisor_and_the_same_limit_per_session(self):
         self.assertIsNone(bench.arm_adapter('sonnet-5', 1.5, 1))
-        adapter = bench.arm_adapter('modelpilot', 1.5, 2)
+        adapter = bench.arm_adapter('modelpilot', 1.5, 2, jev_key='ts-key')
         self.assertEqual((adapter.policy.mode, adapter.tools, adapter.limit), ('active', True, 3.0))
         self.assertEqual((adapter.arm_id, adapter.model, adapter.effort), ('modelpilot', 'claude-sonnet-5-5', 'medium'))
-        self.assertEqual(bench.ARMS['modelpilot']['served_models'], ['claude-sonnet-5-5', 'claude-opus-5-5'])
-        variant = bench.arm_adapter('modelpilot-o55', 1, 1)
-        self.assertEqual((variant.arm_id, variant.model, variant.effort, variant.policy.client_model),
-                         ('modelpilot-o55', 'claude-opus-5-5', 'medium', 'claude-opus-5-5'))
-        table = bench.rates()
-        for arm in ('modelpilot', 'modelpilot-o55'):
-            self.assertTrue(all(m in table for m in bench.ARMS[arm]['served_models']))
+        self.assertIs(adapter.policy.advisor, adapter.advisor)
+        self.assertEqual((adapter.advisor.live, adapter.advisor.key, adapter.advisor.checkout),
+                         (True, 'ts-key', bench.ROOT/'work/jev-router-compat'))
+        self.assertIsNone(bench.arm_adapter('modelpilot', 1, 1).advisor)  # no key: no advice, never eligible
+        self.assertFalse(bench.arm_adapter('modelpilot', 1, 1, advisor_stub={}).advisor.live)
+        arm = bench.ARMS['modelpilot']
+        self.assertEqual((arm['served_models'], arm['models']), (['claude-opus-5-5', 'claude-sonnet-5-5'], POLICY_TIERS))
+        self.assertNotIn('modelpilot-o55', bench.ARMS)  # the start is Jev's prediction now, not a tuned variant
+        self.assertTrue(all(m in bench.rates() for m in arm['served_models']))
         with self.assertRaises(ValueError):  # Haiku targets are not implemented
             from modelpilot.modelpilot_adapter import ModelPilotAdapter
             ModelPilotAdapter(mode='active', tools=True, model='claude-haiku-4-5-20251001', effort=None)
-        manifest = bench.modelpilot_manifest(['sonnet-5', 'modelpilot', 'modelpilot-o55'], 1.0, 1)
-        self.assertEqual({a: m['parameters']['ladder'][-1] for a, m in manifest.items()},
-                         {'modelpilot': 'claude-opus-5-5/medium', 'modelpilot-o55': 'claude-opus-5-5/high'})
+        parameters = bench.modelpilot_manifest(['sonnet-5', 'modelpilot'], 1.0, 1)['modelpilot']['parameters']
+        self.assertEqual(parameters['decision_points'], ['turn_start', 'stuck_evidence'])
+        self.assertIn('claude-opus-5-5/xhigh', parameters['settings'])
+        self.assertNotIn('ladder', parameters)
         self.assertIsNone(bench.modelpilot_manifest(['sonnet-5'], 1.0, 1))
 
     def test_refused_requests_are_counted_apart_from_sent_ones(self):

@@ -1,0 +1,122 @@
+"""ModelPilot's switch policy: whether moving to Jev's recommended setting pays. Pure, $0."""
+import copy
+import json
+import tempfile
+import unittest
+from modelpilot import bench, switch_policy as sp
+
+H, S, O = 'claude-haiku-4-5-20251001', 'claude-sonnet-5-5', 'claude-opus-5-5'
+MODELS, EFFORTS = [H, S, O], ['low', 'medium', 'high', 'xhigh', 'max']
+
+
+def advice(model, effort, model_p=.9, effort_p=.85, models=None):
+    def spread(labels, top, p):
+        return {x: p if x == top else (1 - p) / (len(labels) - 1) for x in labels}
+    return {'model': {'choice': model, 'confidence': model_p, 'probabilities': models or spread(MODELS, model, model_p)},
+            'effort': {'choice': effort, 'confidence': effort_p, 'probabilities': spread(EFFORTS, effort, effort_p)}}
+
+
+def request(kb):
+    return {'model': S, 'messages': [{'role': 'user', 'content': 'x' * (kb * 1000 - 200)}]}
+
+
+class SwitchPolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.cfg, self.rates = sp.load(), bench.rates()
+
+    def decide(self, adv, current, kb=11, warm=False, trigger='turn_start', cfg=None):
+        cfg = cfg or self.cfg
+        return sp.decide(cfg, self.rates, adv, current, sp.profile(cfg, request(kb), warm), trigger)
+
+    def test_the_settings_come_from_the_config(self):
+        settings = sp.settings(self.cfg)
+        self.assertNotIn(H, {m for m, _ in settings})  # not a candidate: the config says why
+        self.assertIn((O, 'xhigh'), settings)
+        self.assertEqual(len(settings), 10)
+        cfg = copy.deepcopy(self.cfg)  # a new model is a config entry and a rate, not code
+        cfg['models']['claude-next'] = dict(cfg['models'][O], rank=3)
+        rates = dict(self.rates, **{'claude-next': self.rates[O]})
+        adv = advice('claude-next', 'high', models={H: .01, S: .02, O: .02, 'claude-next': .95})
+        decision = sp.decide(cfg, rates, adv, (S, 'medium'), sp.profile(cfg, request(11), False), 'turn_start')
+        self.assertEqual((decision['action'], decision['target']), ('jump', ['claude-next', 'high']))
+
+    def test_a_confident_hard_prediction_jumps_straight_to_it(self):
+        decision = self.decide(advice(O, 'xhigh'), (S, 'medium'))
+        self.assertEqual((decision['action'], decision['target']), ('jump', [O, 'xhigh']))
+        # Only staying, Jev's setting and its model or effort alone are weighed: no intermediate rungs.
+        self.assertEqual({c['setting'] for c in decision['candidates']},
+                         {f'{S}/medium', f'{O}/xhigh', f'{O}/medium', f'{S}/xhigh'})
+
+    def test_it_still_jumps_when_a_warm_rewrite_is_worth_it(self):
+        decision = self.decide(advice(O, 'xhigh'), (S, 'medium'), kb=200, warm=True)
+        self.assertEqual(decision['action'], 'jump')
+        target = next(c for c in decision['candidates'] if c['setting'] == f'{O}/xhigh')
+        self.assertGreater(target['switch_usd'], 0)
+
+    def test_uncertain_between_the_current_and_a_dearer_setting_stays(self):
+        adv = advice(S, 'medium', model_p=.55, models={H: .05, S: .55, O: .40})
+        self.assertEqual(self.decide(adv, (S, 'medium'), kb=100, warm=True)['action'], 'stay')
+
+    def test_a_downgrade_pays_when_cold_but_not_in_a_warm_long_session(self):
+        adv = advice(S, 'medium', model_p=.85, models={H: .1, S: .85, O: .05})
+        warm = self.decide(adv, (O, 'high'), kb=300, warm=True)
+        self.assertEqual((warm['action'], warm['reason'], warm['downgrade']), ('stay', 'not_worth_switching', True))
+        self.assertGreater(warm['required_usd'], self.cfg['hysteresis_usd'])  # plus a multiple of the rewrite
+        self.assertEqual(self.decide(adv, (O, 'high'), kb=20, warm=False)['action'], 'jump')
+
+    def test_a_low_confidence_downgrade_is_refused(self):
+        adv = advice(S, 'medium', model_p=.25, models={H: .6, S: .25, O: .15})
+        decision = self.decide(adv, (O, 'high'))
+        self.assertEqual((decision['action'], decision['reason']), ('stay', 'low_confidence_no_downgrade'))
+
+    def test_hysteresis_keeps_a_small_gain_from_switching(self):
+        cfg = dict(self.cfg, hysteresis_usd=10.0)
+        decision = self.decide(advice(O, 'xhigh'), (S, 'medium'), cfg=cfg)
+        self.assertEqual((decision['action'], decision['reason']), ('stay', 'not_worth_switching'))
+
+    def test_switch_costs_by_kind(self):
+        prof = sp.profile(self.cfg, dict(request(40), tools=[{'name': 'x', 'description': 'y' * 20000}]), warm=True)
+        model_change = sp.switch_cost(self.cfg, self.rates, (S, 'medium'), (O, 'medium'), prof)
+        opus_effort = sp.switch_cost(self.cfg, self.rates, (O, 'medium'), (O, 'high'), prof)
+        sonnet_effort = sp.switch_cost(self.cfg, self.rates, (S, 'medium'), (S, 'high'), prof)
+        self.assertAlmostEqual(model_change, prof['prefix_tokens'] * (5 - .2) / 1e6)
+        self.assertAlmostEqual(opus_effort, prof['messages_tokens'] * (5 - .2) / 1e6)  # Opus 5.5 keeps tools and system
+        self.assertAlmostEqual(sonnet_effort, prof['prefix_tokens'] * (2.5 - .2) / 1e6)  # Sonnet rewrites everything
+        self.assertLess(opus_effort, model_change)
+        self.assertEqual(sp.switch_cost(self.cfg, self.rates, (S, 'medium'), (O, 'medium'), dict(prof, warm=False)), 0)
+
+    def test_stuck_evidence_rules_out_the_current_setting_and_weakers(self):
+        decision = self.decide(advice(S, 'medium'), (S, 'medium'), kb=60, warm=True, trigger='stuck_evidence')
+        self.assertEqual(decision['action'], 'jump')
+        rows = {c['setting']: c for c in decision['candidates']}
+        self.assertEqual(rows[f'{S}/medium']['p_ok'], 0)
+        self.assertTrue(all(sp.at_least(self.cfg, tuple(c.split('/')), (S, 'medium')) for c in rows))
+        self.assertNotIn(f'{O}/low', rows)  # weaker effort: not ruled in by the evidence
+
+    def test_stuck_with_nothing_stronger_stops(self):
+        decision = self.decide(advice(O, 'max'), (O, 'max'), trigger='stuck_evidence')
+        self.assertEqual((decision['action'], decision['reason']), ('stop', 'no_stronger_setting'))
+
+    def test_without_advice_it_stays(self):
+        self.assertEqual(self.decide(None, (S, 'medium'))['reason'], 'advice_unavailable')
+        self.assertEqual(self.decide({'model': {'probabilities': {}}}, (S, 'medium'))['reason'], 'advice_unavailable')
+
+    def test_without_an_effort_answer_effort_does_not_enter_the_estimate(self):
+        adv = advice(O, 'xhigh')
+        del adv['effort']
+        decision = self.decide(adv, (S, 'medium'))
+        self.assertEqual({c['setting'] for c in decision['candidates']}, {f'{S}/medium', f'{O}/medium'})
+
+    def test_a_bad_config_is_refused(self):
+        for change in ({'effort_switch_rewrite': 'partial'}, {'efforts': ['medium', 'extreme']}):
+            cfg = copy.deepcopy(self.cfg)
+            cfg['models'][S].update(change)
+            with tempfile.NamedTemporaryFile('w', suffix='.json') as f:
+                json.dump(cfg, f)
+                f.flush()
+                with self.assertRaises(ValueError):
+                    sp.load(f.name)
+
+
+if __name__ == '__main__':
+    unittest.main()

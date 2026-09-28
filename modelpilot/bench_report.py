@@ -78,6 +78,62 @@ def cache_attribution(rows, rates):
             'assumptions': ASSUMPTIONS}
 
 
+def _add(total, cost):
+    return None if total is None or cost is None else total + cost
+
+
+# Policy deferrals that are the normal state, not a rung the policy wanted and could not apply.
+IDLE_DEFERRALS = ('no_executable_escalation', 'unacknowledged_revision')
+
+
+def setting_path(rows):
+    """The model/effort settings one trial's main loop ran at, in order.
+
+    Consecutive main-loop requests at one setting form a step. Requests without tools are Claude Code's
+    own side calls, counted apart. A rung the policy wanted but did not apply is counted per request
+    under its reason (the stuck window stays open, so it recurs until applied or the task ends).
+    """
+    messages = sorted((r for r in rows if r.get('kind') == 'messages'), key=lambda r: r.get('started_unix', 0))
+    steps, side, deferred = [], {'requests': 0, 'cost_usd': 0.0}, Counter()
+    for r in messages:
+        policy = r.get('policy') or {}
+        reason = policy.get('escalation_deferred') or (policy.get('reason') if policy.get('status') == 'deferred' else None)
+        if reason and reason not in IDLE_DEFERRALS:
+            deferred['thinking_history_unverified' if reason.startswith('refused:Thinking history') else reason] += 1
+        if r.get('tool_count'):
+            setting = [r.get('model'), r.get('effort')]
+            if not steps or steps[-1]['setting'] != setting:
+                steps.append({'setting': setting, 'requests': 0, 'cost_usd': 0.0})
+            bucket = steps[-1]
+        else:
+            bucket = side
+        bucket['requests'] += 1
+        bucket['cost_usd'] = _add(bucket['cost_usd'], r.get('cost_usd'))
+    return {'steps': steps, 'side': side, 'deferred_escalations': dict(deferred)}
+
+
+def cost_components(rows, rates):
+    """Measured dollars by kind of token: uncached input, cache writes, cache reads and output.
+
+    Priced requests only, with the rates they were priced at; None when a priced request can't be split.
+    """
+    out = {'input': 0.0, 'cache_write': 0.0, 'cache_read': 0.0, 'output': 0.0}
+    for r in rows:
+        if r.get('kind') != 'messages' or r.get('cost_usd') is None:
+            continue
+        usage, rate = r.get('usage') or {}, rates.get(r.get('model'))
+        split = usage.get('cache_creation') or ({'ephemeral_5m_input_tokens': 0, 'ephemeral_1h_input_tokens': 0}
+                                                if not usage.get('cache_creation_input_tokens') else None)
+        if rate is None or split is None:
+            return None
+        out['input'] += usage.get('input_tokens', 0) * rate['input'] / 1e6
+        out['cache_write'] += (split['ephemeral_5m_input_tokens'] * rate['write_5m'] +
+                               split['ephemeral_1h_input_tokens'] * rate['write_1h']) / 1e6
+        out['cache_read'] += usage.get('cache_read_input_tokens', 0) * rate['read'] / 1e6
+        out['output'] += usage.get('output_tokens', 0) * rate['output'] / 1e6
+    return out
+
+
 def cold_cost(record):
     if (record.get('accounting') or {}).get('cost_complete') is False:
         return None  # an adapter reported its total incomplete: cache repricing cannot complete it
@@ -189,7 +245,112 @@ def policy_summary(records):
             'kept_requests': sum(p['kept_requests'] for p in policies),
             'policy_stops': sum(bool(p['stops']) for p in policies),
             'escalations': dict(Counter(f"{e['action']}:{e['status']}" for p in policies for e in p['escalations'])),
-            'refusals': dict(Counter(x for p in policies for x in p['refusals']))}
+            'refusals': dict(Counter(x for p in policies for x in p['refusals'])),
+            # Jev's advice at each decision point and what the switch policy did with it.
+            'decisions': dict(Counter(f"{d.get('trigger')}:{d.get('action')}:{d.get('reason')}"
+                                      for p in policies for d in p.get('decisions') or []))}
+
+
+def outcome(record):
+    """How a ModelPilot trial ended: passed or not, at its start setting or after climbing, or its session stop."""
+    stop = next((s.get('stop') for s in reversed(record.get('sessions') or []) if s.get('stop')), None)
+    if 'path' not in record:
+        climbed = ''
+    else:
+        climbed = '_after_climbing' if len(record['path']['steps']) > 1 else '_at_start'
+    if record.get('passed'):
+        return 'passed' + climbed
+    if stop and stop != 'success':
+        return stop  # policy_stop, budget_stop, turn_limit, timeout, ...
+    return 'finished_failing' + climbed  # the client ended normally but the hidden tests failed
+
+
+def trial_view(record):
+    """One ModelPilot trial: its setting path, what it spent on steps it later left, and its excerpts."""
+    path = record.get('path') or {}
+    steps = path.get('steps') or []
+    left = steps[:-1]
+    calls = ((record.get('routing') or {}).get('tools') or {}).get('calls') or []
+    cost = 0.0
+    for step in left:
+        cost = _add(cost, step['cost_usd'])
+    return {'task': record['task'], 'trial': record.get('trial', 0), 'passed': bool(record.get('passed')),
+            'cost_usd': cold_cost(record), 'outcome': outcome(record),
+            'path': [dict(s, setting='/'.join(str(x) for x in s['setting'])) for s in steps],
+            'climb': {'steps_left': len(left), 'requests': sum(s['requests'] for s in left), 'cost_usd': cost} if left else None,
+            'deferred_escalations': path.get('deferred_escalations') or {},
+            'excerpts': {'cut_outputs': sum(bool(c.get('truncated')) for c in calls),
+                         'cut_test_output': any(c.get('tool') == 'run_tests' and c.get('truncated') for c in calls),
+                         'expanded': sum(c.get('tool') == 'expand_output' for c in calls)},
+            'cost_components': record.get('cost_components')}
+
+
+def modelpilot_breakdown(arm, trials, others):
+    """Per-task results of one ModelPilot arm against every other arm on the same tasks.
+
+    A task is lost when the arm failed it and another arm passed it; it is costlier when the arm passed
+    but another arm passed it for less. Climbing cost is what trials spent on settings they later left.
+    """
+    views = [trial_view(r) for r in trials]
+    mine = cells(trials)
+    tasks = {}
+    for task, cell in sorted(mine.items()):
+        passing = {a: c[task] for a, c in others.items() if task in c and c[task]['passes'] == c[task]['n']}
+        priced = {a: c['cost'] / c['n'] for a, c in passing.items() if c['cost'] is not None}
+        cheapest = min(priced, key=priced.get) if priced else None
+        tasks[task] = {'passed': cell['passes'] == cell['n'],
+                       'mean_cost_usd': cell['cost'] / cell['n'] if cell['cost'] is not None else None,
+                       'outcomes': [v['outcome'] for v in views if v['task'] == task],
+                       'other_arms_passed': sorted(passing), 'cheapest_passing_arm': cheapest,
+                       'cheapest_passing_cost_usd': priced.get(cheapest)}
+    climbed = [v for v in views if v['climb']]
+    climb_costs = [v['climb']['cost_usd'] for v in climbed]
+    components = [v['cost_components'] for v in views if v['cost_components'] is not None]
+    return {
+        'arm': arm, 'trials': views, 'tasks': tasks,
+        'outcomes': dict(Counter(v['outcome'] for v in views)),
+        'lost_tasks': {t: v['outcomes'] for t, v in tasks.items() if not v['passed'] and v['other_arms_passed']},
+        'costlier_tasks': {t: {'cost_usd': v['mean_cost_usd'], 'cheapest_passing_arm': v['cheapest_passing_arm'],
+                               'cheapest_passing_cost_usd': v['cheapest_passing_cost_usd']}
+                           for t, v in tasks.items() if v['passed'] and v['mean_cost_usd'] is not None
+                           and v['cheapest_passing_cost_usd'] is not None
+                           and v['mean_cost_usd'] > v['cheapest_passing_cost_usd']},
+        'climbing': {'trials': len(climbed), 'requests_on_left_steps': sum(v['climb']['requests'] for v in climbed),
+                     'cost_on_left_steps_usd': None if None in climb_costs else sum(climb_costs),
+                     'deferred_escalation_requests': dict(sum((Counter(v['deferred_escalations']) for v in views), Counter()))},
+        'excerpts': {'trials_with_cut_output': sum(bool(v['excerpts']['cut_outputs']) for v in views),
+                     'trials_that_expanded': sum(bool(v['excerpts']['expanded']) for v in views),
+                     'failed_after_cut_test_output': sum(v['excerpts']['cut_test_output'] and not v['passed'] for v in views)},
+        'cost_components_usd': {k: sum(c[k] for c in components) for k in ('input', 'cache_write', 'cache_read', 'output')}
+                               if components else None,
+        'cost_components_trials': len(components)}
+
+
+def start_point_ceiling(by_arm, candidates):
+    """The most a perfect per-task choice among start points could gain over always using one.
+
+    For each task it takes the candidate with the highest pass rate, then the lowest mean cost. The choice
+    is made after seeing the outcome, and with one trial per task it also picks up run-to-run noise, so
+    any real picker gains less. Only tasks every candidate ran with a known cost are compared.
+    """
+    shared = set.intersection(*(set(by_arm[a]) for a in candidates))
+    tasks = sorted(t for t in shared if all(by_arm[a][t]['cost'] is not None for a in candidates))
+    if not tasks:
+        return None
+    picks = {t: min(candidates, key=lambda a: (-by_arm[a][t]['passes'] / by_arm[a][t]['n'],
+                                                by_arm[a][t]['cost'] / by_arm[a][t]['n'])) for t in tasks}
+
+    def totals(choice):
+        chosen = [by_arm[choice[t]][t] for t in tasks]
+        n = sum(c['n'] for c in chosen)
+        return {'passes': sum(c['passes'] for c in chosen), 'trials': n, 'mean_cost_usd': sum(c['cost'] for c in chosen) / n}
+    best = totals(picks)
+    always = {a: totals(dict.fromkeys(tasks, a)) for a in candidates}
+    return {'candidates': list(candidates), 'tasks': len(tasks), 'excluded_tasks': len(set.union(*(set(by_arm[a]) for a in candidates))) - len(tasks),
+            'picks': picks, 'best_per_task': best, 'always': always,
+            'ceiling': {a: {'extra_passes': best['passes'] - f['passes'],
+                            'mean_cost_saving_usd': f['mean_cost_usd'] - best['mean_cost_usd']} for a, f in always.items()},
+            'note': 'Upper bound: chosen after the outcome; a negative saving means the extra passes cost more.'}
 
 
 def arm_summary(arm, complete, incomplete, arm_cells, rng, resamples):
@@ -264,7 +425,8 @@ def summarize(records, arms, seed=0, resamples=10000):
     by_arm = {arm: cells(complete[arm]) for arm in arms}
     summaries = [arm_summary(arm, complete[arm], incomplete[arm], by_arm[arm], rng, resamples) for arm in arms]
     scope = {s['arm']: s['cost_scope'] for s in summaries}
-    return {'excluded_ineligible_trials': [{'task': r['task'], 'arm': r['arm'],
+    policy_arms = [a for a in arms if any((r.get('routing') or {}).get('kind') == 'modelpilot_policy' for r in complete[a])]
+    out = {'excluded_ineligible_trials': [{'task': r['task'], 'arm': r['arm'],
                 'reason': r['routing'].get('ineligible_reason', 'adapter_not_benchmark_eligible'),
                 'cost_usd': (r.get('accounting') or {}).get('cost_usd')} for r in excluded],
             'arms': summaries,
@@ -273,6 +435,11 @@ def summarize(records, arms, seed=0, resamples=10000):
             'bootstrap': {'seed': seed, 'resamples': resamples, 'unit': 'task', 'interval': '95% percentile'},
             'cost_basis': 'cold-equivalent (inherited cache reads repriced as writes); measured cost alongside',
             'claims': 'No winner or savings claim when an interval covers 0, or from the tuning split.'}
+    if policy_arms:
+        out['modelpilot'] = [modelpilot_breakdown(a, complete[a], {b: by_arm[b] for b in arms if b != a}) for a in policy_arms]
+    if len(policy_arms) > 1:
+        out['start_points'] = start_point_ceiling(by_arm, policy_arms)
+    return out
 
 
 def load_run(run_dir, rates):
@@ -287,7 +454,8 @@ def load_run(run_dir, rates):
         log = path.parent/'observations.jsonl'
         if log.exists():
             rows = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
-            record['cache'] = cache_attribution(rows, rates)
+            record.update(cache=cache_attribution(rows, rates), path=setting_path(rows),
+                          cost_components=cost_components(rows, rates))
         records.append(record)
     return manifest, records
 

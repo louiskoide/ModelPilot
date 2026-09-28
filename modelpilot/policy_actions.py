@@ -3,13 +3,19 @@ from contextlib import nullcontext
 import copy
 import json
 import math
+from pathlib import Path
 from .proxy import reservation_estimate
 
-# The ladder's tiers, cheapest first. Opus 5.5 replaced Opus 5 as the top rung on September 26 and Sonnet 5.5
-# replaced Sonnet 5 as the middle tier on September 28, each at the same or a lower price on every rate
-# (docs/m6-modelpilot-policy.md, "Tier set").
-MODELS=('claude-haiku-4-5-20251001','claude-sonnet-5-5','claude-opus-5-5')
-EFFORTS=('low','medium','high')
+# The policy's models, cheapest first, and what each accepts, from configs/modelpilot-policy.json so the tier set
+# can change without code. Opus 5.5 replaced Opus 5 on September 26 and Sonnet 5.5 replaced Sonnet 5 on
+# September 28 (docs/m6-modelpilot-policy.md, "Tier set").
+POLICY_CONFIG=Path(__file__).resolve().parents[1]/'configs/modelpilot-policy.json'
+_CONFIG=json.loads(POLICY_CONFIG.read_text())
+MODELS=tuple(sorted(_CONFIG['models'],key=lambda m:_CONFIG['models'][m]['rank']))
+EFFORTS=tuple(_CONFIG['effort_order'])
+MODEL_EFFORTS={m:tuple(_CONFIG['models'][m]['efforts']) for m in MODELS}
+MID_CONVERSATION_SYSTEM={m:_CONFIG['models'][m]['mid_conversation_system'] for m in MODELS}
+LADDER_EFFORTS=('low','medium','high')  # the fixture-only ladder (ProxyPolicy); the active arm never climbs
 # (source model, target model) changes the provider accepted with thinking history, from
 # thinking_probe evidence only; the same model twice means an effort change (docs/thinking-history-probe.md).
 # Opus 5.5 effort: 4/4 in runs/thinking-probe-top-rung-20260926-153723. Its Sonnet 5 pairs (and Sonnet 5 effort,
@@ -20,7 +26,7 @@ THINKING_HISTORY_VERIFIED=frozenset({('claude-opus-5-5','claude-opus-5-5')})
 
 
 def setting(model,effort):
-    if model not in MODELS or (effort is not None if model==MODELS[0] else effort not in EFFORTS):
+    if model not in MODELS or (effort not in MODEL_EFFORTS[model] if MODEL_EFFORTS[model] else effort is not None):
         raise ValueError('Unsupported model/effort combination')
 
 
@@ -40,7 +46,7 @@ def transform_request(request,model,effort,allow_thinking_history=False):
         raise ValueError('Thinking history across setting changes is not validated')
     out=copy.deepcopy(request)
     out['model']=model
-    if model==MODELS[0]:
+    if not MODEL_EFFORTS[model]:  # no effort or adaptive thinking (Haiku 4.5)
         out.pop('thinking',None)
         if 'output_config' in out:
             out['output_config'].pop('effort',None)
@@ -54,7 +60,7 @@ def transform_request(request,model,effort,allow_thinking_history=False):
         out.setdefault('output_config',{})['effort']=effort
     # Claude Code 2.1.284 itself sends system-role messages (after every user turn) to Sonnet 5.5 and Opus 5.5,
     # as 2.1.282 did to Sonnet 5 and Opus 5, so they are kept. Haiku rejects them (Jev finding): relocate trailing ones only.
-    if model==MODELS[0]:
+    if not MID_CONVERSATION_SYSTEM[model]:
         messages=out['messages'];tail=[]
         while messages and messages[-1].get('role')=='system':tail.insert(0,messages.pop())
         if any(m.get('role')=='system' for m in messages):
@@ -78,8 +84,8 @@ def transform_request(request,model,effort,allow_thinking_history=False):
 def next_setting(action,model,effort):
     """The ladder's rule for one stuck recommendation: (action, model, effort) after it. An effort step,
     else the next model at medium; with no rung left the action becomes re_diagnose (or human_review)."""
-    if action=='increase_effort' and effort in EFFORTS and effort!='high':
-        return action,model,EFFORTS[EFFORTS.index(effort)+1]
+    if action=='increase_effort' and effort in LADDER_EFFORTS and effort!=LADDER_EFFORTS[-1]:
+        return action,model,LADDER_EFFORTS[LADDER_EFFORTS.index(effort)+1]
     if action in ('increase_effort','stronger_model') and model!=MODELS[-1]:
         return action,MODELS[MODELS.index(model)+1],'medium'
     if action=='hold':
@@ -107,11 +113,17 @@ def prepare_action(state,proposal,owner,request,available_usd,rates,reserve_outp
     requests reserves max_tokens (Claude Code sends 64000, $1.28 of Opus 5.5 output)."""
     fresh=escalation_proposal(state,proposal['task'],proposal['revision'],owner,
                              proposal['source_model'],proposal['source_effort'])
-    if fresh!=proposal:raise ValueError('Proposal no longer matches host ledger evidence')
+    if proposal.get('action')=='jump':
+        # A direct move the switch policy chose (switch_policy.decide), fenced on the ledger state it was decided
+        # on; a move made on stuck evidence also needs that evidence to still be there.
+        keys=('task','revision','last_event','level','source_model','source_effort')
+        if any(fresh[k]!=proposal[k] for k in keys) or (proposal.get('trigger')=='stuck_evidence' and fresh['action']=='hold'):
+            raise ValueError('Proposal no longer matches host ledger evidence')
+    elif fresh!=proposal:raise ValueError('Proposal no longer matches host ledger evidence')
     if request.get('model')!=proposal['source_model'] or request.get('output_config',{}).get('effort')!=proposal['source_effort']:
         raise ValueError('Request setting changed after proposal')
     result={'action':'defer','applied':False,'reason':'no_executable_escalation','proposal':proposal}
-    if proposal['action'] not in ('increase_effort','stronger_model'):return result
+    if proposal['action'] not in ('increase_effort','stronger_model','jump'):return result
     if (available_usd is None or isinstance(available_usd,bool) or not isinstance(available_usd,(float,int))
             or not math.isfinite(available_usd) or available_usd<0):
         result['reason']='unknown_or_invalid_budget';return result

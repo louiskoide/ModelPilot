@@ -136,10 +136,11 @@ class JevRouter:
         return decisions
 
 
-def prefetch_catalog(base_url, key, timeout=10):
+def prefetch_catalog(base_url, key, timeout=10, entries=False):
     """GET /v1/models through Jev's proxy, as interactive Claude Code does for its picker, so Jev's catalog
     is the (filtered) account catalog. The key travels as a request header, like every client request; the
-    router process's environment never holds it. Returns the status and the model ids Jev received."""
+    router process's environment never holds it. Returns the status and the model ids Jev received, and with
+    entries=True the catalog entries themselves (Jev's model question describes each model from them)."""
     origin = urlsplit(base_url)
     conn = http.client.HTTPConnection(origin.hostname, origin.port, timeout=timeout)
     try:
@@ -151,10 +152,11 @@ def prefetch_catalog(base_url, key, timeout=10):
     finally:
         conn.close()
     try:
-        models = [m.get('id') for m in json.loads(data).get('data', []) if isinstance(m, dict)]
+        listed = [m for m in json.loads(data).get('data', []) if isinstance(m, dict)]
     except (ValueError, AttributeError):
-        models = []
-    return {'status': response.status, 'models': models}
+        listed = []
+    out = {'status': response.status, 'models': [m.get('id') for m in listed]}
+    return dict(out, entries=listed) if entries else out
 
 
 def session_of(at_ms, sessions):

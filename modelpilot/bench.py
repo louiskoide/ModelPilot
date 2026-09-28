@@ -36,7 +36,7 @@ import tempfile
 import threading
 import time
 import uuid
-from . import bench_jev, bench_report, bench_tasks
+from . import bench_jev, bench_report, bench_tasks, switch_policy
 from .governed_session import client_env
 from .jev_route_check import PATCH, TOKEN_FIELDS, check_anthropic_key, parse_events
 from .policy_actions import MODELS as POLICY_TIERS
@@ -64,12 +64,13 @@ ARMS = {
     # its fallback is its static claude-opus-5.
     'jev-compat-o55': {'kind': 'jev', 'variant': 'compat', 'model': 'jev-router', 'checkout': 'work/jev-router-compat',
                        'patch': PATCH, 'models': POLICY_TIERS},
-    # The client asks for the arm's start setting (S0); the policy's proxy may serve the ladder's rungs. The tuning
-    # split chooses S0 (docs/m6-benchmark-plan.md).
-    'modelpilot': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'medium',
-                   'served_models': ['claude-sonnet-5-5', 'claude-opus-5-5'], 'policy': 'docs/m6-modelpilot-policy.md'},
-    'modelpilot-o55': {'kind': 'modelpilot', 'model': 'claude-opus-5-5', 'effort': 'medium',
-                       'served_models': ['claude-opus-5-5'], 'policy': 'docs/m6-modelpilot-policy.md'},
+    # Jev (the compat checkout, advice only) predicts the model and effort; ModelPilot's proxy jumps there when the
+    # expected cost says it pays (active_policy). The client asks for the fallback start (S0), used while Jev is
+    # unavailable. Like jev-compat-o55 it discovers only the policy's models, so Jev's model question is the same.
+    'modelpilot': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'medium', 'advisor': 'jev',
+                   'checkout': 'work/jev-router-compat', 'models': POLICY_TIERS,
+                   'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}),
+                   'policy': 'docs/m6-modelpilot-policy.md'},
 }
 RUNNABLE = ('fixed', 'jev')
 IDLE_SECONDS = 130  # the proxy's upstream socket timeout (120 s) bounds any request still in flight
@@ -110,13 +111,18 @@ def model_eligibility(routing, models, catalog):
     return routing
 
 
-def arm_adapter(arm, budget_usd, sessions):
-    """The ModelPilot arm's adapter: active policy, R5 tools, and the per-session limit for each session."""
+def arm_adapter(arm, budget_usd, sessions, jev_key=None, advisor_stub=None):
+    """The ModelPilot arm's adapter: active policy with Jev as advisor, R5 tools, and the per-session limit for
+    each session. Without a TypeSafe key (or an offline stub) there is no advisor and the trial is ineligible."""
     if ARMS[arm]['kind'] != 'modelpilot':
         return None
+    from .advisor import JevAdvisor
     from .modelpilot_adapter import ModelPilotAdapter
+    advisor = (JevAdvisor(ROOT/ARMS[arm]['checkout'], key=jev_key, stub=advisor_stub)
+               if jev_key or advisor_stub is not None else None)
     return ModelPilotAdapter(limit_usd=budget_usd * sessions, mode='active', tools=True, arm_id=arm,
-                             model=ARMS[arm]['model'], effort=ARMS[arm]['effort'])
+                             model=ARMS[arm]['model'], effort=ARMS[arm]['effort'], advisor=advisor,
+                             models=ARMS[arm].get('models'))
 
 
 def schedule(tasks, arms, trials, seed):
@@ -431,6 +437,11 @@ class Trial:
                 self.record['catalog'] = bench_jev.prefetch_catalog(self.route['env']['ANTHROPIC_BASE_URL'], self.api_key)
         else:
             env['ANTHROPIC_BASE_URL'] = proxy_url
+            if self.adapter and hasattr(self.adapter, 'use_catalog'):
+                # The ModelPilot arm's advisor describes the models from the (filtered) account catalog, as Jev does.
+                catalog = bench_jev.prefetch_catalog(proxy_url, self.api_key, entries=True)
+                self.adapter.use_catalog(catalog)
+                self.record['catalog'] = {k: v for k, v in catalog.items() if k != 'entries'}
         self.env = env
 
     def run_session(self, index):
@@ -496,7 +507,8 @@ class Trial:
                     'num_turns': self.final.get('num_turns'), 'stop': last.get('stop')},
             accounting=self.adapter.accounting(rows, self.final) if self.adapter else
             accounting(rows, self.final, jev=bool(self.router)),
-            cache=bench_report.cache_attribution(rows, self.rates))
+            cache=bench_report.cache_attribution(rows, self.rates),
+            path=bench_report.setting_path(rows), cost_components=bench_report.cost_components(rows, self.rates))
         if self.adapter and (self.dir/'tmp').exists():
             self.record['routing'] = self.adapter.evidence(self.dir)
         (self.dir/'trial.json').write_text(json.dumps(self.record, indent=2) + '\n')
@@ -670,7 +682,7 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
         json.dump(manifest, f, indent=2)
 
     def default_factory(task, arm, trial_dir, n):
-        adapter = arm_adapter(arm, limits.get('budget_usd', 1.0), 2 if shape == 'followup' else 1)
+        adapter = arm_adapter(arm, limits.get('budget_usd', 1.0), 2 if shape == 'followup' else 1, jev_key)
         return Trial(task, arm, trial_dir, cli, key, upstream, price_table, trial=n, shape=shape, gap=gap,
                      client_version=client_version, jev_key=jev_key, adapter=adapter,
                      expected_hidden_passed=((expected or {}).get(task['id']) or {}).get('hidden_passed'), **limits)
@@ -748,9 +760,11 @@ def main():
     missing = [m for m in served if m not in table]
     if missing:
         raise SystemExit(f'No configured rates for {missing}.')
-    if jev_arms and not shutil.which('node'):
-        raise SystemExit('Jev arms need Node.')
+    advised = [a for a in arms if ARMS[a].get('advisor') == 'jev']
+    if (jev_arms or advised) and not shutil.which('node'):
+        raise SystemExit('Jev arms and the ModelPilot arm (Jev as advisor) need Node.')
     problems = [p for p in (bench_jev.JevRouter(ARMS[a]).problem() for a in jev_arms) if p]
+    problems += [p for p in (bench_jev.JevRouter(dict(ARMS[a], variant='compat', patch=PATCH)).problem() for a in advised) if p]
     if problems:
         raise SystemExit(' '.join(problems))
     if args.live and args.run_budget is None:
@@ -782,12 +796,13 @@ def main():
                   'so their dollars are a lower bound; the client stop threshold is priced on the jev-router sentinel. '
                   'Stock Jev is expected not to route on this client (run as Opus plus router overhead). '
                   '--live asks for a TypeSafe key; consider python3 -m modelpilot.jev_check --live first.')
-        from .active_policy import parameters
         for arm in (a for a in arms if ARMS[a]['kind'] == 'modelpilot'):
-            ladder = parameters(ARMS[arm]['model'], ARMS[arm]['effort'])['ladder']
-            print(f'ModelPilot arm {arm}: active policy (benchmark arm only): stuck ladder {" -> ".join(ladder)}, '
-                  f'then the task stops; any request is refused once wire spend reaches ${args.budget * sessions:.2f} '
-                  'per trial or cost is unknown. No cost-motivated switches, Haiku targets or worker drafts.')
+            print(f'ModelPilot arm {arm}: active policy (benchmark arm only). Jev (compat checkout, advice only) predicts '
+                  'the model and effort at each turn start and on stuck evidence; ModelPilot jumps straight there when '
+                  'the expected total cost says it pays, else stays (configs/modelpilot-policy.json). Stuck with nothing '
+                  f'stronger, the task stops; any request is refused once wire spend reaches ${args.budget * sessions:.2f} '
+                  'per trial or cost is unknown. TypeSafe advice is billed separately and unpriced, so its dollars are a '
+                  'lower bound; --live asks for a TypeSafe key.')
         return
     cli, version = resolve_client(args.claude or shutil.which('claude') or 'claude')
     writable = bench_tasks.writable_site_packages(python)
@@ -800,7 +815,7 @@ def main():
     if problem:
         raise SystemExit(problem + ' No billable requests sent.')
     jev_key = None
-    if jev_arms:
+    if jev_arms or advised:
         jev_key = (os.environ.get('JEV_API_KEY') or os.environ.get('TYPESAFE_API_KEY')
                    or getpass.getpass('TypeSafe/Jev API key (hidden): ').strip())
         if not jev_key or any(c.isspace() for c in jev_key):

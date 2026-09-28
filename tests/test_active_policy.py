@@ -11,7 +11,21 @@ from modelpilot.governor import Governor
 from modelpilot.proxy import ProxyServer
 from tests.test_policy_session import O, RATES, S, Upstream
 
-ONE = 100*2/1e6 + 4*10/1e6  # one scripted Sonnet 5 reply: 100 input and 4 output tokens
+H = 'claude-haiku-4-5-20251001'
+
+ONE = 100*2/1e6 + 4*10/1e6  # one scripted Sonnet 5.5 reply: 100 input and 4 output tokens
+
+
+class ScriptedAdvisor:
+    """Stands in for Jev (advisor.JevAdvisor): returns a scripted answer and records each call."""
+    live = False
+
+    def __init__(self):
+        self.answer, self.calls = None, []
+
+    def ask(self, body, current, catalog, efforts, strip_prefix='', evidence=None, dry=False):
+        self.calls.append({'current': current, 'efforts': list(efforts), 'evidence': evidence})
+        return self.answer
 
 
 class ActivePolicyTests(Upstream, unittest.TestCase):
@@ -30,7 +44,9 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
     def start(self, limit=5, client=S):
         # The ledger records one limit per session, so each test uses a fresh session for its limit.
         self.session = f's{limit}'
-        self.proxy = ProxyServer(('127.0.0.1', 0), self.url, self.log, RATES, policy=ActivePolicy(client, OWNER),
+        self.advisor = ScriptedAdvisor()
+        self.proxy = ProxyServer(('127.0.0.1', 0), self.url, self.log, RATES,
+                                 policy=ActivePolicy(client, OWNER, advisor=self.advisor),
                                  governor={'db': self.db, 'session': self.session, 'limit_usd': limit, 'task': self.task})
         self.proxy_thread = threading.Thread(target=self.proxy.serve_forever, daemon=True)
         self.proxy_thread.start()
@@ -117,86 +133,152 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertIsNone(first['cost_usd'])
         self.assertEqual((second['kind'], second['refusal']), ('refused', 'cost_unknown'))
 
-    def test_the_ladder_escalates_keeps_each_rung_and_then_stops_the_task(self):
-        self.start()
-        self.post()
-        self.stuck()
-        self.post()  # effort rung, sent once and confirmed
-        self.post()  # kept
-        self.stuck()
-        self.post()  # model rung
-        self.post()  # kept
-        self.stuck()
-        status, body = self.post()  # stuck again at the top of the ladder: R2 stops the task
-        self.assertEqual(status, 400)
-        self.assertIn(b'policy_stop:re_diagnose', body)
-        self.assertEqual(self.sent(), [(S, 'medium'), (S, 'high'), (S, 'high'), (O, 'medium'), (O, 'medium')])
-        rows = self.rows()
-        self.assertEqual([r.get('policy', {}).get('status') for r in rows],
-                         ['deferred', 'confirmed', 'kept', 'confirmed', 'kept', 'stop'])
-        self.assertEqual((rows[-1]['kind'], rows[-1]['refusal']), ('refused', 'policy_stop:re_diagnose'))
-        self.assertNotIn('governor_request_id', rows[-1])  # a stop reserves nothing
+    def advise(self, model, effort, model_p=.9, effort_p=.85):
+        """Script Jev's answer: most of the probability on (model, effort), the rest spread evenly."""
+        models, efforts = [H, S, O], ['low', 'medium', 'high', 'xhigh', 'max']
+        spread = lambda labels, top, p: {x: p if x == top else (1 - p) / (len(labels) - 1) for x in labels}
+        self.advisor.answer = {'model': {'choice': model, 'confidence': model_p, 'probabilities': spread(models, model, model_p)},
+                               'effort': {'choice': effort, 'confidence': effort_p,
+                                          'probabilities': spread(efforts, effort, effort_p)}}
+
+    TURN = [{'role': 'user', 'content': 'go'}]
+    CONTINUE = TURN + [{'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 't1', 'name': 'Bash', 'input': {}}]},
+                       {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 't1', 'content': 'x'}]}]
+
+    def decisions(self):
         gov = self.gov()
         try:
-            self.assertEqual([e['payload']['status'] for e in gov.journal('policy_dispatch')], ['confirmed', 'confirmed'])
-            self.assertEqual(len(gov.journal('policy_keep')), 2)
-            stop, = gov.journal('policy_stop')
-            self.assertEqual((stop['payload']['level'], stop['payload']['model']), (2, O))
-            self.assertEqual(gov.journal('fixture_dispatch'), [])
-            policy = gov.policy()
-            self.assertAlmostEqual(policy['spent_usd'], 3*ONE + 2*(100*4/1e6 + 4*20/1e6))  # 3 Sonnet, 2 Opus 5.5
-            self.assertTrue(policy['cost_complete'])
+            return [e['payload'] for e in gov.journal('advisor_decision')]
         finally:
             gov.close()
 
-    def test_an_opus_5_5_start_has_one_rung_then_stops(self):
+    def dispatches(self):
+        gov = self.gov()
+        try:
+            return [e['payload'] for e in gov.journal('policy_dispatch')]
+        finally:
+            gov.close()
+
+    def test_a_turn_start_jumps_straight_to_jevs_setting_and_keeps_it(self):
+        self.start()
+        self.advise(O, 'xhigh')
+        self.post(messages=self.TURN)
+        self.post(messages=self.CONTINUE)
+        self.post(messages=self.CONTINUE)
+        self.assertEqual(self.sent(), [(O, 'xhigh')]*3)  # no Sonnet high or Opus medium on the way
+        self.assertEqual(len(self.advisor.calls), 1)  # tool follow-ups are not decision points
+        jump, = self.dispatches()
+        self.assertEqual((jump['action'], jump['trigger'], jump['status'], jump['source_model'], jump['target_effort']),
+                         ('jump', 'turn_start', 'confirmed', S, 'xhigh'))
+        decision, = self.decisions()
+        self.assertEqual((decision['action'], decision['target'], decision['profile']['warm']), ('jump', [O, 'xhigh'], False))
+        self.assertEqual([r['policy']['status'] for r in self.rows()], ['confirmed', 'kept', 'kept'])
+        call = self.advisor.calls[0]
+        self.assertEqual((call['current'], call['evidence'], call['efforts'][-1]), (S, None, 'max'))
+
+    def test_advice_for_the_current_setting_stays(self):
+        self.start()
+        self.advise(S, 'medium')
+        self.post(messages=self.TURN)
+        self.assertEqual(self.sent(), [(S, 'medium')])
+        self.assertEqual([(d['action'], d['reason']) for d in self.decisions()], [('stay', 'current_is_cheapest')])
+        self.assertEqual(self.dispatches(), [])
+
+    def test_no_advice_stays_and_never_blocks_the_request(self):
+        self.start()
+        self.advisor.answer = {'error': 'advice_failed: AbortError'}
+        self.assertEqual(self.post(messages=self.TURN)[0], 200)
+        self.assertEqual(self.sent(), [(S, 'medium')])
+        decision, = self.decisions()
+        self.assertEqual((decision['action'], decision['reason'], decision['advice']['error']),
+                         ('stay', 'advice_unavailable', 'advice_failed: AbortError'))
+
+    def test_a_downgrade_in_a_warm_long_session_is_not_worth_its_rewrite(self):
         self.start(client=O)
-        self.post(model=O)
+        long = [{'role': 'user', 'content': 'x' * 300000}]
+        self.advise(O, 'high')
+        self.post(model=O, output_config={'effort': 'high'}, messages=long)
+        self.advise(S, 'medium')  # the next turn looks easy, but moving would rewrite ~75K cached tokens
+        turn2 = long + [{'role': 'assistant', 'content': 'done'}, {'role': 'user', 'content': 'next'}]
+        self.post(model=O, output_config={'effort': 'high'}, messages=turn2)
+        self.assertEqual(self.sent(), [(O, 'high')]*2)
+        first, second = self.decisions()
+        self.assertEqual((second['trigger'], second['action'], second['reason'], second['profile']['warm'], second['downgrade']),
+                         ('turn_start', 'stay', 'not_worth_switching', True, True))
+        self.assertGreater(second['required_usd'], second['benefit_usd'])
+
+    def test_stuck_evidence_jumps_to_a_stronger_setting_with_jevs_advice(self):
+        self.start()
+        self.advise(S, 'medium')
+        self.post(messages=self.TURN)  # Jev thinks Sonnet medium is enough: stay
         self.stuck()
-        self.post(model=O)  # effort rung
-        self.post(model=O)  # kept
+        self.post(messages=self.CONTINUE)
+        stay, jump = self.decisions()
+        self.assertEqual((jump['trigger'], jump['action']), ('stuck_evidence', 'jump'))
+        target = tuple(jump['target'])
+        self.assertNotEqual(target, (S, 'medium'))
+        self.assertEqual(self.sent(), [(S, 'medium'), target])  # one move, straight to the target
+        self.assertIn('the same error keeps repeating', self.advisor.calls[-1]['evidence'])
+        dispatch, = self.dispatches()
+        self.assertEqual((dispatch['trigger'], dispatch['status']), ('stuck_evidence', 'confirmed'))
+
+    def test_stuck_with_nothing_stronger_stops_the_task(self):
+        self.start(client=O)
+        self.advise(O, 'max')
+        self.post(model=O, output_config={'effort': 'max'}, messages=self.TURN)
         self.stuck()
-        status, body = self.post(model=O)  # no stronger model left: re_diagnose stops the task
+        status, body = self.post(model=O, output_config={'effort': 'max'}, messages=self.CONTINUE)
         self.assertEqual(status, 400)
-        self.assertIn(b'policy_stop:re_diagnose', body)
-        self.assertEqual(self.sent(), [(O, 'medium'), (O, 'high'), (O, 'high')])
-        self.assertEqual([r.get('policy', {}).get('status') for r in self.rows()], ['deferred', 'confirmed', 'kept', 'stop'])
+        self.assertIn(b'policy_stop:no_stronger_setting', body)
+        rows = self.rows()
+        self.assertEqual((rows[-1]['kind'], rows[-1]['refusal']), ('refused', 'policy_stop:no_stronger_setting'))
+        self.assertNotIn('governor_request_id', rows[-1])  # a stop reserves nothing
 
     def test_an_unaffordable_rebuild_keeps_the_client_setting_within_the_limit(self):
         self.start(limit=.001)
-        self.stuck()
-        # About 10,000 request tokens: the rung's rebuild at the dearest write rate is $0.04, over the limit.
+        self.advise(O, 'xhigh')
+        # About 10,000 request tokens: the move's rebuild at the dearest write rate is $0.08, over the limit.
         self.assertEqual(self.post(messages=[{'role': 'user', 'content': 'x' * 30000}])[0], 200)
         row, = self.rows()
         self.assertEqual((row['applied'], row['policy']['reason'], row['governor']['admitted']),
                          (False, 'insufficient_write_reservation', True))
         self.assertEqual(self.sent(), [(S, 'medium')])
 
-    def test_the_output_allowance_is_not_reserved_for_an_escalation(self):
-        # Claude Code sends max_tokens=64000: $0.64 of Sonnet 5 output, $1.28 of Opus 5.5, above a $0.10 limit.
+    def test_the_output_allowance_is_not_reserved_for_a_jump(self):
+        # Claude Code sends Sonnet 5.5 max_tokens=128000: $2.56 of Opus 5.5 output, far above a $0.10 limit.
         self.start(limit=.1)
-        self.stuck()
-        self.post(max_tokens=64000)
-        self.post(max_tokens=64000)
-        self.stuck()
-        self.post(max_tokens=64000)
-        self.assertEqual(self.sent(), [(S, 'high'), (S, 'high'), (O, 'medium')])
+        self.advise(O, 'xhigh')
+        self.post(max_tokens=128000, messages=self.TURN)
+        self.assertEqual(self.sent(), [(O, 'xhigh')])
         gov = self.gov()
         try:
-            reserves = [e['payload']['estimate_usd'] for e in gov.journal('admit') if e['payload']['admitted']]
+            reserve, = [e['payload']['estimate_usd'] for e in gov.journal('admit') if e['payload']['admitted']]
         finally:
             gov.close()
-        self.assertLess(max(reserves[0], reserves[2]), .001)  # the two rungs reserved their rebuilds only
+        self.assertLess(reserve, .001)  # the jump reserved its rebuild only
 
-    def test_a_deferred_escalation_is_recorded_on_the_request_that_keeps_the_rung(self):
+    def test_a_deferred_jump_is_recorded_on_the_request_that_keeps_the_setting(self):
         self.start(limit=.001)
+        self.advise(O, 'xhigh')
+        self.post(messages=self.TURN)  # a small request's rebuild fits
         self.stuck()
-        self.post()  # effort rung: a small request's rebuild fits
-        self.stuck()
-        self.post(messages=[{'role': 'user', 'content': 'x' * 30000}])  # the model rung's rebuild does not
+        big = self.CONTINUE + [{'role': 'user', 'content': 'x' * 30000}]
+        self.post(messages=big)  # the only stronger setting, Opus max: its rebuild does not fit
         last = self.rows()[-1]
         self.assertEqual((last['effort'], last['policy']['kind'], last['policy']['escalation_deferred']),
-                         ('high', 'keep_escalated', 'insufficient_write_reservation'))
+                         ('xhigh', 'keep_escalated', 'insufficient_write_reservation'))
+
+    def test_thinking_history_blocks_an_unverified_jump(self):
+        self.start()
+        self.advise(O, 'xhigh')
+        with_thinking = [{'role': 'user', 'content': 'go'},
+                         {'role': 'assistant', 'content': [{'type': 'thinking', 'thinking': 'x', 'signature': 's'},
+                                                           {'type': 'text', 'text': 'done'}]},
+                         {'role': 'user', 'content': 'next'}]
+        self.post(messages=with_thinking)
+        self.assertEqual(self.sent(), [(S, 'medium')])  # Sonnet 5.5 -> Opus 5.5 has no probe evidence yet
+        row, = self.rows()
+        self.assertIn('Thinking history', row['policy']['reason'])
 
     def test_a_governor_failure_fails_closed(self):
         self.start()
