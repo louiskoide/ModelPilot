@@ -18,6 +18,8 @@ def response_for(request):
         return 429, 'application/json', b'{"error":{"type":"rate_limit_error","message":"synthetic"}}'
     message = {'type': 'message', 'model': request['model'], 'usage': USAGE,
                'content': [{'type': 'text', 'text': 'synthetic output'}]}
+    if request.get('metadata', {}).get('test_no_usage'):
+        message.pop('usage')
     if not request.get('stream'):
         return 200, 'application/json', json.dumps(message).encode()
     start = dict(message, usage=dict(USAGE, output_tokens=1), content=[])
@@ -109,7 +111,10 @@ class FixtureHandler(BaseHTTPRequestHandler):
         request = json.loads(raw)
         script = self.server.script
         # Only the tool-bearing conversation follows the script; side requests get plain text.
-        if script and request.get('tools') and self.path.split('?', 1)[0] == '/v1/messages':
+        if self.path.split('?', 1)[0] == '/v1/messages/count_tokens':
+            # As the API answers it: a count and no usage (token counting is free).
+            status, content_type, data = 200, 'application/json', json.dumps({'input_tokens': len(raw) // 4}).encode()
+        elif script and request.get('tools') and self.path.split('?', 1)[0] == '/v1/messages':
             time.sleep(self.server.delay)
             status, content_type, data = scripted_response(request, script)
             if request['model'] in self.server.truncate_models and request.get('stream'):

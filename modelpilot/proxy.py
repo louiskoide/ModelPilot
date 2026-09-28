@@ -73,6 +73,12 @@ class UsageObserver:
         self.complete = False
         self.invalid = False
         self.model = None
+        self.problem = None  # why usage is missing or unusable, for the log
+        self.input_tokens = None  # a token-counting reply's count
+
+    def fail(self, problem):
+        self.invalid = True
+        self.problem = self.problem or problem
 
     def event(self, obj):
         kind = obj.get('type')
@@ -85,7 +91,7 @@ class UsageObserver:
         elif kind == 'message_stop':
             self.complete = True
         elif kind == 'error':
-            self.invalid = True
+            self.fail('error_event')
         # Unknown events, tool blocks and thinking signatures pass through untouched.
 
     def feed(self, data):
@@ -102,9 +108,9 @@ class UsageObserver:
                     if lines:
                         self.event(json.loads(b'\n'.join(lines)))
                 except (ValueError, TypeError, AttributeError):
-                    self.invalid = True
+                    self.fail('unparseable_event')
         if len(self.buffer) > MAX_EVENT:
-            self.invalid = True
+            self.fail('oversized_response')
             self.buffer = b''
 
     def finish(self):
@@ -114,10 +120,17 @@ class UsageObserver:
                 self.usage = obj.get('usage', {})
                 self.model = obj.get('model')
                 self.complete = isinstance(self.usage, dict) and bool(self.usage)
+                count = obj.get('input_tokens')
+                self.input_tokens = count if isinstance(count, int) and not isinstance(count, bool) else None
             except (ValueError, TypeError, AttributeError):
-                self.invalid = True
+                self.fail('unparseable_body')
+            else:
+                if not self.complete:
+                    self.problem = 'no_usage_field'
         if self.stream and self.buffer.strip():
-            self.invalid = True
+            self.fail('trailing_bytes')
+        if self.stream and not self.complete and not self.problem:
+            self.problem = 'stream_ended_early'
 
 
 USAGE_COUNTERS = ('input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens')
@@ -494,7 +507,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         headers['Accept-Encoding'] = 'identity'
         tools = request.get('tools')
         mode = self.server.policy.mode if ticket is not None else 'active' if self.server.active else 'dry-run'
-        row = {'started_unix': time.time(), 'kind': 'messages', 'mode': mode,
+        counting = path.path == '/v1/messages/count_tokens'
+        row = {'started_unix': time.time(), 'kind': 'count_tokens' if counting else 'messages', 'path': path.path,
+               'mode': mode,
                'applied': ticket is not None,
                'tool_count': len(tools) if isinstance(tools, list) else 0,
                'request_sha256': hashlib.sha256(raw).hexdigest(),
@@ -538,7 +553,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             sent_headers = True
             row['response_encoding'] = response.headers.get('Content-Encoding', 'identity').lower()
             if row['response_encoding'] != 'identity':
-                observer.invalid = True  # bytes still forwarded; don't parse compressed payloads
+                observer.fail('compressed_response')  # bytes still forwarded; don't parse compressed payloads
             first = True
             while True:
                 data = response.read1(16384)
@@ -554,10 +569,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
             row['status'] = 'ok' if 200 <= response.status < 300 else 'upstream_error'
             row['usage_complete'] = observer.complete and not observer.invalid
             row['usage'] = logged_usage(observer.usage)
-            if row['status'] == 'ok':
+            if counting:
+                # Token counting is free (Anthropic docs) and replies {"input_tokens": N}, with no usage.
+                row.update(cost_usd=0.0, input_tokens=observer.input_tokens)
+            elif row['status'] == 'ok':
                 row['cost_usd'] = measured_cost(observer, request, self.server.rates)
-            row['decision'] = forecast(request, row['usage'], self.server.rates) if row['cost_usd'] is not None else {
-                'action': 'hold', 'applied': False, 'reason': 'incomplete_or_unpriced_response'}
+                if row['cost_usd'] is None:
+                    row['usage_problem'] = observer.problem or 'unpriced_usage'
+            if not counting:
+                row['decision'] = forecast(request, row['usage'], self.server.rates) if row['cost_usd'] is not None else {
+                    'action': 'hold', 'applied': False, 'reason': 'incomplete_or_unpriced_response'}
         except (BrokenPipeError, ConnectionResetError):
             row['status'] = 'connection_closed'
         except Exception as e:

@@ -140,6 +140,7 @@ def accounting(rows, final, jev=False):
            'rejected_requests': sum(isinstance(r.get('http_status'), int) and r['http_status'] != 200 for r in messages),
            'transport_failures': sum(r.get('http_status') is None for r in messages),
            'refused_requests': sum(refused.values()), 'refusal_reasons': dict(refused),
+           'count_tokens_requests': sum(r.get('kind') == 'count_tokens' for r in rows),  # free; never in requests
            'models': [r.get('model') for r in messages], 'unpriced_requests': unpriced,
            # Unknown cost stays unknown: a trial with any unpriced request has no dollar total.
            'cost_usd': known if unpriced == 0 and messages else None, 'known_cost_usd': known,
