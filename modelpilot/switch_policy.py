@@ -11,15 +11,22 @@ with that of each direct move:
 - switch: the one-time cache rewrite, beyond the read it replaces. A model change rewrites the whole
   prefix; an effort change rewrites what that model rewrites (config: full, messages or none); a
   cold cache costs nothing extra, since staying would write it too.
+- candidates: staying and Jev's setting; when Jev is unsure of the model (or the effort), also Jev's
+  effort (or model) alone, so a move can take the part Jev is sure of. When it is sure of both, nothing
+  cheaper is tried first.
 - P_ok(c): Jev's model answer is the cheapest model that can finish in one pass, and its effort
   answer the lowest effort that can. So c is enough when both are at or below c's, treated as
   independent. On evidence that the current setting isn't enough, the probabilities are
   conditioned on that.
 - recover(c): a failure wastes part of run(c), and the task is redone where Jev says it needs to be (its
-  recommendation, when at least as strong as c), or else on the strongest setting.
+  recommendation, when at least as strong as c), or else on the strongest setting. That redo can fail
+  too (then it is done again on the strongest setting), so staying on a setting likely to fail carries
+  the same downstream risk as moving to Jev's setting now.
 
-A move goes straight to its target and never climbs. Downgrades need more benefit (hysteresis plus
-a multiple of their rewrite) and enough confidence. Models, efforts, cache behaviour and the cost
+A move goes straight to its target and never climbs. It must beat staying by the hysteresis, scaled
+by how plausible the current setting is: the margin protects a setting that may well be enough from
+marginal moves, not one that is almost certain to fail. Downgrades also need a multiple of their
+rewrite and enough confidence. Models, efforts, cache behaviour and the cost
 model come from configs/modelpilot-policy.json and prices from the rate table; nothing here names
 a model.
 """
@@ -137,6 +144,10 @@ def at_least(cfg, target, current):
             _effort_index(cfg, target[1]) >= _effort_index(cfg, current[1]))
 
 
+def _at_least_number(value, floor):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value >= floor
+
+
 def _label(setting):
     return f'{setting[0]}/{setting[1]}'
 
@@ -176,21 +187,35 @@ def decide(cfg, rates, advice, current, prof, trigger):
         candidates = [current]
     jm = model_answer.get('choice')
     je = effort_answer.get('choice') or current[1]
-    moves = [(m, e if m in cfg['models'] and cfg['models'][m]['efforts'] else None)
-             for m, e in ((jm, je), (jm, current[1]), (current[0], je))]
+    sure = cfg['direct_jump_confidence']
+    moves = [(jm, je)]  # Jev's setting; a partial move only in a dimension Jev is unsure of
+    if not _at_least_number(effort_answer.get('confidence'), sure):
+        moves.append((jm, current[1]))
+    if not _at_least_number(model_answer.get('confidence'), sure):
+        moves.append((current[0], je))
+    moves = [(m, e if m in cfg['models'] and cfg['models'][m]['efforts'] else None) for m, e in moves]
     pick = moves[0] if moves[0] in runnable else None
     if trigger == 'turn_start':
         candidates += [c for c in dict.fromkeys(moves) if c in runnable and c != current]
     strongest = max(runnable, key=lambda c: (_rank(cfg, c[0]), _effort_index(cfg, c[1])))
 
+    wasted = cfg['recovery']['wasted_fraction']
+
     def recovery(setting):  # where a failed setting's work is redone
         return pick if pick and pick != setting and at_least(cfg, pick, setting) else strongest
+
+    def from_scratch(setting):  # the work done on setting alone, redone on the strongest if it fails too
+        run = run_cost(cfg, rates, setting, prof)
+        if setting == strongest:
+            return run
+        p = probability(setting)
+        return p * run + (1 - p) * (wasted * run + switch_cost(cfg, rates, setting, strongest, prof, warm=True) +
+                                    run_cost(cfg, rates, strongest, prof))
     rows = []
     for c in candidates:
         run = run_cost(cfg, rates, c, prof)
         r = recovery(c)
-        recover = (cfg['recovery']['wasted_fraction'] * run + switch_cost(cfg, rates, c, r, prof, warm=True) +
-                   run_cost(cfg, rates, r, prof))
+        recover = wasted * run + switch_cost(cfg, rates, c, r, prof, warm=True) + from_scratch(r)
         p, switch = probability(c), switch_cost(cfg, rates, current, c, prof)
         rows.append({'setting': _label(c), 'p_ok': p, 'switch_usd': switch, 'run_usd': run, 'recover_usd': recover,
                      'expected_usd': switch + p * run + (1 - p) * recover, '_setting': c})
@@ -206,7 +231,8 @@ def decide(cfg, rates, advice, current, prof, trigger):
         if not isinstance(confidence, (int, float)) or confidence < cfg['min_confidence_to_downgrade']:
             return dict(out, action='stay', reason='low_confidence_no_downgrade')
     benefit = stay['expected_usd'] - best['expected_usd']
-    required = cfg['hysteresis_usd'] + (cfg['downgrade_switch_multiplier'] - 1) * best['switch_usd'] * downgrade
+    required = (cfg['hysteresis_usd'] * stay['p_ok'] +
+                (cfg['downgrade_switch_multiplier'] - 1) * best['switch_usd'] * downgrade)
     out.update(benefit_usd=benefit, required_usd=required, downgrade=downgrade)
     if benefit <= required:
         return dict(out, action='stay', reason='not_worth_switching')

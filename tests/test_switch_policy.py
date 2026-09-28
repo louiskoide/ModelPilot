@@ -1,5 +1,6 @@
 """ModelPilot's switch policy: whether moving to Jev's recommended setting pays. Pure, $0."""
 import copy
+import itertools
 import json
 import tempfile
 import unittest
@@ -43,9 +44,27 @@ class SwitchPolicyTests(unittest.TestCase):
     def test_a_confident_hard_prediction_jumps_straight_to_it(self):
         decision = self.decide(advice(O, 'xhigh'), (S, 'medium'))
         self.assertEqual((decision['action'], decision['target']), ('jump', [O, 'xhigh']))
-        # Only staying, Jev's setting and its model or effort alone are weighed: no intermediate rungs.
-        self.assertEqual({c['setting'] for c in decision['candidates']},
-                         {f'{S}/medium', f'{O}/xhigh', f'{O}/medium', f'{S}/xhigh'})
+        # Jev is sure of both: only staying and its setting are weighed, nothing cheaper is tried first.
+        self.assertEqual({c['setting'] for c in decision['candidates']}, {f'{S}/medium', f'{O}/xhigh'})
+
+    def test_a_partial_move_is_weighed_only_where_jev_is_unsure(self):
+        unsure_effort = self.decide(advice(O, 'xhigh', effort_p=.4), (S, 'medium'))
+        self.assertEqual({c['setting'] for c in unsure_effort['candidates']}, {f'{S}/medium', f'{O}/xhigh', f'{O}/medium'})
+        unsure_model = self.decide(advice(O, 'xhigh', model_p=.5), (S, 'medium'))
+        self.assertEqual({c['setting'] for c in unsure_model['candidates']}, {f'{S}/medium', f'{O}/xhigh', f'{S}/xhigh'})
+
+    def test_a_clear_prediction_jumps_whatever_the_guessed_parameters(self):
+        # A redo can fail too: staying on a setting that will likely fail carries the same downstream risk as moving
+        # now, so the guesses (horizon, effort output factors, wasted fraction) can't turn a clear case into a stay.
+        for horizon, spread, wasted in itertools.product([5, 15, 40], [.5, 1, 2], [.25, .5, .75]):
+            cfg = copy.deepcopy(self.cfg)
+            cfg['defaults']['horizon_requests'] = horizon
+            cfg['effort_output_factor'] = {e: 1 + (f - 1) * spread for e, f in self.cfg['effort_output_factor'].items()}
+            cfg['recovery']['wasted_fraction'] = wasted
+            for kb, warm in ((11, False), (200, True)):
+                decision = self.decide(advice(O, 'xhigh', model_p=.85, effort_p=.7), (S, 'medium'), kb, warm, cfg=cfg)
+                self.assertEqual((decision['action'], decision['target']), ('jump', [O, 'xhigh']),
+                                 (horizon, spread, wasted, kb))
 
     def test_it_still_jumps_when_a_warm_rewrite_is_worth_it(self):
         decision = self.decide(advice(O, 'xhigh'), (S, 'medium'), kb=200, warm=True)
@@ -69,10 +88,15 @@ class SwitchPolicyTests(unittest.TestCase):
         decision = self.decide(adv, (O, 'high'))
         self.assertEqual((decision['action'], decision['reason']), ('stay', 'low_confidence_no_downgrade'))
 
-    def test_hysteresis_keeps_a_small_gain_from_switching(self):
-        cfg = dict(self.cfg, hysteresis_usd=10.0)
-        decision = self.decide(advice(O, 'xhigh'), (S, 'medium'), cfg=cfg)
+    def test_hysteresis_protects_a_plausible_setting_not_a_hopeless_one(self):
+        plausible = advice(S, 'high', model_p=.9, effort_p=.6)  # Sonnet medium has about a 20% chance of being enough
+        self.assertEqual(self.decide(plausible, (S, 'medium'))['action'], 'jump')  # a small gain, with a small margin
+        cfg = dict(self.cfg, hysteresis_usd=1.0)
+        decision = self.decide(plausible, (S, 'medium'), cfg=cfg)
         self.assertEqual((decision['action'], decision['reason']), ('stay', 'not_worth_switching'))
+        hopeless = self.decide(advice(O, 'xhigh'), (S, 'medium'), cfg=cfg)  # almost surely not enough: little protection
+        self.assertEqual(hopeless['action'], 'jump')
+        self.assertLess(hopeless['required_usd'], .05)
 
     def test_switch_costs_by_kind(self):
         prof = sp.profile(self.cfg, dict(request(40), tools=[{'name': 'x', 'description': 'y' * 20000}]), warm=True)

@@ -25,8 +25,10 @@
   "recovery": {"wasted_fraction": 0.5, "redo_on": "Jev's recommendation when at least as strong as the failed setting, else the strongest candidate setting"},
   "jev_smoothing": 0.05,
   "hysteresis_usd": 0.02,
+  "hysteresis_scaling": "A move must beat staying by hysteresis_usd x P(the current setting is enough): full protection for a plausible current setting, almost none for one that is nearly certain to fail.",
   "downgrade_switch_multiplier": 2.0,
   "min_confidence_to_downgrade": 0.3,
+  "direct_jump_confidence": 0.6,
   "decision_points": ["turn_start", "stuck_evidence"],
   "guesses": "effort_output_factor, defaults, recovery.wasted_fraction, hysteresis_usd and downgrade_switch_multiplier are starting values, not measurements; the 4a tuning run calibrates them."
 }
