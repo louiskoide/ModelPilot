@@ -121,15 +121,15 @@ class ToolTrialTests(unittest.TestCase):
     def tearDown(self):
         self.fixture.tearDown()
 
-    def modelpilot_trial(self, name, script, adapter):
+    def modelpilot_trial(self, name, script, adapter, max_turns=12, rates=test_bench.RATES):
         work = self.out/name/'workspace'
         self.upstream.keep_bodies = True
         self.upstream.script = [dict(step, input={k: (str(work/v) if k == 'file_path' else v)
                                                   for k, v in step['input'].items()})
                                 if 'tool' in step and isinstance(step['input'], dict) else step for step in script]
-        return bench.run_trial(self.task, 'modelpilot', self.out/name, self.cli, 'sk-ant-offline-not-a-key',
-                               f'http://127.0.0.1:{self.upstream.server_port}', test_bench.RATES, python=sys.executable,
-                               max_turns=12, client_version=self.version, adapter=adapter)
+        return bench.run_trial(self.task, adapter.arm_id, self.out/name, self.cli, 'sk-ant-offline-not-a-key',
+                               f'http://127.0.0.1:{self.upstream.server_port}', rates, python=sys.executable,
+                               max_turns=max_turns, client_version=self.version, adapter=adapter)
 
     def test_long_output_stays_out_of_context_until_expanded(self):
         needles = ''.join(f'needle {i}\n' for i in range(200))
@@ -178,6 +178,76 @@ class ToolTrialTests(unittest.TestCase):
         self.assertTrue(routing['accounting_matches'], routing)
         self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
         self.assertFalse(routing['benchmark_eligible'])
+
+    def main_loop(self):
+        return [(json.loads(b)['model'], json.loads(b)['output_config']['effort'])
+                for b in self.upstream.bodies if b'"tools"' in b]
+
+    def test_the_active_arm_escalates_and_its_trials_are_benchmark_eligible(self):
+        script = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': BROKEN}}] +
+                  [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 3 +
+                  [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
+                   {'tool': 'mcp__modelpilot__run_tests', 'input': {}},
+                   {'text': 'Done.'}])
+        record = self.modelpilot_trial('active', script, bench.arm_adapter('modelpilot', 1, 1))
+        self.assertTrue(record['passed'], record['grade'])
+        self.assertEqual(self.main_loop(), [('claude-sonnet-5', 'medium')]*4 + [('claude-sonnet-5', 'high')]*3)
+        routing = record['routing']
+        self.assertEqual((routing['mode'], routing['benchmark_eligible'], routing['active_policy_implemented']),
+                         ('active', True, True))
+        self.assertEqual(routing['policy']['escalations'],
+                         [{'action': 'increase_effort', 'status': 'confirmed',
+                           'target_model': 'claude-sonnet-5', 'target_effort': 'high'}])
+        self.assertEqual((routing['policy']['kept_requests'], routing['policy']['stops']), (2, []))
+        self.assertTrue(routing['accounting_matches'], routing)
+        self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
+        self.assertEqual(record['sessions'][0]['stop'], 'success')
+
+    def test_a_budget_refusal_ends_the_session_as_a_budget_stop(self):
+        script = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}}] +
+                  [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 4 + [{'text': 'Done.'}])
+        adapter = bench.arm_adapter('modelpilot', 1, 1)
+        adapter.limit = 2.5 * (100*2 + 4*10) / 1e6  # three scripted Sonnet 5 replies reach it
+        record = self.modelpilot_trial('budget', script, adapter)
+        session, = record['sessions']
+        self.assertEqual((session['stop'], session['requests']), ('budget_stop', 3), session)
+        self.assertEqual((record['accounting']['refused_requests'], record['accounting']['refusal_reasons']),
+                         (1, {'insufficient_budget': 1}))
+        self.assertEqual(len(self.main_loop()), 3)  # the refused request never reached the provider
+        self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
+        self.assertEqual(record['routing']['policy']['refusals'], ['insufficient_budget'])
+        self.record_client_end = record['client']
+
+    def test_a_task_stuck_beyond_the_ladder_is_stopped_unfinished(self):
+        script = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': BROKEN}}] +
+                  [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 12 + [{'text': 'Done.'}])
+        rates = dict(test_bench.RATES, **{'claude-opus-5-5': dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)})
+        record = self.modelpilot_trial('stuck', script, bench.arm_adapter('modelpilot', 1, 1), max_turns=20, rates=rates)
+        self.assertFalse(record['passed'])
+        self.assertEqual(record['sessions'][0]['stop'], 'policy_stop', record['sessions'])
+        self.assertEqual(self.main_loop(), [('claude-sonnet-5', 'medium')]*4 + [('claude-sonnet-5', 'high')]*3 +
+                         [('claude-opus-5-5', 'medium')]*3)
+        policy = record['routing']['policy']
+        self.assertEqual([e['action'] for e in policy['escalations']], ['increase_effort', 'stronger_model'])
+        self.assertEqual((len(policy['stops']), policy['refusals']), (1, ['policy_stop:re_diagnose']))
+        self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
+
+    def test_the_opus_5_5_variant_asks_for_opus_and_raises_only_its_effort(self):
+        script = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': BROKEN}}] +
+                  [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 3 +
+                  [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
+                   {'tool': 'mcp__modelpilot__run_tests', 'input': {}},
+                   {'text': 'Done.'}])
+        rates = dict(test_bench.RATES, **{'claude-opus-5-5': dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)})
+        record = self.modelpilot_trial('o55', script, bench.arm_adapter('modelpilot-o55', 1, 1), rates=rates)
+        self.assertTrue(record['passed'], record['grade'])
+        self.assertEqual(self.main_loop(), [('claude-opus-5-5', 'medium')]*4 + [('claude-opus-5-5', 'high')]*3)
+        self.assertEqual((record['arm'], record['model']), ('modelpilot-o55', 'claude-opus-5-5'))
+        policy = record['routing']['policy']
+        self.assertEqual(policy['parameters']['ladder'], ['claude-opus-5-5/medium', 'claude-opus-5-5/high'])
+        self.assertEqual([e['target_effort'] for e in policy['escalations']], ['high'])
+        self.assertTrue(record['routing']['benchmark_eligible'])
+        self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
 
     def test_policy_refuses_a_live_upstream(self):
         with self.assertRaises(ValueError):

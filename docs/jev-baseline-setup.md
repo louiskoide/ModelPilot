@@ -83,6 +83,8 @@ This changes only in-memory timeout settings in the diagnostic subprocess: 15 se
 
 `runs/jev-preflight-20260922-120150` passed at the stock 1.5-second attempt timeout, 3-second deadline and one retry: `claude-sonnet-4-6` was chosen with confidence 0.98 in 393 ms. Router usage was reported as `jev-1.13.0` with 893 input and 100 output tokens. Provider calls were zero, and router cost remains unpriced. Run `115855` in between was another 401 and is preserved. **The credential and scoring gate is now passed.** The saved evidence contains no key material. The locally available Claude Code is 2.1.280 at `~/.local/bin/claude` (not the 2.1.278 used on the original machine). Its compatibility is part of the next gate.
 
+`runs/jev-preflight-20260926-171119` (September 26, before the 4a tuning run) passed with the user's current key, which is not the one exposed on September 22: `claude-sonnet-4-6` with confidence 0.98 in 307 ms, zero provider calls, router cost unpriced.
+
 ## End-to-end routing preflight (prepared, not yet run)
 
 ```sh

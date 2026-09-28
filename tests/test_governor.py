@@ -112,6 +112,22 @@ class GovernorTests(unittest.TestCase):
         self.gov.admit('a', .1)
         self.gov.settle('a', None)
         self.assertEqual(self.gov.admit('b', 0)['reason'], 'cost_unknown')
+        self.assertEqual(self.gov.admit('c', 0, gate='spent')['reason'], 'cost_unknown')
+
+    def test_spent_gate_admits_until_measured_spend_reaches_the_limit(self):
+        # A client's own budget stop: pessimistic estimates and pending reservations never refuse.
+        first = self.gov.admit('a', 5, self.task, self.rev, gate='spent')
+        self.assertEqual((first['admitted'], first['reserved'], first['gate']), (True, True, 'spent'))
+        self.assertTrue(self.gov.admit('b', 5, self.task, self.rev, gate='spent')['admitted'])
+        self.assertEqual(self.gov.admit('c', 5)['reason'], 'insufficient_budget')  # the reservation gate still does
+        self.gov.settle('a', .6)
+        self.gov.settle('b', .3)
+        self.assertTrue(self.gov.admit('d', 5, gate='spent')['admitted'])
+        self.gov.settle('d', .1)  # measured spend now equals the limit
+        refused = self.gov.admit('e', 0, gate='spent')
+        self.assertEqual((refused['admitted'], refused['reason'], refused['reserved']), (False, 'insufficient_budget', False))
+        self.assertEqual(self.gov.admit('f', 0, self.task, self.rev+1, gate='spent')['reason'], 'stale_task')
+        with self.assertRaises(ValueError): self.gov.admit('g', 0, gate='maybe')
 
     def test_stale_or_terminal_task_work_refused(self):
         self.assertEqual(self.gov.admit('a', .1, self.task, self.rev+1)['reason'], 'stale_task')

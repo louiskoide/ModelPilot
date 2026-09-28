@@ -113,13 +113,21 @@ class Governor:
     def policy(self):
         return self.recover()['policy']
 
-    def admit(self, request_id, estimate, task=None, revision=None, ttl=600, enforce=True, fence=None):
+    def admit(self, request_id, estimate, task=None, revision=None, ttl=600, enforce=True, fence=None,
+              gate='reservation'):
         """Reserve before dispatch. Work for a stale or terminal task revision is refused.
 
         enforce=False is for observers that forward regardless (the dry-run proxy): the
         decision is journaled as would-admit/would-refuse, but the reservation is always
         recorded so that forwarded spend still counts.
+
+        gate='reservation' admits only if the estimate fits beside every pending reservation.
+        gate='spent' admits while measured spend is below the limit, the rule of a client's own
+        budget stop, so an arm limited this way stops where the other benchmark arms do. The
+        estimate is still reserved, so a request that never settles leaves cost unknown.
         """
+        if gate not in ('reservation', 'spent'):
+            raise ValueError('Admission gate must be reservation or spent')
         nonnegative(estimate, 'estimate')
         if not isinstance(request_id, str) or not request_id:
             raise ValueError('Request ID required')
@@ -144,6 +152,9 @@ class Governor:
             if reason == 'reserved':
                 if not policy['cost_complete']:
                     reason = 'cost_unknown'
+                elif gate == 'spent':
+                    if policy['spent_usd'] >= self.limit:
+                        reason = 'insufficient_budget'
                 elif policy['available_usd'] <= 0 or estimate > policy['available_usd']:
                     reason = 'insufficient_budget'
             admitted = reason == 'reserved'
@@ -152,7 +163,7 @@ class Governor:
                 self.db.execute("INSERT INTO gov_reservations(session,request_id,task,revision,estimate,status,created,expires) "
                                 "VALUES(?,?,?,?,?,'pending',?,?)", (self.session, request_id, task, revision, estimate, now, now+ttl))
                 policy = self._policy()
-            result = {'request_id': request_id, 'admitted': admitted, 'reason': reason, 'enforced': enforce,
+            result = {'request_id': request_id, 'admitted': admitted, 'reason': reason, 'enforced': enforce, 'gate': gate,
                       'reserved': admitted or not enforce, 'estimate_usd': estimate, 'policy': policy, 'applied': False}
             self._journal('admit', result, task, revision)
         return result

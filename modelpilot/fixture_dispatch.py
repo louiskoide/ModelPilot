@@ -1,6 +1,8 @@
-"""Synthetic policy dispatch: in-process fixtures, or a proxy whose upstream is the owned fixture server.
+"""Policy dispatch core (Dispatcher, ProxyPolicy) and its fixture-only variants.
 
-No URLs, credentials or live transport are accepted.
+The fixture variants accept only in-process fixtures, or a proxy whose upstream is the owned
+fixture server: no URLs, credentials or live transport. The live variant, for the benchmark arm
+only, is active_policy.ActivePolicy.
 """
 import hashlib
 import json
@@ -27,40 +29,40 @@ class StrictFixture:
                 'service_tier':'standard','inference_geo':'global'}}
 
 
-class FixtureDispatcher:
-    def __init__(self,governor,rates,fixture):
-        from .loopback_fixture import LoopbackFixture
-        # FixtureServer only serves requests forwarded by a ProxyPolicy proxy (begin/finish).
-        if type(fixture) not in (StrictFixture,LoopbackFixture,FixtureServer):
-            raise ValueError('Only owned in-process or loopback fixtures are accepted; no live transport')
-        self.gov,self.rates,self.fixture=governor,rates,fixture
+class Dispatcher:
+    """Fences, reserves, settles and confirms one ladder escalation. The caller sends the request.
 
-    def dispatch(self,proposal,owner,request):
-        ticket=self.begin(proposal,owner,request)
-        if ticket['status']=='deferred':return ticket
-        response=error=None
-        try:response=self.fixture.reply(ticket['request'])
-        except Exception as exc:error=type(exc).__name__
-        return self.finish(ticket,response,error)
+    gate and reserve_output choose the admission rule (Governor.admit, prepare_action): by
+    default the reservation, output allowance included, must fit beside pending reservations.
+    """
+    journal_kind,confirmed,prefix,fixture_only='policy_dispatch','confirmed','mp-esc-',False
+    gate,reserve_output='reservation',True
+
+    def __init__(self,governor,rates):
+        self.gov,self.rates=governor,rates
+
+    def available(self,policy):
+        """What the escalation's reservation must fit in; None while cost is unknown."""
+        if not policy['cost_complete']:return None
+        return max(0,self.gov.limit-policy['spent_usd']) if self.gate=='spent' else policy['available_usd']
 
     def begin(self,proposal,owner,request):
         """Fence and reserve one escalation; returns the exact request to send, or a deferral."""
         # Bind inputs before validation so a caller cannot change the dispatched payload later.
         proposal=json.loads(json.dumps(proposal));request=json.loads(json.dumps(request))
-        policy=self.gov.policy()
-        prepared=prepare_action(self.gov.state,proposal,owner,request,
-                                policy['available_usd'] if policy['cost_complete'] else None,self.rates)
+        prepared=prepare_action(self.gov.state,proposal,owner,request,self.available(self.gov.policy()),self.rates,
+                                self.reserve_output)
         if prepared['action']!='prepared_offline':
             return {'status':'deferred','reason':prepared['reason'],'applied':False}
         # One attempt per escalation window, even if new observations arrive before completion.
         identity=[self.gov.session,proposal['task'],proposal['revision'],proposal['level']]
-        request_id='fixture-'+hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+        request_id=self.prefix+hashlib.sha256(json.dumps(identity).encode()).hexdigest()
         def fence():
-            policy=self.gov._policy()
-            checked=prepare_action(self.gov.state,proposal,owner,request,
-                                    policy['available_usd'] if policy['cost_complete'] else None,self.rates)
+            checked=prepare_action(self.gov.state,proposal,owner,request,self.available(self.gov._policy()),self.rates,
+                                   self.reserve_output)
             if checked!=prepared:raise ValueError('Admission changed after preparation')
-        admitted=self.gov.admit(request_id,prepared['reserve_usd'],proposal['task'],proposal['revision'],fence=fence)
+        admitted=self.gov.admit(request_id,prepared['reserve_usd'],proposal['task'],proposal['revision'],fence=fence,
+                                gate=self.gate)
         if not admitted['admitted']:
             return {'status':'deferred','reason':admitted['reason'],'applied':False}
         return {'status':'admitted','request_id':request_id,'proposal':proposal,'owner':owner,
@@ -69,7 +71,7 @@ class FixtureDispatcher:
     def finish(self,ticket,response,error=None,applied=False):
         """Settle measured cost (None stays unknown) and confirm the rung only for a priced reply."""
         proposal,request=ticket['proposal'],ticket['request']
-        result={'request_id':ticket['request_id'],'status':'unknown_outcome','applied':applied,'fixture_only':True,
+        result={'request_id':ticket['request_id'],'status':'unknown_outcome','applied':applied,'fixture_only':self.fixture_only,
                 'target_model':proposal['target_model'],'target_effort':proposal['target_effort'],
                 'action':proposal['action'],'level':proposal['level'],
                 'request_sha256':hashlib.sha256(json.dumps(request,sort_keys=True).encode()).hexdigest()}
@@ -87,15 +89,36 @@ class FixtureDispatcher:
         if actual is not None:
             try:
                 self.gov.state.confirm_escalation(proposal['task'],proposal['revision'],ticket['owner'],proposal['last_event'])
-                result['status']='fixture_confirmed'
+                result['status']=self.confirmed
             except ValueError:
                 result['status']='stale_after_send'
         with self.gov.db:
-            self.gov._journal('fixture_dispatch',result,proposal['task'],proposal['revision'])
+            self.gov._journal(self.journal_kind,result,proposal['task'],proposal['revision'])
         return result
 
 
+class FixtureDispatcher(Dispatcher):
+    journal_kind,confirmed,prefix,fixture_only='fixture_dispatch','fixture_confirmed','fixture-',True
+
+    def __init__(self,governor,rates,fixture):
+        from .loopback_fixture import LoopbackFixture
+        # FixtureServer only serves requests forwarded by a ProxyPolicy proxy (begin/finish).
+        if type(fixture) not in (StrictFixture,LoopbackFixture,FixtureServer):
+            raise ValueError('Only owned in-process or loopback fixtures are accepted; no live transport')
+        super().__init__(governor,rates)
+        self.fixture=fixture
+
+    def dispatch(self,proposal,owner,request):
+        ticket=self.begin(proposal,owner,request)
+        if ticket['status']=='deferred':return ticket
+        response=error=None
+        try:response=self.fixture.reply(ticket['request'])
+        except Exception as exc:error=type(exc).__name__
+        return self.finish(ticket,response,error)
+
+
 EXECUTABLE=('increase_effort','stronger_model')
+STOPS=('re_diagnose','human_review')
 
 
 class ProxyPolicy:
@@ -107,6 +130,8 @@ class ProxyPolicy:
     A correction (new revision) resets it with the ladder. Anything refused, stale or unknown is
     forwarded unchanged, as the dry-run proxy does; ModelPilot never blocks the client.
     """
+    active,mode,gate,keep_kind,Dispatch=False,'fixture-policy','reservation','fixture_keep_escalated',FixtureDispatcher
+
     def __init__(self,upstream,client_model,owner):
         if type(upstream) is not FixtureServer:
             raise ValueError('Policy dispatch requires the owned in-process fixture upstream; no live transport')
@@ -116,11 +141,13 @@ class ProxyPolicy:
         if origin.scheme!='http' or origin.hostname!='127.0.0.1' or origin.port!=self.upstream.server_port:
             raise ValueError('Proxy upstream is not the owned fixture server')
 
-    @staticmethod
-    def effective(gov,task,revision):
+    def dispatcher(self,gov,rates):
+        return FixtureDispatcher(gov,rates,self.upstream)
+
+    def effective(self,gov,task,revision):
         """Setting confirmed for this task revision, or None when the client's own applies."""
-        confirmed=[e['payload'] for e in gov.journal('fixture_dispatch')
-                   if e['task']==task and e['revision']==revision and e['payload']['status']=='fixture_confirmed']
+        confirmed=[e['payload'] for e in gov.journal(self.Dispatch.journal_kind)
+                   if e['task']==task and e['revision']==revision and e['payload']['status']==self.Dispatch.confirmed]
         return (confirmed[-1]['target_model'],confirmed[-1]['target_effort']) if confirmed else None
 
     def plan(self,gov,rates,task,request):
@@ -138,7 +165,13 @@ class ProxyPolicy:
             proposal=escalation_proposal(gov.state,task,revision,self.owner,*setting)
         except ValueError as exc:
             return {'status':'deferred','reason':'refused:'+str(exc)}
-        dispatcher=FixtureDispatcher(gov,rates,self.upstream)
+        if self.active and proposal['action'] in STOPS:
+            stop={'status':'stop','reason':'policy_stop:'+proposal['action'],'level':proposal['level'],
+                  'model':setting[0],'effort':setting[1]}
+            with gov.db:
+                gov._journal('policy_stop',stop,task,revision)
+            return stop  # R2: the task ends unfinished, with no retry
+        dispatcher=self.dispatcher(gov,rates)
         deferral=None
         if proposal['action'] in EXECUTABLE:
             try:
@@ -157,24 +190,25 @@ class ProxyPolicy:
             if self.effective(gov,task,revision)!=setting:raise ValueError('Escalated setting changed')
         try:
             admitted=gov.admit(request_id,reservation_estimate(json.dumps(current).encode(),current,rates),
-                               task,revision,fence=fence)
+                               task,revision,fence=fence,gate=self.gate)
         except ValueError as exc:
             return {'status':'deferred','reason':'refused:'+str(exc)}
         if not admitted['admitted']:
             return {'status':'deferred','reason':admitted['reason']}
         return {'status':'admitted','kind':'keep_escalated','request_id':request_id,'request':current,
-                'target_model':setting[0],'target_effort':setting[1],'task':task,'revision':revision}
+                'target_model':setting[0],'target_effort':setting[1],'task':task,'revision':revision,
+                'escalation_deferred':deferral['reason'] if deferral else None}
 
     def finish(self,gov,rates,ticket,cost,model,usage):
         if ticket['kind']=='escalation':
-            dispatcher=FixtureDispatcher(gov,rates,self.upstream)
+            dispatcher=self.dispatcher(gov,rates)
             response=None if cost is None else {'model':model,'usage':usage}
             error=None if cost is not None else 'UnpricedOrIncompleteResponse'
             return dispatcher.finish(ticket,response,error,applied=True)
         gov.settle(ticket['request_id'],cost)
         result={'request_id':ticket['request_id'],'status':'kept' if cost is not None else 'unknown_outcome',
-                'applied':True,'fixture_only':True,'target_model':ticket['target_model'],
+                'applied':True,'fixture_only':not self.active,'target_model':ticket['target_model'],
                 'target_effort':ticket['target_effort'],'cost_usd':cost}
         with gov.db:
-            gov._journal('fixture_keep_escalated',result,ticket['task'],ticket['revision'])
+            gov._journal(self.keep_kind,result,ticket['task'],ticket['revision'])
         return result

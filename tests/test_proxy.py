@@ -45,6 +45,25 @@ class ObserverTests(unittest.TestCase):
             cost = measured_cost(observer, {'model': 'claude-opus-4-6'}, RATES)
             self.assertEqual(cost is not None, priced, geo)
 
+    def test_missing_usage_has_a_reason(self):
+        def observe(stream, *chunks):
+            observer = UsageObserver(stream)
+            for chunk in chunks:
+                observer.feed(chunk)
+            observer.finish()
+            return observer.problem
+        start = b'data: ' + json.dumps({'type': 'message_start', 'message': {'usage': USAGE}}).encode() + b'\n\n'
+        stop = b'data: {"type": "message_stop"}\n\n'
+        self.assertIsNone(observe(True, start, stop))
+        self.assertEqual(observe(True, start), 'stream_ended_early')
+        self.assertEqual(observe(True, start, b'data: {"type": "error"}\n\n'), 'error_event')
+        self.assertEqual(observe(True, b'data: {nope\n\n'), 'unparseable_event')
+        self.assertEqual(observe(True, start, stop, b'data: {"type"'), 'trailing_bytes')
+        self.assertEqual(observe(False, b'x' * (1024*1024 + 1)), 'oversized_response')
+        self.assertEqual(observe(False, b'{"input_tokens": 12}'), 'no_usage_field')
+        self.assertEqual(observe(False, b'not json'), 'unparseable_body')
+        self.assertIsNone(observe(False, json.dumps({'model': 'm', 'usage': USAGE}).encode()))
+
     def test_forecast_accounts_for_rebuild_once_and_never_applies(self):
         result = forecast({'model': 'claude-opus-4-6'}, USAGE, RATES)
         one = result['scenarios'][0]
@@ -145,12 +164,54 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(len(self.upstream.received), 1)
         self.assertIsNone(json.loads(self.log.read_text())['cost_usd'])
 
+    def post(self, path, body):
+        conn = http.client.HTTPConnection('127.0.0.1', self.proxy.server_port, timeout=5)
+        try:
+            conn.request('POST', path, json.dumps(body), {'Content-Type': 'application/json'})
+            response = conn.getresponse()
+            return response.status, json.loads(response.read())
+        finally:
+            conn.close()
+
+    def rows(self, count):
+        for _ in range(200):
+            rows = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
+            if len(rows) >= count:
+                return rows
+            time.sleep(.005)
+        self.fail('rows not logged')
+
+    def test_token_counting_is_logged_as_free_and_apart_from_messages(self):
+        # The API answers /v1/messages/count_tokens with {"input_tokens": N} and no usage; it is free.
+        status, body = self.post('/v1/messages/count_tokens?beta=true',
+                                 {'model': 'claude-opus-4-6', 'messages': [{'role': 'user', 'content': 'x' * 400}]})
+        self.assertEqual((status, list(body)), (200, ['input_tokens']))
+        self.call()
+        counted, sent = self.rows(2)
+        self.assertEqual((counted['kind'], counted['path'], counted['cost_usd'], counted['input_tokens']),
+                         ('count_tokens', '/v1/messages/count_tokens', 0.0, body['input_tokens']))
+        self.assertEqual((sent['kind'], sent['path']), ('messages', '/v1/messages'))
+        from modelpilot.bench import accounting
+        result = accounting([counted, sent], {})
+        self.assertEqual((result['requests'], result['count_tokens_requests'], result['unpriced_requests']), (1, 1, 0))
+        self.assertAlmostEqual(result['cost_usd'], .007525)
+
+    def test_a_messages_reply_without_usage_stays_unknown_with_its_reason(self):
+        self.call(test_no_usage=True)
+        row, = self.rows(1)
+        self.assertEqual((row['kind'], row['status'], row['cost_usd'], row['usage_problem']),
+                         ('messages', 'ok', None, 'no_usage_field'))
+        self.post('/v1/messages', {'model': 'claude-unpriced', 'max_tokens': 8, 'messages': []})
+        unpriced = self.rows(2)[-1]
+        self.assertEqual((unpriced['cost_usd'], unpriced['usage_problem']), (None, 'unpriced_usage'))
+
     def test_stream_error_not_priced_as_success(self):
         request, _, _, data, _ = self.call(True, test_stream_error=True)
         self.assertEqual(data, response_for(request)[2])
         row = json.loads(self.log.read_text())
         self.assertFalse(row['usage_complete'])
         self.assertIsNone(row['cost_usd'])
+        self.assertEqual(row['usage_problem'], 'error_event')
 
 
 class InFlightTests(unittest.TestCase):
@@ -293,6 +354,7 @@ class GovernedProxyTests(unittest.TestCase):
             conn.close()
             rows = self.rows(2)
             self.assertTrue(all('governor_request_id' not in r for r in rows))
+            self.assertEqual(sorted(r['kind'] for r in rows), ['count_tokens', 'models'])
             self.assertEqual(gov.journal('admit'), [])
         finally:
             gov.close()

@@ -74,6 +74,18 @@ def transform_request(request,model,effort,allow_thinking_history=False):
     return out
 
 
+def next_setting(action,model,effort):
+    """The ladder's rule for one stuck recommendation: (action, model, effort) after it. An effort step,
+    else the next model at medium; with no rung left the action becomes re_diagnose (or human_review)."""
+    if action=='increase_effort' and effort in EFFORTS and effort!='high':
+        return action,model,EFFORTS[EFFORTS.index(effort)+1]
+    if action in ('increase_effort','stronger_model') and model!=MODELS[-1]:
+        return action,MODELS[MODELS.index(model)+1],'medium'
+    if action=='hold':
+        return action,model,effort
+    return ('human_review' if action=='human_review' else 're_diagnose'),model,effort
+
+
 def escalation_proposal(state,task,revision,owner,model,effort):
     setting(model,effort)
     nested=state.db.in_transaction
@@ -82,20 +94,16 @@ def escalation_proposal(state,task,revision,owner,model,effort):
             state.db.execute('BEGIN IMMEDIATE')
         state._owned(task,revision,owner)
         recommendation=state.recommend(task)
-        target,target_effort=model,effort
-        action=recommendation['recommendation']
-        if action=='increase_effort' and effort in EFFORTS and effort!='high':
-            target_effort=EFFORTS[EFFORTS.index(effort)+1]
-        elif action in ('increase_effort','stronger_model') and model!=MODELS[-1]:
-            target=MODELS[MODELS.index(model)+1];target_effort='medium'
-        elif action!='hold':
-            action='human_review' if action=='human_review' else 're_diagnose'
+        action,target,target_effort=next_setting(recommendation['recommendation'],model,effort)
         return {'task':task,'revision':revision,'last_event':recommendation['last_event'],
                 'level':recommendation['level'],'source_model':model,'source_effort':effort,
                 'target_model':target,'target_effort':target_effort,'action':action,'applied':False}
 
 
-def prepare_action(state,proposal,owner,request,available_usd,rates):
+def prepare_action(state,proposal,owner,request,available_usd,rates,reserve_output=True):
+    """reserve_output=False reserves the target's full rebuild (every request byte written at the
+    dearest write rate) without the output allowance: the active arm's rule, since none of its
+    requests reserves max_tokens (Claude Code sends 64000, $1.28 of Opus 5.5 output)."""
     fresh=escalation_proposal(state,proposal['task'],proposal['revision'],owner,
                              proposal['source_model'],proposal['source_effort'])
     if fresh!=proposal:raise ValueError('Proposal no longer matches host ledger evidence')
@@ -113,7 +121,8 @@ def prepare_action(state,proposal,owner,request,available_usd,rates):
         result['reason']='unknown_rates';return result
     if type(transformed.get('max_tokens')) is not int or transformed['max_tokens']<1:
         result['reason']='invalid_output_limit';return result
-    reserve=reservation_estimate(json.dumps(transformed).encode(),transformed,rates)
+    reserve=reservation_estimate(json.dumps(transformed).encode(),
+                                 transformed if reserve_output else dict(transformed,max_tokens=0),rates)
     result.update(reserve_usd=reserve,reason='insufficient_write_reservation')
     if reserve<=available_usd:
         result.update(action='prepared_offline',reason='requires_dispatch_time_fence_and_reservation',request=transformed)

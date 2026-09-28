@@ -20,8 +20,12 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(d['action'],'would_switch')
         self.assertFalse(d['applied'])
 
-    def test_active_mode_refused(self):
-        with self.assertRaises(ValueError): ModelPilotAdapter(mode='active')
+    def test_active_mode_needs_the_tools_and_its_own_policy(self):
+        with self.assertRaises(ValueError): ModelPilotAdapter(mode='active')  # R5 tools are part of the arm
+        with self.assertRaises(ValueError): ModelPilotAdapter(mode='enforce', tools=True)
+        with self.assertRaises(ValueError): ModelPilotAdapter(mode='active', tools=True, fixture_policy=object())
+        adapter = ModelPilotAdapter(mode='active', tools=True)
+        self.assertEqual((adapter.policy.mode, adapter.policy.gate), ('active', 'spent'))
 
 class IntegrationTests(unittest.TestCase):
     def test_real_client_hooks_and_governor_reconcile_offline(self):

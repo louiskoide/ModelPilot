@@ -162,7 +162,7 @@ def cost_scope(records):
 
 def routing_summary(records):
     """Jev routing across an arm's trials, or None for arms without a router."""
-    routes = [r['routing'] for r in records if r.get('routing')]
+    routes = [r['routing'] for r in records if r.get('routing') and r['routing'].get('kind') != 'modelpilot_policy']
     if not routes:
         return None
     tokens = Counter()
@@ -176,6 +176,20 @@ def routing_summary(records):
             'extra_decisions': sum(x.get('extra_decisions') or 0 for x in routes),
             'served_models': dict(Counter(m for x in routes for m in x.get('served_models') or [])),
             'router_tokens': dict(tokens)}
+
+
+def policy_summary(records):
+    """The ModelPilot arm's policy actions across its trials, or None for other arms."""
+    policies = [r['routing']['policy'] for r in records
+                if (r.get('routing') or {}).get('kind') == 'modelpilot_policy' and r['routing'].get('policy')]
+    if not policies:
+        return None
+    return {'trials': len(policies),
+            'escalated_trials': sum(any(e['status'] == 'confirmed' for e in p['escalations']) for p in policies),
+            'kept_requests': sum(p['kept_requests'] for p in policies),
+            'policy_stops': sum(bool(p['stops']) for p in policies),
+            'escalations': dict(Counter(f"{e['action']}:{e['status']}" for p in policies for e in p['escalations'])),
+            'refusals': dict(Counter(x for p in policies for x in p['refusals']))}
 
 
 def arm_summary(arm, complete, incomplete, arm_cells, rng, resamples):
@@ -207,6 +221,9 @@ def arm_summary(arm, complete, incomplete, arm_cells, rng, resamples):
     routing = routing_summary(complete)
     if routing:
         out['routing'] = routing
+    policy = policy_summary(complete)
+    if policy:
+        out['policy'] = policy
     return out
 
 
