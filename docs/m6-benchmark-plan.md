@@ -129,14 +129,14 @@ All arms use the same tasks, tools, per-task limits, graders and isolation. Sinc
 
 | Arm | Setup |
 | --- | --- |
-| Fixed Opus 5.5 (`opus-5.5`) | `--model claude-opus-5-5`, default effort (Opus 5.5 defaults to medium) |
+| Fixed Opus 5.5 (`opus-5.5`) | `--model claude-opus-5-5`, default effort: Claude Code 2.1.284 sends medium |
 | Fixed Opus 5 (`opus-5`, reference) | `--model claude-opus-5`, default effort |
-| Fixed Sonnet 5.5 (`sonnet-5.5`) | `--model claude-sonnet-5-5`, default effort (high; its levels are recalibrated from Sonnet 5's) |
+| Fixed Sonnet 5.5 (`sonnet-5.5`) | `--model claude-sonnet-5-5`, default effort: Claude Code 2.1.284 sends medium (checked at $0; it sent Sonnet 5 high) |
 | Fixed Sonnet 5 (`sonnet-5`, reference) | `--model claude-sonnet-5`, default effort |
 | Fixed Haiku 4.5 | `--model claude-haiku-4-5-20251001` (lower bound on cost) |
 | Stock Jev | pinned, unmodified. With current Claude Code it does not route, so it is reported as a fixed-Opus arm plus router overhead |
 | Compat Jev | pinned plus the one-line patch (`work/jev-router-compat`), reported with `rejected_requests`, `extra_decisions` and router usage. It routes among Jev's static tiers, including Opus 5 (reference) |
-| Aligned compat Jev (`jev-compat-o55`) | compat Jev, model-constrained and recorded separately: it discovers only the policy's tiers, so it routes among Haiku 4.5, Sonnet 5.5 and Opus 5.5 (see "Jev model alignment") |
+| Aligned compat Jev (`jev-compat-o55`) | compat Jev, model-constrained and recorded separately: it discovers only the policy's tiers, so it routes among Haiku 4.5, Sonnet 5.5 and Opus 5.5 (see "Jev model alignment"). Effort: the client doesn't know the `jev-router` sentinel and sends high, which Jev keeps (it removes effort only for Haiku), while the fixed Sonnet 5.5 and Opus 5.5 arms run at medium. Part of any Jev difference is therefore effort, not routing (2.1.284, checked at $0) |
 | ModelPilot (`modelpilot`) | policy in `docs/m6-modelpilot-policy.md`, active for this arm only (approved September 26): Sonnet 5.5 medium, stuck ladder to Sonnet 5.5 high and Opus 5.5 medium (both rungs wait for the `sonnet-5-5` thinking probe), R5 tools, limit enforced on wire cost. R3/R4 and worker drafts not implemented. Offline-verified only |
 | ModelPilot, Opus 5.5 start (`modelpilot-o55`) | the same policy with S0 = Opus 5.5 medium: one rung (Opus 5.5 high), then a stuck task stops. A tuning-split candidate for S0 (September 27) |
 
