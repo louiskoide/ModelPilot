@@ -189,6 +189,47 @@ class ParseResultTests(unittest.TestCase):
 
 
 
+class EnvironmentLockTests(unittest.TestCase):
+    def test_locks_local_dependencies_without_following_links(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            venv = root/'venv'
+            packages = venv/'lib'/'site-packages'
+            packages.mkdir(parents=True)
+            module = packages/'module.py'
+            module.write_text('')
+            outside = root/'outside'
+            outside.write_text('')
+            (packages/'link').symlink_to(outside)
+            try:
+                with mock.patch.object(bench_tasks, 'ROOT', root), mock.patch.object(bench_tasks, 'VENV', venv), mock.patch.object(
+                        bench_tasks, 'writable_site_packages', side_effect=[[str(packages)], []]):
+                    bench_tasks.lock_benchmark_environment(str(venv/'bin'/'python'))
+                self.assertEqual(packages.stat().st_mode & 0o222, 0)
+                self.assertEqual(module.stat().st_mode & 0o222, 0)
+                self.assertTrue(outside.stat().st_mode & 0o200)
+            finally:
+                packages.chmod(0o700)
+
+    def test_never_changes_a_global_environment(self):
+        with mock.patch.object(bench_tasks, 'writable_site_packages', return_value=['/global/site-packages']):
+            with self.assertRaisesRegex(ValueError, 'project'):
+                bench_tasks.lock_benchmark_environment('/global/bin/python')
+
+    def test_a_failed_lock_still_blocks_execution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            venv = Path(tmp)
+            packages = venv/'site-packages'
+            packages.mkdir()
+            try:
+                with mock.patch.object(bench_tasks, 'ROOT', venv), mock.patch.object(bench_tasks, 'VENV', venv), mock.patch.object(
+                        bench_tasks, 'writable_site_packages', return_value=[str(packages)]):
+                    with self.assertRaisesRegex(ValueError, 'still writable'):
+                        bench_tasks.lock_benchmark_environment(str(venv/'bin'/'python'))
+            finally:
+                packages.chmod(0o700)
+
+
 class SplitTests(unittest.TestCase):
     TASKS = [{'id': 'a1', 'repo': 'a'}, {'id': 'a2', 'repo': 'a'}, {'id': 'b1', 'repo': 'b'}]
 

@@ -129,6 +129,27 @@ def writable_site_packages(python):
     return [d for d in json.loads(out) if Path(d).exists() and os.access(d, os.W_OK)]
 
 
+def lock_benchmark_environment(python):
+    """Remove write permissions only inside the managed benchmark venv, then verify."""
+    writable = writable_site_packages(python)
+    if not writable:
+        return
+    root = VENV.resolve()
+    if (Path(python).absolute() != (VENV/'bin'/'python').absolute()
+            or not root.is_relative_to(ROOT.resolve())
+            or any(not Path(d).resolve().is_relative_to(root) or Path(d).is_symlink() for d in writable)):
+        raise ValueError('Writable dependencies are outside the managed project environment; '
+                         'create work/bench/py312 using bench/environment.json first.')
+    for directory in writable:
+        for parent, dirs, files in os.walk(directory, followlinks=False):
+            for path in [Path(parent), *(Path(parent)/name for name in dirs + files)]:
+                if not path.is_symlink():
+                    path.chmod(path.stat().st_mode & ~0o222)
+    remaining = writable_site_packages(python)
+    if remaining:
+        raise ValueError(f'Benchmark dependencies are still writable ({remaining[0]}). No requests sent.')
+
+
 def clean_env(python=None, home=None, tmp=None):
     """Test environment without provider credentials or user Python settings.
 
