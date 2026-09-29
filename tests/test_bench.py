@@ -110,6 +110,19 @@ class ScheduleTests(unittest.TestCase):
         for args, expected in cases:
             self.assertEqual(bench.stop_reason(*args), expected, args)
 
+    def test_only_the_pinned_client_may_run(self):
+        pinned = json.loads((bench.ROOT/'bench/environment.json').read_text())['claude_code']
+        self.assertIsNone(bench.client_problem(f'{pinned} (Claude Code)'))
+        for other in ('2.1.278 (Claude Code)', '2.1.2840 (Claude Code)', '', None):  # 4a ran 2.1.278 on another computer
+            problem = bench.client_problem(other)
+            self.assertIn(f'npm install --save-exact @anthropic-ai/claude-code@{pinned}', problem)
+
+    def test_the_manifest_records_the_code_it_ran(self):
+        revision = bench.code_revision()
+        if revision is not None:  # a Git checkout
+            self.assertRegex(revision['commit'], '^[0-9a-f]{40}$')
+            self.assertIsInstance(revision['uncommitted_changes'], bool)
+
     def test_diffs_touching_test_configuration_are_flagged(self):
         paths = ['pkg/core.py', 'conftest.py', 'tests/conftest.py', 'pyproject.toml', 'setup.cfg', 'src/sitecustomize.py',
                  'docs/pytest.ini.md', 'tox.ini']
@@ -275,6 +288,7 @@ class RunBenchTests(unittest.TestCase):
         self.assertEqual((manifest['shape'], manifest['gap_seconds'], manifest['run_budget_usd']), ('followup', 0, 1.0))
         self.assertEqual(manifest['follow_up_prompt'], bench.FOLLOW_UP)
         self.assertEqual(manifest['client_version'], '9.9 (fake)')
+        self.assertEqual(manifest['code'], bench.code_revision())  # which ModelPilot design ran
 
     def test_a_harness_crash_still_writes_the_summary(self):
         order = [task for task, _, _ in bench.schedule([{'id': n} for n in 'AB'], ['sonnet-5'], 1, 0)]

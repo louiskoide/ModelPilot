@@ -215,6 +215,27 @@ def client_version(cli):
     return subprocess.run([str(cli), '--version'], capture_output=True, text=True, timeout=30).stdout.strip()
 
 
+def client_problem(version):
+    """Why this client can't run the benchmark, or None: every arm runs the version pinned in bench/environment.json."""
+    env = json.loads((ROOT/'bench/environment.json').read_text())
+    pinned = env.get('claude_code')
+    if pinned and (version or '').split(' ')[0] != pinned:
+        return (f'Claude Code {version} is not the pinned {pinned}; every arm must run the pinned client. '
+                f'Install it with: {env["claude_code_install"]}, then put work/claude-client/node_modules/.bin first on '
+                'PATH or pass --claude.')
+    return None
+
+
+def code_revision():
+    """The commit the harness runs from, and whether its code differs from it (None outside a Git checkout)."""
+    head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True)
+    if head.returncode:
+        return None
+    changed = subprocess.run(['git', 'status', '--porcelain', '--', 'modelpilot', 'configs', 'bench'], cwd=ROOT,
+                             capture_output=True, text=True).stdout
+    return {'commit': head.stdout.strip(), 'uncommitted_changes': bool(changed.strip())}
+
+
 def resolve_client(cli):
     """The real binary behind a CLI path and its version. The installed `claude` is a symlink
     the auto-updater moves, so a run holds on to the binary it started with."""
@@ -677,7 +698,7 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
     gap = gap if shape == 'followup' else 0
     manifest = {'seed': seed, 'order': order, 'arms': {a: ARMS[a] for a in arms}, 'trials': trials,
                 'tasks': {t['id']: bench_tasks.spec_hash(t) for t in tasks}, 'client': str(cli),
-                'client_version': client_version,
+                'client_version': client_version, 'code': code_revision(),
                 'python': python_version(limits.get('python') or bench_tasks.interpreter()), 'limits': limits,
                 'preamble': PREAMBLE, 'tools': TOOLS, 'shape': shape, 'gap_seconds': gap,
                 'follow_up_prompt': FOLLOW_UP if shape == 'followup' else None, 'run_budget_usd': run_budget,
@@ -789,7 +810,13 @@ def main():
     print('Preflight passed: ' + ', '.join(f"{i} ({e['hidden_passed']} hidden)" for i, e in expected.items()), flush=True)
     runs = len(tasks) * len(arms) * args.trials
     sessions = 2 if args.shape == 'followup' else 1
+    try:
+        planned = client_problem(resolve_client(args.claude or shutil.which('claude') or 'claude')[1])
+    except OSError:
+        planned = 'No Claude Code client found.'
     if not args.live:
+        if planned:
+            print('Client: ' + planned + ' A live run would stop here.')
         shape = f'follow-up after {args.gap:g} s' if args.shape == 'followup' else 'single prompt'
         ceiling = runs * sessions * args.budget
         if args.run_budget is None:
@@ -815,6 +842,8 @@ def main():
                   'lower bound; --live asks for a TypeSafe key.')
         return
     cli, version = resolve_client(args.claude or shutil.which('claude') or 'claude')
+    if client_problem(version):
+        raise SystemExit(client_problem(version) + ' No billable requests sent.')
     try:
         bench_tasks.lock_benchmark_environment(python)
     except (OSError, ValueError) as e:

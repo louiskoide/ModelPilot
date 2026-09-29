@@ -10,5 +10,8 @@
   "pytest==8.4.2"
  ],
  "recreate": "python3.12 -m venv work/bench/py312 && work/bench/py312/bin/pip install -r <(packages above)",
- "note": "The agent and the grader both use this interpreter: its bin directory leads the agent PATH."
+ "note": "The agent and the grader both use this interpreter: its bin directory leads the agent PATH.",
+ "claude_code": "2.1.284",
+ "claude_code_install": "cd work/claude-client && npm install --save-exact @anthropic-ai/claude-code@2.1.284",
+ "claude_code_note": "Every arm runs this client (work/claude-client/node_modules/.bin first on PATH, or --claude). Older clients get Opus 5.5 refused (claude_code_version_too_old before 2.1.280) and do not know Sonnet 5.5: 2.1.278 sends it a 50 KB request at high effort, the Jev placeholder 17.7 KB (docs/m6-tuning-20260928.md). A live run refuses any other version."
 }
