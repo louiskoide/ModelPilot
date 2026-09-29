@@ -12,6 +12,7 @@ import unittest
 from unittest import mock
 from modelpilot import bench, bench_tasks
 from modelpilot.fixtures import fixture_server, scripted_response
+from modelpilot.policy_actions import MODELS as POLICY_TIERS
 from tests import test_bench_tasks as synthetic
 
 # Sonnet 5 serves the harness tests' fixed arm; Sonnet 5.5 is the ModelPilot arm's start tier. Same rates.
@@ -36,24 +37,27 @@ class ScheduleTests(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             bench.run_trial({'id': 't'}, 'modelpilot', '/nonexistent', 'claude', 'k', 'http://127.0.0.1:1', RATES)
 
-    def test_the_modelpilot_arm_gets_the_active_policy_and_the_same_limit_per_session(self):
+    def test_the_modelpilot_arm_gets_the_active_policy_jev_as_advisor_and_the_same_limit_per_session(self):
         self.assertIsNone(bench.arm_adapter('sonnet-5', 1.5, 1))
-        adapter = bench.arm_adapter('modelpilot', 1.5, 2)
+        adapter = bench.arm_adapter('modelpilot', 1.5, 2, jev_key='ts-key')
         self.assertEqual((adapter.policy.mode, adapter.tools, adapter.limit), ('active', True, 3.0))
         self.assertEqual((adapter.arm_id, adapter.model, adapter.effort), ('modelpilot', 'claude-sonnet-5-5', 'medium'))
-        self.assertEqual(bench.ARMS['modelpilot']['served_models'], ['claude-sonnet-5-5', 'claude-opus-5-5'])
-        variant = bench.arm_adapter('modelpilot-o55', 1, 1)
-        self.assertEqual((variant.arm_id, variant.model, variant.effort, variant.policy.client_model),
-                         ('modelpilot-o55', 'claude-opus-5-5', 'medium', 'claude-opus-5-5'))
-        table = bench.rates()
-        for arm in ('modelpilot', 'modelpilot-o55'):
-            self.assertTrue(all(m in table for m in bench.ARMS[arm]['served_models']))
+        self.assertIs(adapter.policy.advisor, adapter.advisor)
+        self.assertEqual((adapter.advisor.live, adapter.advisor.key, adapter.advisor.checkout),
+                         (True, 'ts-key', bench.ROOT/'work/jev-router-compat'))
+        self.assertIsNone(bench.arm_adapter('modelpilot', 1, 1).advisor)  # no key: no advice, never eligible
+        self.assertFalse(bench.arm_adapter('modelpilot', 1, 1, advisor_stub={}).advisor.live)
+        arm = bench.ARMS['modelpilot']
+        self.assertEqual((arm['served_models'], arm['models']), (['claude-opus-5-5', 'claude-sonnet-5-5'], POLICY_TIERS))
+        self.assertNotIn('modelpilot-o55', bench.ARMS)  # the start is Jev's prediction now, not a tuned variant
+        self.assertTrue(all(m in bench.rates() for m in arm['served_models']))
         with self.assertRaises(ValueError):  # Haiku targets are not implemented
             from modelpilot.modelpilot_adapter import ModelPilotAdapter
             ModelPilotAdapter(mode='active', tools=True, model='claude-haiku-4-5-20251001', effort=None)
-        manifest = bench.modelpilot_manifest(['sonnet-5', 'modelpilot', 'modelpilot-o55'], 1.0, 1)
-        self.assertEqual({a: m['parameters']['ladder'][-1] for a, m in manifest.items()},
-                         {'modelpilot': 'claude-opus-5-5/medium', 'modelpilot-o55': 'claude-opus-5-5/high'})
+        parameters = bench.modelpilot_manifest(['sonnet-5', 'modelpilot'], 1.0, 1)['modelpilot']['parameters']
+        self.assertEqual(parameters['decision_points'], ['turn_start', 'stuck_evidence'])
+        self.assertIn('claude-opus-5-5/xhigh', parameters['settings'])
+        self.assertNotIn('ladder', parameters)
         self.assertIsNone(bench.modelpilot_manifest(['sonnet-5'], 1.0, 1))
 
     def test_refused_requests_are_counted_apart_from_sent_ones(self):
@@ -92,6 +96,11 @@ class ScheduleTests(unittest.TestCase):
                  (('completed', {'subtype': 'error_max_budget_usd', 'is_error': True}, []), 'budget_stop'),
                  (('completed', {}, [{'kind': 'messages', 'status': 'transport_error'}]), 'transport_error'),
                  (('completed', {'subtype': 'error_during_execution', 'is_error': True, 'api_error_status': 400}, []), 'api_error'),
+                 # runs/bench-20260928-150510: every trial ended like this when the account ran out of credit
+                 (('completed', {'subtype': 'success', 'is_error': True, 'api_error_status': 400,
+                                 'result': 'Credit balance is too low'}, []), 'account_error'),
+                 (('completed', {'subtype': 'success', 'is_error': True, 'api_error_status': 401,
+                                 'result': 'Invalid API key · Fix external API key'}, []), 'account_error'),
                  (('completed', {'subtype': 'error_during_execution', 'is_error': True}, []), 'client_error'),
                  (('completed', {}, []), 'client_error')]
         error = {'subtype': 'success', 'is_error': True}  # how the client ends after a proxy refusal
@@ -100,6 +109,19 @@ class ScheduleTests(unittest.TestCase):
             cases.append((('completed', error, [{'kind': 'refused', 'refusal': reason}]), expected))
         for args, expected in cases:
             self.assertEqual(bench.stop_reason(*args), expected, args)
+
+    def test_only_the_pinned_client_may_run(self):
+        pinned = json.loads((bench.ROOT/'bench/environment.json').read_text())['claude_code']
+        self.assertIsNone(bench.client_problem(f'{pinned} (Claude Code)'))
+        for other in ('2.1.278 (Claude Code)', '2.1.2840 (Claude Code)', '', None):  # 4a ran 2.1.278 on another computer
+            problem = bench.client_problem(other)
+            self.assertIn(f'npm install --save-exact @anthropic-ai/claude-code@{pinned}', problem)
+
+    def test_the_manifest_records_the_code_it_ran(self):
+        revision = bench.code_revision()
+        if revision is not None:  # a Git checkout
+            self.assertRegex(revision['commit'], '^[0-9a-f]{40}$')
+            self.assertIsInstance(revision['uncommitted_changes'], bool)
 
     def test_diffs_touching_test_configuration_are_flagged(self):
         paths = ['pkg/core.py', 'conftest.py', 'tests/conftest.py', 'pyproject.toml', 'setup.cfg', 'src/sitecustomize.py',
@@ -174,10 +196,11 @@ class Clock:
 
 class FakeTrial:
     """Stands in for bench.Trial on a fake clock: fixed sessions, duration and cost."""
-    def __init__(self, name, clock, sessions=2, seconds=100, cost=.4, fail_on=None, unavailable_after=None):
+    def __init__(self, name, clock, sessions=2, seconds=100, cost=.4, fail_on=None, unavailable_after=None, account_error=False):
         self.key, self.clock, self.sessions, self.seconds, self.cost, self.fail_on = (name, 'sonnet-5', 0), clock, sessions, seconds, cost, fail_on
         self.ran, self.started, self.finished, self.record = 0, False, False, None
         self.unavailable_after, self.router_unavailable, self.closed = unavailable_after, False, False
+        self.account_error_after, self.account_error = account_error, False
 
     def step(self):
         if self.fail_on == self.ran + 1:
@@ -187,6 +210,7 @@ class FakeTrial:
         self.clock.log.append((self.key[0], self.ran + 1))
         self.ran += 1
         self.router_unavailable = self.ran == self.unavailable_after
+        self.account_error = bool(self.account_error_after)
         if self.ran == self.sessions:
             self.finish()
         return self.ran < self.sessions
@@ -264,6 +288,7 @@ class RunBenchTests(unittest.TestCase):
         self.assertEqual((manifest['shape'], manifest['gap_seconds'], manifest['run_budget_usd']), ('followup', 0, 1.0))
         self.assertEqual(manifest['follow_up_prompt'], bench.FOLLOW_UP)
         self.assertEqual(manifest['client_version'], '9.9 (fake)')
+        self.assertEqual(manifest['code'], bench.code_revision())  # which ModelPilot design ran
 
     def test_a_harness_crash_still_writes_the_summary(self):
         order = [task for task, _, _ in bench.schedule([{'id': n} for n in 'AB'], ['sonnet-5'], 1, 0)]
@@ -280,6 +305,11 @@ class RunBenchTests(unittest.TestCase):
         self.assertEqual(len(self.made), 1)
         saved = json.loads((self.out/'summary.json').read_text())
         self.assertEqual(saved['stopped'], 'jev_router_unavailable')
+
+    def test_an_anthropic_account_error_stops_the_run(self):
+        first = bench.schedule([{'id': n} for n in 'ABC'], ['sonnet-5'], 1, 0)[0][0]
+        summary = self.run_fake('ABC', fake={first: {'account_error': True, 'sessions': 1}}, shape='single')
+        self.assertEqual((summary['stopped'], summary['complete'], len(self.made)), ('anthropic_account_error', False, 1))
 
 
 class TrialTests(unittest.TestCase):

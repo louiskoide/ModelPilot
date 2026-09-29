@@ -7,14 +7,16 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
-from modelpilot import bench
+from modelpilot import bench, fixtures
 from modelpilot.bench_tools import OWNER, ToolServer, excerpt
 from modelpilot.governor import Governor
 from modelpilot.modelpilot_adapter import ModelPilotAdapter
 from tests import test_bench_tasks as synthetic
 from tests import test_bench
+from tests.test_bench_jev import ACCOUNT_CATALOG, POLICY_TIERS
 
 BROKEN = 'def last(items):\n    return None\n'
+EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 
 
 class ServerTests(unittest.TestCase):
@@ -64,7 +66,9 @@ class ServerTests(unittest.TestCase):
         error, page = self.call('expand_output', handle=result['handle'], offset=0, limit=32000)
         self.assertIn('notes.txt:100: needle 99', page['text'])
         calls = [e['payload'] for e in self.gov.journal('bench_tool')]
-        self.assertEqual([(c['tool'], c['matches'], c['truncated']) for c in calls], [('search', 200, True)])
+        self.assertEqual([(c['tool'], c.get('matches'), c.get('truncated')) for c in calls],
+                         [('search', 200, True), ('expand_output', None, None)])
+        self.assertEqual((calls[1]['characters'], calls[1]['offset'], calls[1]['more']), (len(page['text']), 0, False))
 
     def test_run_tests_reports_counts_and_feeds_the_stuck_ladder(self):
         (self.work/'pkg'/'__init__.py').write_text(BROKEN)
@@ -142,7 +146,7 @@ class ToolTrialTests(unittest.TestCase):
         record = self.modelpilot_trial('tools', script, ModelPilotAdapter(limit_usd=1, tools=True, threshold=256))
         self.assertTrue(record['passed'], record['grade'])
         routing = record['routing']
-        self.assertEqual([c['tool'] for c in routing['tools']['calls']], ['search', 'run_tests'])
+        self.assertEqual([c['tool'] for c in routing['tools']['calls']], ['search', 'expand_output', 'run_tests'])
         self.assertTrue(routing['tools']['calls'][0]['truncated'])
         self.assertTrue(routing['accounting_matches'], routing)
         self.assertTrue(record['accounting']['tokens_match'], record['accounting'])
@@ -184,71 +188,75 @@ class ToolTrialTests(unittest.TestCase):
         return [(json.loads(b)['model'], json.loads(b)['output_config']['effort'])
                 for b in self.upstream.bodies if b'"tools"' in b]
 
-    def test_the_active_arm_escalates_and_its_trials_are_benchmark_eligible(self):
-        script = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': BROKEN}}] +
-                  [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 3 +
-                  [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
-                   {'tool': 'mcp__modelpilot__run_tests', 'input': {}},
-                   {'text': 'Done.'}])
-        record = self.modelpilot_trial('active', script, bench.arm_adapter('modelpilot', 1, 1))
+    OPUS_RATES = dict(test_bench.RATES, **{'claude-opus-5-5': dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)})
+
+    def advised_trial(self, name, script, model, effort, limit=1, **kwargs):
+        """The active arm with Jev's real bridge and code, its TypeSafe answer stubbed ($0, never eligible)."""
+        stub = {'model': {'choice': model, 'confidence': .9,
+                          'probabilities': {m: .9 if m == model else .05 for m in POLICY_TIERS}},
+                'effort': {'choice': effort, 'confidence': .85,
+                           'probabilities': {e: .85 if e == effort else .0375 for e in EFFORTS}}}
+        adapter = bench.arm_adapter('modelpilot', limit, 1, advisor_stub=stub)
+        with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
+            return self.modelpilot_trial(name, script, adapter, **kwargs)
+
+    STALLED = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': BROKEN}}] +
+               [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 3)
+
+    def test_the_active_arm_jumps_straight_to_jevs_setting_and_again_on_stuck_evidence(self):
+        script = self.STALLED + [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
+                                 {'tool': 'mcp__modelpilot__run_tests', 'input': {}}, {'text': 'Done.'}]
+        record = self.advised_trial('active', script, 'claude-opus-5-5', 'xhigh', rates=self.OPUS_RATES)
         self.assertTrue(record['passed'], record['grade'])
-        self.assertEqual(self.main_loop(), [('claude-sonnet-5-5', 'medium')]*4 + [('claude-sonnet-5-5', 'high')]*3)
+        # The first request jumps from the client's Sonnet 5.5 medium straight to Jev's Opus 5.5 xhigh; three stalled
+        # suite runs are evidence it isn't enough, and the only stronger setting is Opus 5.5 max.
+        self.assertEqual(self.main_loop(), [('claude-opus-5-5', 'xhigh')]*4 + [('claude-opus-5-5', 'max')]*3)
         routing = record['routing']
-        self.assertEqual((routing['mode'], routing['benchmark_eligible'], routing['active_policy_implemented']),
-                         ('active', True, True))
-        self.assertEqual(routing['policy']['escalations'],
-                         [{'action': 'increase_effort', 'status': 'confirmed',
-                           'target_model': 'claude-sonnet-5-5', 'target_effort': 'high'}])
-        self.assertEqual((routing['policy']['kept_requests'], routing['policy']['stops']), (2, []))
+        self.assertEqual((routing['mode'], routing['benchmark_eligible'], routing['ineligible_reason']),
+                         ('active', False, 'advisor_stub'))
+        policy = routing['policy']
+        self.assertEqual([(e['action'], e['trigger'], e['status'], e['target_effort']) for e in policy['escalations']],
+                         [('jump', 'turn_start', 'confirmed', 'xhigh'), ('jump', 'stuck_evidence', 'confirmed', 'max')])
+        self.assertEqual([(d['trigger'], d['action']) for d in policy['decisions']],
+                         [('turn_start', 'jump'), ('stuck_evidence', 'jump')])
+        self.assertEqual((routing['advisor']['calls'], routing['advisor']['failures'], routing['advisor']['live']), (2, 0, False))
+        self.assertEqual(record['catalog'], {'status': 200, 'models': ['claude-opus-5-5', 'claude-sonnet-5-5',
+                                                                      'claude-haiku-4-5-20251001']})
         self.assertTrue(routing['accounting_matches'], routing)
         self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
-        self.assertEqual(record['sessions'][0]['stop'], 'success')
+        self.assertEqual(record['accounting']['cost_scope'], 'complete')  # a stub costs nothing; live Jev is unpriced
 
     def test_a_budget_refusal_ends_the_session_as_a_budget_stop(self):
         script = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}}] +
                   [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 4 + [{'text': 'Done.'}])
-        adapter = bench.arm_adapter('modelpilot', 1, 1)
-        adapter.limit = 2.5 * (100*2 + 4*10) / 1e6  # three scripted Sonnet 5 replies reach it
-        record = self.modelpilot_trial('budget', script, adapter)
+        # Jev says the client's own setting: stay; three scripted Sonnet 5.5 replies reach the limit.
+        record = self.advised_trial('budget', script, 'claude-sonnet-5-5', 'medium', limit=2.5 * (100*2 + 4*10) / 1e6)
         session, = record['sessions']
         self.assertEqual((session['stop'], session['requests']), ('budget_stop', 3), session)
         self.assertEqual((record['accounting']['refused_requests'], record['accounting']['refusal_reasons']),
                          (1, {'insufficient_budget': 1}))
-        self.assertEqual(len(self.main_loop()), 3)  # the refused request never reached the provider
-        self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
+        self.assertEqual(self.main_loop(), [('claude-sonnet-5-5', 'medium')]*3)  # the refused one never left
         self.assertEqual(record['routing']['policy']['refusals'], ['insufficient_budget'])
-        self.record_client_end = record['client']
 
-    def test_a_task_stuck_beyond_the_ladder_is_stopped_unfinished(self):
-        script = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': BROKEN}}] +
-                  [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 12 + [{'text': 'Done.'}])
-        rates = dict(test_bench.RATES, **{'claude-opus-5-5': dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)})
-        record = self.modelpilot_trial('stuck', script, bench.arm_adapter('modelpilot', 1, 1), max_turns=20, rates=rates)
+    def test_a_stuck_task_with_nothing_stronger_is_stopped_unfinished(self):
+        script = self.STALLED + [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 9 + [{'text': 'Done.'}]
+        record = self.advised_trial('stuck', script, 'claude-opus-5-5', 'max', max_turns=20, rates=self.OPUS_RATES)
         self.assertFalse(record['passed'])
         self.assertEqual(record['sessions'][0]['stop'], 'policy_stop', record['sessions'])
-        self.assertEqual(self.main_loop(), [('claude-sonnet-5-5', 'medium')]*4 + [('claude-sonnet-5-5', 'high')]*3 +
-                         [('claude-opus-5-5', 'medium')]*3)
+        self.assertEqual(self.main_loop(), [('claude-opus-5-5', 'max')]*4)
         policy = record['routing']['policy']
-        self.assertEqual([e['action'] for e in policy['escalations']], ['increase_effort', 'stronger_model'])
-        self.assertEqual((len(policy['stops']), policy['refusals']), (1, ['policy_stop:re_diagnose']))
+        self.assertEqual((len(policy['stops']), policy['refusals']), (1, ['policy_stop:no_stronger_setting']))
         self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
 
-    def test_the_opus_5_5_variant_asks_for_opus_and_raises_only_its_effort(self):
-        script = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': BROKEN}}] +
-                  [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 3 +
-                  [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
-                   {'tool': 'mcp__modelpilot__run_tests', 'input': {}},
-                   {'text': 'Done.'}])
-        rates = dict(test_bench.RATES, **{'claude-opus-5-5': dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)})
-        record = self.modelpilot_trial('o55', script, bench.arm_adapter('modelpilot-o55', 1, 1), rates=rates)
+    def test_without_a_typesafe_key_the_arm_stays_at_its_start_and_is_ineligible(self):
+        script = [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
+                  {'tool': 'mcp__modelpilot__run_tests', 'input': {}}, {'text': 'Done.'}]
+        with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
+            record = self.modelpilot_trial('no-key', script, bench.arm_adapter('modelpilot', 1, 1))
         self.assertTrue(record['passed'], record['grade'])
-        self.assertEqual(self.main_loop(), [('claude-opus-5-5', 'medium')]*4 + [('claude-opus-5-5', 'high')]*3)
-        self.assertEqual((record['arm'], record['model']), ('modelpilot-o55', 'claude-opus-5-5'))
-        policy = record['routing']['policy']
-        self.assertEqual(policy['parameters']['ladder'], ['claude-opus-5-5/medium', 'claude-opus-5-5/high'])
-        self.assertEqual([e['target_effort'] for e in policy['escalations']], ['high'])
-        self.assertTrue(record['routing']['benchmark_eligible'])
-        self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
+        self.assertEqual(set(self.main_loop()), {('claude-sonnet-5-5', 'medium')})
+        self.assertEqual((record['routing']['benchmark_eligible'], record['routing']['ineligible_reason']),
+                         (False, 'no_advisor'))
 
     def test_policy_refuses_a_live_upstream(self):
         with self.assertRaises(ValueError):

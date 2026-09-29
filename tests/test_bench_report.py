@@ -278,5 +278,119 @@ class ModelPilotPolicySummaryTests(unittest.TestCase):
         self.assertNotIn('routing', arm)
         self.assertEqual(arm['policy'], {'trials': 3, 'escalated_trials': 2, 'kept_requests': 3, 'policy_stops': 1,
                                          'escalations': {'increase_effort:confirmed': 2, 'stronger_model:confirmed': 1},
-                                         'refusals': {'policy_stop:re_diagnose': 1, 'insufficient_budget': 1}})
+                                         'refusals': {'policy_stop:re_diagnose': 1, 'insufficient_budget': 1},
+                                         'decisions': {}})
         self.assertEqual(summarize(rows, ['modelpilot'], resamples=10)['excluded_ineligible_trials'], [])
+
+
+S55, O55 = 'claude-sonnet-5-5', 'claude-opus-5-5'
+TIER_RATES = dict(RATES, **{S55: dict(input=2, output=10, read=.2, write_5m=2.5, write_1h=4),
+                            O55: dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)})
+
+
+def main_row(started, model, effort, cost, *, tools=3, policy=None):
+    out = {'kind': 'messages', 'started_unix': started, 'model': model, 'effort': effort, 'tool_count': tools,
+           'http_status': 200, 'cost_usd': cost}
+    if policy is not None:
+        out['policy'] = policy
+    return out
+
+
+class SettingPathTests(unittest.TestCase):
+    def test_steps_follow_the_main_loop_in_time_order_and_side_calls_are_apart(self):
+        rows = [main_row(3.0, O55, 'xhigh', .05), main_row(1.0, S55, 'medium', .01),
+                main_row(2.0, S55, 'medium', .02), main_row(1.5, 'claude-haiku-4-5-20251001', None, .001, tools=0),
+                main_row(4.0, O55, 'xhigh', .06)]
+        path = bench_report.setting_path(rows)
+        self.assertEqual([(s['setting'], s['requests']) for s in path['steps']],
+                         [([S55, 'medium'], 2), ([O55, 'xhigh'], 2)])
+        self.assertAlmostEqual(path['steps'][0]['cost_usd'], .03)
+        self.assertEqual(path['side']['requests'], 1)
+
+    def test_deferred_moves_are_counted_by_reason_and_idle_deferrals_are_not(self):
+        gate = {'status': 'deferred', 'reason': 'refused:Thinking history across setting changes is not validated'}
+        rows = [main_row(1.0, S55, 'medium', .01, policy={'status': 'deferred', 'reason': 'no_executable_escalation'}),
+                main_row(2.0, S55, 'medium', .01, policy=gate), main_row(3.0, S55, 'medium', .01, policy=gate),
+                main_row(4.0, O55, 'high', .01, policy={'kind': 'keep_escalated', 'status': 'reserved',
+                                                       'escalation_deferred': 'insufficient_write_reservation'})]
+        self.assertEqual(bench_report.setting_path(rows)['deferred_escalations'],
+                         {'thinking_history_unverified': 2, 'insufficient_write_reservation': 1})
+
+    def test_an_unpriced_request_makes_its_step_cost_unknown(self):
+        rows = [main_row(1.0, S55, 'medium', .01), main_row(2.0, S55, 'medium', None)]
+        self.assertIsNone(bench_report.setting_path(rows)['steps'][0]['cost_usd'])
+
+
+class CostComponentTests(unittest.TestCase):
+    def test_components_add_up_to_the_measured_cost(self):
+        rows = [row(0.0, 0, 5000, output=300), row(1.0, 5000, 400, output=120, model='claude-opus-5')]
+        parts = bench_report.cost_components(rows, RATES)
+        self.assertAlmostEqual(sum(parts.values()), rows[0]['cost_usd'] + rows[1]['cost_usd'])
+        self.assertAlmostEqual(parts['cache_read'], 5000 * .5 / 1e6)
+        self.assertAlmostEqual(parts['output'], (300 * 10 + 120 * 25) / 1e6)
+
+    def test_a_priced_request_without_the_write_split_cannot_be_split(self):
+        self.assertIsNone(bench_report.cost_components([row(0.0, 0, 5000, split=False)], RATES))
+
+
+class ModelPilotBreakdownTests(unittest.TestCase):
+    def mp(self, task, passed, cost, steps, *, stop='success', calls=()):
+        out = record(task, 'modelpilot', passed=passed, cost_usd=cost, stop=stop,
+                     routing={'kind': 'modelpilot_policy', 'mode': 'active', 'benchmark_eligible': True,
+                              'tools': {'calls': list(calls)}})
+        out['path'] = {'steps': [{'setting': list(s), 'requests': n, 'cost_usd': c} for s, n, c in steps],
+                       'side': {'requests': 0, 'cost_usd': 0.0}, 'deferred_escalations': {}}
+        return out
+
+    def test_lost_and_costlier_tasks_climbing_cost_and_excerpt_use(self):
+        records = [
+            self.mp('a', True, .10, [((S55, 'medium'), 6, .10)]),
+            self.mp('b', False, .30, [((S55, 'medium'), 4, .05), ((O55, 'xhigh'), 5, .25)],
+                    calls=[{'tool': 'run_tests', 'truncated': True}, {'tool': 'expand_output'}]),
+            self.mp('c', False, .20, [((O55, 'max'), 8, .20)], stop='policy_stop'),
+            self.mp('d', True, .40, [((S55, 'medium'), 2, .02), ((O55, 'xhigh'), 6, .38)]),
+            record('a', 'sonnet-5.5', cost_usd=.08), record('b', 'sonnet-5.5', cost_usd=.12),
+            record('c', 'sonnet-5.5', passed=False, cost_usd=.15), record('d', 'sonnet-5.5', cost_usd=.50),
+            record('c', 'opus-5.5', cost_usd=.30)]
+        result = summarize(records, ['modelpilot', 'sonnet-5.5', 'opus-5.5'], resamples=10)
+        mp, = result['modelpilot']
+        self.assertEqual(mp['outcomes'], {'passed_at_start': 1, 'finished_failing_after_climbing': 1,
+                                          'policy_stop': 1, 'passed_after_climbing': 1})
+        self.assertEqual(mp['lost_tasks'], {'b': ['finished_failing_after_climbing'], 'c': ['policy_stop']})
+        self.assertEqual(set(mp['costlier_tasks']), {'a'})
+        self.assertEqual(mp['costlier_tasks']['a']['cheapest_passing_arm'], 'sonnet-5.5')
+        self.assertEqual((mp['climbing']['trials'], mp['climbing']['requests_on_left_steps']), (2, 6))
+        self.assertAlmostEqual(mp['climbing']['cost_on_left_steps_usd'], .07)
+        self.assertEqual(mp['excerpts'], {'trials_with_cut_output': 1, 'trials_that_expanded': 1,
+                                          'failed_after_cut_test_output': 1})
+        self.assertNotIn('start_points', result)  # one ModelPilot arm: nothing to choose between
+
+    def test_outcome_without_a_recorded_path(self):
+        self.assertEqual(bench_report.outcome({'passed': True}), 'passed')
+        self.assertEqual(bench_report.outcome({'passed': False, 'sessions': [{'stop': 'turn_limit'}]}), 'turn_limit')
+
+    def test_the_start_point_ceiling_takes_each_tasks_best_start_after_the_fact(self):
+        cells_a = {'t1': {'n': 1, 'passes': 1, 'cost': .1, 'wall': 1}, 't2': {'n': 1, 'passes': 0, 'cost': .2, 'wall': 1}}
+        cells_b = {'t1': {'n': 1, 'passes': 1, 'cost': .3, 'wall': 1}, 't2': {'n': 1, 'passes': 1, 'cost': .4, 'wall': 1}}
+        ceiling = bench_report.start_point_ceiling({'a': cells_a, 'b': cells_b}, ['a', 'b'])
+        self.assertEqual(ceiling['picks'], {'t1': 'a', 't2': 'b'})
+        self.assertEqual(ceiling['best_per_task'], {'passes': 2, 'trials': 2, 'mean_cost_usd': .25})
+        self.assertEqual(ceiling['ceiling']['a']['extra_passes'], 1)
+        self.assertAlmostEqual(ceiling['ceiling']['b']['mean_cost_saving_usd'], .1)
+        self.assertAlmostEqual(ceiling['ceiling']['a']['mean_cost_saving_usd'], -.1)  # the extra pass costs more
+
+
+class RebuildPathTests(unittest.TestCase):
+    def test_a_rebuilt_run_recomputes_the_path_and_components(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp)
+            (run/'manifest.json').write_text(json.dumps({'seed': 0, 'arms': {'sonnet-5': {}}}))
+            trial = run/'t0'/'sonnet-5'/'0'
+            trial.mkdir(parents=True)
+            (trial/'trial.json').write_text(json.dumps(record('t0', 'sonnet-5')))
+            rows = [dict(row(0.0, 0, 9000), tool_count=2), dict(row(3.0, 9000, 300), tool_count=2)]
+            (trial/'observations.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
+            _, (loaded,) = bench_report.load_run(run, RATES)
+            self.assertEqual(loaded['path']['steps'][0]['requests'], 2)
+            self.assertAlmostEqual(sum(loaded['cost_components'].values()), rows[0]['cost_usd'] + rows[1]['cost_usd'])
+

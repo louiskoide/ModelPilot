@@ -1,6 +1,6 @@
 # Thinking-history probe
 
-Status (September 28, 2026): four live runs, $2.90 in total. **Sonnet 5.5 replaced Sonnet 5 as the middle tier on September 28, so only Opus 5.5 effort changes remain verified for the current ladder.** The `sonnet-5-5` suite (48 requests, about $1) must pass before the Sonnet 5.5 rungs and the Opus 5.5 → Sonnet 5.5 correction reset can rewrite requests whose history holds thinking. See "Sonnet 5.5 as the middle tier". Earlier status (September 26): every ladder rung and correction reset between Sonnet 5 and Opus 5.5 was verified. Haiku targets stay refused by the transform, and Opus 5 refused every request in its run. See Results and "Opus 5.5 as the top rung".
+Status (September 28, 2026): **every move between Sonnet 5.5 and Opus 5.5 is verified across thinking history**: Sonnet 5.5 effort changes 8/8 and Sonnet 5.5 ↔ Opus 5.5 4/4 each (`runs/thinking-probe-sonnet-5-5-20260928-133426`, $1.0562074). A second run the same afternoon stopped when the account's credit ran out; it is not evidence. See "Sonnet 5.5 as the middle tier". Earlier status (September 26): every ladder rung and correction reset between Sonnet 5 and Opus 5.5 was verified. Haiku targets stay refused by the transform, and Opus 5 refused every request in its run. See Results and "Opus 5.5 as the top rung".
 
 ## Why
 
@@ -198,3 +198,22 @@ python3 -m modelpilot.thinking_probe --suite sonnet-5-5 --repeats 2 --live --bud
 ```
 
 The dry-run plan's admission bound is $6.90 (a conservative upper bound, not a forecast). The `top-rung` run cost $1.09 for 40 requests with more Opus seeds, so expect about $1. If the suite passes, add its run and pairs to `THINKING_HISTORY_VERIFIED` and to the evidence table in `tests/test_policy_actions.py`. Two outcomes need attention. A `model_down` verdict of "accepted" with the Opus reasoning dropped is expected and unbilled. A refusal (`stop_details` category) gets its own verdict: Sonnet 5.5 declines in five categories, more than Sonnet 5.
+
+### Results (September 28)
+
+**`runs/thinking-probe-sonnet-5-5-20260928-133426`: complete.** 48/48 requests served, **$1.0562074**, 143 s. No rejections, no refusals, no retries. Client shape 2.1.284.
+
+| Case | Verdict | Cache on the switched request |
+| --- | --- | --- |
+| control/sonnet, control/opus | 4/4 each | read about 8,043–8,048, wrote about 300 new |
+| effort_up/sonnet: Sonnet 5.5 medium → high | **4/4 accepted** | read 7,871–7,873 (tools and system), rewrote only the messages (465–504), about $0.003 |
+| effort_down/sonnet: Sonnet 5.5 high → medium | **4/4 accepted** | the same |
+| model_up: Sonnet 5.5 high → Opus 5.5 medium | **4/4 accepted** | full rewrite, 8,086–8,126 written, $0.043–0.046 |
+| model_down: Opus 5.5 medium → Sonnet 5.5 medium | **4/4 accepted** | full rewrite, 8,086–8,126 written, $0.021–0.023 |
+
+`verified_transitions` = Sonnet 5.5 → Sonnet 5.5, Sonnet 5.5 → Opus 5.5 and Opus 5.5 → Sonnet 5.5. With the Opus 5.5 effort result, `THINKING_HISTORY_VERIFIED` holds all four moves between the two tiers.
+
+Unlike Sonnet 5, **a Sonnet 5.5 effort change keeps the tools and system cached and rewrites only the messages**, as Opus 5.5 does. `configs/modelpilot-policy.json` now records `effort_switch_rewrite: messages` for Sonnet 5.5 (it had assumed Sonnet 5's full rewrite), so the switch policy prices Sonnet effort changes much lower than before. Model switches rewrite everything. Evidence SHA-256: `summary.json` `6632f4e2184f1169bab69d4b124337792c5b488b944bba4353b4bf1f2d2bc176`.
+
+**`runs/thinking-probe-sonnet-5-5-20260928-150023`: not evidence.** It served 46 requests ($0.9522298 known), then the account's credit ran out. The API answered one switched request (model_up) and the next seed with HTTP 400 "Your credit balance is too low", and the run stopped. The probe recorded that switched request as a *rejected transition*, which it wasn't. Fixed: `cache_probe.send` now keeps the API's error type, and `cache_probe.account_problem` recognises billing and authentication failures. A switched request that fails that way now stops the run with no verdict (`tests/test_thinking_probe.py`).
+

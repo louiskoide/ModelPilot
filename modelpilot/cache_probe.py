@@ -181,6 +181,16 @@ def error_details(error):
     return {'error_category': 'other', 'error_hint': 'See error_type in the observation log.'}
 
 
+ACCOUNT_ERROR_TYPES = ('authentication_error', 'permission_error', 'billing_error')
+ACCOUNT_MESSAGE = re.compile(r'credit balance|purchase credits|billing|invalid x-api-key|api key', re.I)
+
+
+def account_problem(error):
+    """The account can't pay or authenticate: nothing about the request itself, so never a request outcome."""
+    return (getattr(error, 'api_error_type', None) in ACCOUNT_ERROR_TYPES or
+            bool(ACCOUNT_MESSAGE.search(getattr(error, 'safe_api_message', '') or '')))
+
+
 def send(p, c):
     headers = {'x-api-key': os.environ['ANTHROPIC_API_KEY'],
                'anthropic-version': '2023-06-01', 'content-type': 'application/json'}
@@ -198,6 +208,9 @@ def send(p, c):
             message = body.get('error', {}).get('message', '')
             if isinstance(message, str) and message:
                 error.safe_api_message = redact_message(message)
+            kind = body.get('error', {}).get('type')
+            if isinstance(kind, str):
+                error.api_error_type = kind
         except (ValueError, TypeError, AttributeError):
             pass
         finally:

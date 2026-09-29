@@ -1,0 +1,34 @@
+{
+  "about": "ModelPilot's execution policy (switch_policy.py). Jev predicts the model and effort a task needs; ModelPilot switches there directly only when the expected total cost says it pays. Models, efforts, cache behaviour and the cost model live here so they can change without code. Prices come from the rate files merged by bench.rates().",
+  "models": {
+    "claude-haiku-4-5-20251001": {
+      "rank": 0, "efforts": [], "mid_conversation_system": false, "effort_switch_rewrite": "none", "candidate": false,
+      "why_not_candidate": "Claude Code sends system-role messages mid-history after the first turn, which Haiku rejects, so a session can't be kept on Haiku (policy_actions.transform_request). Jev's probability for Haiku still counts toward the stronger models being enough."
+    },
+    "claude-sonnet-5-5": {
+      "rank": 1, "efforts": ["low", "medium", "high", "xhigh", "max"], "mid_conversation_system": true,
+      "effort_switch_rewrite": "messages", "candidate": true,
+      "effort_switch_evidence": "Sonnet 5.5 effort changes read the tools and system (7,871-7,873 tokens) and rewrote only the messages (465-504), 8/8 (runs/thinking-probe-sonnet-5-5-20260928-133426); Sonnet 5 had rewritten everything."
+    },
+    "claude-opus-5-5": {
+      "rank": 2, "efforts": ["low", "medium", "high", "xhigh", "max"], "mid_conversation_system": true,
+      "effort_switch_rewrite": "messages", "candidate": true,
+      "effort_switch_evidence": "Opus 5.5 effort changes kept tools and system cached and rewrote only the messages (runs/thinking-probe-opus-5-5-effort-20260926-132158)."
+    }
+  },
+  "effort_order": ["low", "medium", "high", "xhigh", "max"],
+  "effort_output_factor": {"low": 0.5, "medium": 1.0, "high": 1.6, "xhigh": 2.4, "max": 3.5},
+  "defaults": {"horizon_requests": 15, "new_input_tokens": 1500, "output_tokens": 1200, "output_effort": "medium"},
+  "bytes_per_token": 4,
+  "cache_write_ttl": "5m",
+  "cache_ttl_seconds": 300,
+  "recovery": {"wasted_fraction": 0.5, "redo_on": "Jev's recommendation when at least as strong as the failed setting, else the strongest candidate setting"},
+  "jev_smoothing": 0.05,
+  "hysteresis_usd": 0.02,
+  "hysteresis_scaling": "A move must beat staying by hysteresis_usd x P(the current setting is enough): full protection for a plausible current setting, almost none for one that is nearly certain to fail.",
+  "downgrade_switch_multiplier": 2.0,
+  "min_confidence_to_downgrade": 0.3,
+  "direct_jump_confidence": 0.6,
+  "decision_points": ["turn_start", "stuck_evidence"],
+  "guesses": "effort_output_factor, defaults, recovery.wasted_fraction, hysteresis_usd and downgrade_switch_multiplier are starting values, not measurements; the 4a tuning run calibrates them."
+}
