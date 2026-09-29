@@ -112,7 +112,7 @@ class ActivePolicy(ProxyPolicy):
         decision.update(point=key, profile={k: prof[k] for k in ('prefix_tokens', 'messages_tokens', 'warm')},
                         advice=None if advice is None else
                         {k: advice.get(k) for k in ('model', 'effort', 'metrics', 'usage', 'router_model', 'ms', 'stub',
-                                                    'error', 'prompt_chars', 'prompt_sha256', 'models')})
+                                                    'error', 'status', 'auth', 'prompt_chars', 'prompt_sha256', 'models')})
         with gov.db:
             gov._journal('advisor_decision', decision, task, revision)
         return decision

@@ -123,7 +123,10 @@ if (!prompt || !models.length) {
       ms: Date.now() - started,
     });
   } catch (err) {
-    write({ ...facts, error: `advice_failed: ${err?.name ?? 'Error'}`, ms: Date.now() - started });
+    // A rejected TypeSafe key fails every later call too; ModelPilot stops the run on it, as it does for Jev's router.
+    const status = Number.isInteger(err?.status) ? err.status : null;
+    const auth = status === 401 || status === 403 || /authenticat/i.test(err?.message ?? '');
+    write({ ...facts, error: `advice_failed: ${err?.name ?? 'Error'}`, status, auth, ms: Date.now() - started });
   } finally {
     clearTimeout(deadline);
   }

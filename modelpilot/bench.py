@@ -536,6 +536,10 @@ class Trial:
             path=bench_report.setting_path(rows), cost_components=bench_report.cost_components(rows, self.rates))
         if self.adapter and (self.dir/'tmp').exists():
             self.record['routing'] = self.adapter.evidence(self.dir)
+            # The ModelPilot arm's advisor uses the same TypeSafe key as Jev's router: a rejected key stops the run
+            # (jev_router_unavailable) rather than letting trials run on their fallback without advice.
+            advisor = self.record['routing'].get('advisor') or {}
+            self.router_unavailable = self.router_unavailable or bool(advisor.get('auth_failures'))
         (self.dir/'trial.json').write_text(json.dumps(self.record, indent=2) + '\n')
 
     def close(self):

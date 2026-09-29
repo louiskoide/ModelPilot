@@ -206,6 +206,7 @@ class ModelPilotAdapter:
                            parameters=parameters(self.model,self.effort))
                  if active else None,
              'advisor':{'live':live,'calls':sum(bool(a) for a in advice),'failures':sum(bool(a.get('error')) for a in advice),
+                        'auth_failures':sum(bool(a.get('auth')) for a in advice),
                         'router_usage':[a['usage'] for a in advice if a.get('usage')],'catalog':self.catalog}
                  if active else None,
              'policy_sha256':hashlib.sha256(policy_file.read_bytes()).hexdigest(),
