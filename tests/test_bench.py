@@ -349,6 +349,22 @@ class TrialTests(unittest.TestCase):
         return bench.Trial(self.task, 'sonnet-5', self.repo_case.root/'trial', '/fake/claude', 'k',
                            f'http://127.0.0.1:{self.upstream.server_port}', RATES, python=sys.executable, **options)
 
+    def test_a_rejected_advisor_key_makes_the_router_unavailable(self):
+        class RejectedKey:  # the ModelPilot arm's adapter after TypeSafe refused its key
+            key, arm_id, model = '', 'sonnet-5', 'claude-sonnet-5'
+            def verify(self): pass
+            def proxy_options(self): return {}
+            def command(self, command, proxy_url): return command
+            def environment(self, env): return env
+            def accounting(self, rows, final): return bench.accounting(rows, final)
+            def evidence(self, directory):
+                return {'kind': 'modelpilot_policy', 'advisor': {'live': True, 'calls': 1, 'failures': 1, 'auth_failures': 1}}
+        trial = self.trial(adapter=RejectedKey())
+        with self.stub(['success']):
+            trial.step()
+        self.assertTrue(trial.router_unavailable)  # run_bench then stops with jev_router_unavailable
+        trial.close()
+
     def test_follow_up_resumes_the_first_session(self):
         trial = self.trial(shape='followup', gap=0)
         with self.stub(['success', 'success']):

@@ -194,6 +194,13 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertEqual((decision['action'], decision['reason'], decision['advice']['error']),
                          ('stay', 'advice_unavailable', 'advice_failed: AbortError'))
 
+    def test_a_rejected_typesafe_key_is_recorded_as_an_auth_failure(self):
+        self.start()
+        self.advisor.answer = {'error': 'advice_failed: APIError', 'status': 401, 'auth': True}
+        self.assertEqual(self.post(messages=self.TURN)[0], 200)  # the request itself is never blocked
+        decision, = self.decisions()
+        self.assertEqual((decision['action'], decision['advice']['status'], decision['advice']['auth']), ('stay', 401, True))
+
     def test_a_downgrade_in_a_warm_long_session_is_not_worth_its_rewrite(self):
         self.start(client=O)
         long = [{'role': 'user', 'content': 'x' * 300000}]
