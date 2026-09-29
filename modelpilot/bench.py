@@ -815,11 +815,10 @@ def main():
                   'lower bound; --live asks for a TypeSafe key.')
         return
     cli, version = resolve_client(args.claude or shutil.which('claude') or 'claude')
-    writable = bench_tasks.writable_site_packages(python)
-    if writable:
-        # An agent's `pip install` would otherwise change what every later trial imports.
-        raise SystemExit(f'Benchmark site-packages is writable ({writable[0]}). Lock it first: '
-                         f'chmod -R a-w {writable[0]}')
+    try:
+        bench_tasks.lock_benchmark_environment(python)
+    except (OSError, ValueError) as e:
+        raise SystemExit(f'Cannot lock benchmark dependencies: {e}')
     key = os.environ.get('ANTHROPIC_API_KEY') or getpass.getpass('Anthropic API key (hidden): ').strip()
     problem = check_anthropic_key(key)
     if problem:
