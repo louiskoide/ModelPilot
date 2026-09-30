@@ -579,6 +579,10 @@ class PerMessageEffortTests(unittest.TestCase):
         return tp.execute(tp.plan('r', 'per-message-effort', 1, SHAPE), self.out, Budget(100), 'per-message-effort', 1,
                           transport=fake)
 
+    @staticmethod
+    def efforts(p):
+        return [(i, m['output_config']['effort']) for i, m in enumerate(p['messages']) if m.get('output_config')]
+
     def test_plan(self):
         groups = tp.plan('r', 'per-message-effort', 2, SHAPE)
         self.assertEqual(tp.planned_calls(groups), 2 * len(tp.EFFORT_CASES) * 4)
@@ -587,10 +591,19 @@ class PerMessageEffortTests(unittest.TestCase):
                          ('pm', 'after_result', [S, 'xhigh'], ['seed', 'step1', 'step2', 'step3']))
         self.assertEqual(group(groups, 'effort/opus_pm_low')['source'], [O, 'medium'])
         self.assertNotEqual(tp.step_puzzle(1), tp.step_puzzle(2))
+        # Every seed carries the client's own effort message on the note after the prompt, as Claude Code 2.1.284 does.
+        for case, home in (('effort/control', 'medium'), ('effort/native_low', 'low'), ('effort/native_xhigh', 'xhigh')):
+            request = group(groups, case)['request']
+            self.assertEqual((request['messages'][-1]['role'], request['messages'][-1]['output_config'],
+                              request['output_config']), ('system', {'effort': home}, {'effort': home}))
 
     def test_effort_messages_go_where_they_were_first_sent(self):
         messages = [{'role': 'user'}, {'role': 'system'}, {'role': 'assistant'}, {'role': 'user'}, {'role': 'system'}]
         self.assertEqual((tp.effort_anchor(messages, 'before_result'), tp.effort_anchor(messages, 'after_result')), (3, 4))
+        # Never before the client's own effort message: at a turn start it goes after the note that carries it.
+        start = [{'role': 'user'}, {'role': 'system', 'output_config': {'effort': 'medium'}}]
+        self.assertEqual((tp.effort_anchor(start, 'before_result'), tp.effort_anchor(start, 'after_result')), (2, 2))
+        self.assertEqual(tp.effort_anchor(start + messages[2:], 'before_result'), 3)
         request = {'output_config': {'effort': 'medium'}, 'messages': messages}
         out = tp.with_effort_messages(request, [(3, 'high'), (1, 'low')])
         self.assertEqual([m.get('output_config', {}).get('effort') for m in out['messages']],
@@ -603,10 +616,15 @@ class PerMessageEffortTests(unittest.TestCase):
         result = self.run_suite(fake)
         self.assertEqual((result['status'], result['calls']), ('complete', 4 * len(tp.EFFORT_CASES)))
         found = result['effort_findings']
-        self.assertEqual(found['effort/pm_xhigh']['mean_thinking_by_step'], [100, 100, 400, 400])
-        self.assertEqual(found['effort/pm_low']['mean_thinking_by_step'], [100, 100, 10, 10])
-        self.assertEqual(found['effort/top_high']['mean_thinking_by_step'], [100, 100, 200, 200])
+        thinking = {case: found[case]['mean_thinking_by_step'] for case in found}
+        self.assertEqual(thinking['effort/pm_xhigh'], [100, 100, 400, 400])
+        self.assertEqual(thinking['effort/pm_low'], [100, 100, 10, 10])
+        self.assertEqual((thinking['effort/native_low'], thinking['effort/native_xhigh']), ([10] * 4, [400] * 4))
+        self.assertEqual(thinking['effort/pm_xhigh_at_start'], [400] * 4)
+        # This fake follows the documented rule, so the client's later effort message outranks a top-level change.
+        self.assertEqual(thinking['effort/top_xhigh'], [100] * 4)
         self.assertEqual((found['effort/pm_xhigh']['step2_cache'], found['effort/pm_xhigh']['step3_cache']), (['kept'], ['kept']))
+        self.assertEqual(found['effort/pm_xhigh_at_start']['step2_cache'], ['kept'])
         self.assertEqual(found['effort/top_xhigh']['step2_cache'], ['rewritten'])
         self.assertEqual(found['effort/control']['step2_cache'], ['kept'])
         # The per-message request: top-level effort as the client sent it, the effort message before the tool result,
@@ -615,21 +633,24 @@ class PerMessageEffortTests(unittest.TestCase):
         step2, step3 = pm[2][0], pm[3][0]
         for p in (step2, step3):
             self.assertEqual(p['output_config']['effort'], 'medium')
-            index = next(i for i, m in enumerate(p['messages']) if m.get('output_config'))
+            index = next(i for i, m in enumerate(p['messages']) if m.get('output_config') and m.get('content') == [])
             self.assertEqual(p['messages'][index + 1]['role'], 'user')
             self.assertEqual(p['messages'][index - 1]['role'], 'assistant')
         self.assertEqual(step3['messages'][:len(step2['messages'])], step2['messages'][:len(step2['messages']) - 1] +
                          [step3['messages'][len(step2['messages']) - 1]])  # history only grows (the note is restrung)
-        top = [p for p, _ in fake.calls if 'effort/top_high/tool_continuation' in p['system'][0]['text']]
-        self.assertEqual([p['output_config']['effort'] for p in top], ['medium', 'medium', 'high', 'high'])
+        top = [p for p, _ in fake.calls if 'effort/top_xhigh/tool_continuation' in p['system'][0]['text']]
+        self.assertEqual([p['output_config']['effort'] for p in top], ['medium', 'medium', 'xhigh', 'xhigh'])
+        start = [p for p, _ in fake.calls if 'effort/pm_xhigh_at_start/tool_continuation' in p['system'][0]['text']]
+        self.assertEqual([self.efforts(p) for p in start[:2]],
+                         [[(1, 'medium'), (2, 'xhigh')], [(1, 'medium'), (2, 'xhigh')]])  # after the client's, and kept
         for name in ('observations.jsonl', 'summary.json'):
             text = (self.out/name).read_text()
             for secret in SECRETS:
                 self.assertNotIn(secret, text, name)
 
     def test_a_rejected_placement_ends_its_group_and_the_run_continues(self):
-        def before_result(p):
-            return any(m.get('output_config') and p['messages'][i + 1]['role'] == 'user'
+        def before_result(p):  # an effort message directly before a user message (the client's own never is)
+            return any(m.get('output_config') and m.get('content') == [] and p['messages'][i + 1]['role'] == 'user'
                        for i, m in enumerate(p['messages'][:-1]))
         result = self.run_suite(EffortTransport(reject=before_result))
         self.assertEqual(result['status'], 'complete')

@@ -234,15 +234,16 @@ class ToolTrialTests(unittest.TestCase):
         script = [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
                   {'tool': 'mcp__modelpilot__run_tests', 'input': {}}, {'text': 'Done.'}]
         with mock.patch.object(switch_policy, 'load', return_value=cfg):
-            record = self.advised_trial('per-message', script, 'claude-sonnet-5-5', 'xhigh')
+            record = self.advised_trial('per-message', script, 'claude-sonnet-5-5', 'xhigh', rates=self.OPUS_RATES)
         self.assertTrue(record['passed'], record['grade'])
         bodies = [json.loads(b) for b in self.upstream.bodies if b'"tools"' in b]
         self.assertEqual({b['output_config']['effort'] for b in bodies}, {'medium'})
         self.assertEqual({policy_actions.effective_effort(b) for b in bodies}, {'xhigh'})
-        places = [[i for i, m in enumerate(b['messages']) if m.get('output_config')] for b in bodies]
-        self.assertEqual(places, [places[0]] * len(bodies))
-        first = bodies[0]['messages']
-        self.assertEqual(first[places[0][0] + 1]['role'], 'user')  # before the turn's user message
+        ours = [[i for i, m in enumerate(b['messages']) if m.get('output_config') and m.get('content') == []] for b in bodies]
+        clients = [[i for i, m in enumerate(b['messages']) if m.get('output_config') and m.get('content') != []] for b in bodies]
+        self.assertEqual(ours, [ours[0]] * len(bodies))  # put back where it was first sent
+        self.assertEqual(len(ours[0]), 1)
+        self.assertLess(clients[0][-1], ours[0][0])  # after Claude Code's own effort message, so it holds
         self.assertEqual(record['path']['steps'], [{'setting': ['claude-sonnet-5-5', 'xhigh'], 'requests': len(bodies),
                                                     'cost_usd': record['path']['steps'][0]['cost_usd']}])
         self.assertTrue(record['accounting']['cost_complete'], record['accounting'])

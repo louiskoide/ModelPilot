@@ -77,17 +77,23 @@ CONTINUE = 'Call record_answer with the previous value plus 17.'
 LOOKBACK_POSITIONS = 20
 # Per-message effort (beta; Claude Code 2.1.284 already sends its older header spelling per-turn-control-2026-07-01): an
 # effort-only system message changes effort "from the next user turn" without invalidating the cache, where a top-level
-# change rewrites the messages. Each group seeds at home, runs step 1 there (the baseline), changes effort at step 2 and
-# continues at step 3; every step is a fresh puzzle so thinking can respond. Placement: 'before_result' puts the message
-# between the assistant's tool call and the tool result (the documented spot, if the API allows it inside a tool loop);
-# 'after_result' right after the tool result. case: (home, mode, target effort, placement)
+# change rewrites the messages. Claude Code 2.1.284 itself carries its --effort value in the system note after the prompt
+# (output_config.effort), and these seeds do too, so each case sees the client's own effort message. Each group seeds at
+# home, runs step 1 there (the baseline), changes effort at step 2 and continues at step 3; every step is a fresh puzzle so
+# thinking can respond. Modes: control (no change; native_* run the client itself at that effort, the references), top
+# (the top-level effort only, as the proxy does today), pm (an effort message at step 2), pm_start (an effort message
+# from the seed on, as at a turn start). Placement: 'before_result' before the newest user message (between the tool call
+# and its result, if the API allows it inside a tool loop), 'after_result' right after it; always after the client's
+# own effort message. case: (home, mode, target effort, placement)
 EFFORT_CASES = {'effort/control': ((S, 'medium'), 'control', 'medium', None),
-                'effort/top_high': ((S, 'medium'), 'top', 'high', None),
+                'effort/native_low': ((S, 'low'), 'control', 'low', None),
+                'effort/native_xhigh': ((S, 'xhigh'), 'control', 'xhigh', None),
                 'effort/top_xhigh': ((S, 'medium'), 'top', 'xhigh', None),
                 'effort/pm_low': ((S, 'medium'), 'pm', 'low', 'before_result'),
                 'effort/pm_high': ((S, 'medium'), 'pm', 'high', 'before_result'),
                 'effort/pm_xhigh': ((S, 'medium'), 'pm', 'xhigh', 'before_result'),
                 'effort/pm_xhigh_after': ((S, 'medium'), 'pm', 'xhigh', 'after_result'),
+                'effort/pm_xhigh_at_start': ((S, 'medium'), 'pm_start', 'xhigh', 'before_result'),
                 'effort/opus_pm_low': ((TOP, 'medium'), 'pm', 'low', 'before_result')}
 EFFORT_STEPS, EFFORT_MAX_TOKENS = 3, 8192
 
@@ -125,6 +131,8 @@ def summarize_shape(bodies, betas, client_version):
             row = {'role': m.get('role'), 'blocks': _blocks(m.get('content', []))}
             if _cache_marks(m.get('content')):
                 row['cache_control'] = _cache_marks(m.get('content'))
+            if isinstance(m.get('output_config'), dict):  # the client's own per-message effort (2.1.284 sends one)
+                row['output_config'] = sorted(m['output_config'])
             messages.append(row)
         def followed_by_system(kind):
             users = [i for i, m in enumerate(messages) if m['role'] == 'user' and
@@ -247,6 +255,8 @@ def plan(run_id, suite, repeats, client_shape):
         if suite == 'per-message-effort':
             for case, (home, mode, effort, placement) in EFFORT_CASES.items():
                 g = _group(run_id, case, 'tool_continuation', repeat, home, (home[0], effort), client_shape)
+                # The client's own effort message, as Claude Code 2.1.284 puts it on the note after the prompt.
+                g['request']['messages'][-1]['output_config'] = {'effort': home[1]}
                 g.update(steps=['seed'] + [f'step{i}' for i in range(1, EFFORT_STEPS + 1)], effort_mode=mode,
                          placement=placement)
                 groups.append(g)
@@ -647,21 +657,24 @@ def execute(groups, out, budget, suite, repeats, transport=probe.send):
         def run_effort(group):
             home, target = tuple(group['source']), group['target'][1]
             mode, placement = group['effort_mode'], group['placement']
-            client, reply = group['request'], send(group, 'seed', group['request'])
+            injections = []
+            if mode == 'pm_start':  # from the first request on, as ModelPilot would at a turn start
+                injections.append((effort_anchor(group['request']['messages'], placement), target))
+            client = group['request']
+            reply = send(group, 'seed', with_effort_messages(client, injections))
             row = rows[-1]
             outcome = {'mode': mode, 'placement': placement, 'thinking': [_thinking_tokens(row)],
                        'reads': [row['usage'].get('cache_read_input_tokens') or 0], 'entries': [_entry_tokens(row['usage'])]}
             problem = seed_problem(group['shape'], reply)
             if problem:
                 return dict(outcome, verdict='inconclusive', reason=problem)
-            injections = []
             for step in range(1, EFFORT_STEPS + 1):
                 client = puzzle_request(group, client, reply, step)
                 forwarded = client
                 if step >= 2 and mode == 'top':
                     forwarded = transform_request(client, home[0], target, allow_thinking_history=True)
-                elif mode == 'pm':
-                    if step == 2:
+                elif mode in ('pm', 'pm_start'):
+                    if step == 2 and mode == 'pm':
                         injections.append((effort_anchor(client['messages'], placement), target))
                     forwarded = with_effort_messages(client, injections)
                 reply = send(group, f'step{step}', forwarded)

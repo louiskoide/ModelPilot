@@ -278,6 +278,21 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         switch = next(c for c in turn['candidates'] if c['setting'] == f'{S}/xhigh')
         self.assertEqual(switch['switch_usd'], 0)  # an effort change through a message rewrites nothing
 
+    def test_the_message_goes_after_the_clients_own_effort_message(self):
+        """Claude Code 2.1.284 carries its --effort value on the note after the prompt; ours must come later to hold."""
+        self.start(config=self.pme_config())
+        self.advise(S, 'xhigh')
+        note = {'role': 'system', 'content': 'env', 'output_config': {'effort': 'medium'}}
+        first = self.convo(0) + [note]
+        later = first + self.convo(1)[1:]
+        self.post(messages=first, thinking=self.ADAPTIVE)
+        self.post(messages=later, thinking=self.ADAPTIVE)
+        bodies = self.forwarded()
+        self.assertEqual([self.effort_positions(b) for b in bodies],
+                         [[(1, 'medium'), (2, 'xhigh')], [(1, 'medium'), (2, 'xhigh')]])
+        self.assertEqual([policy_actions.effective_effort(b) for b in bodies], ['xhigh', 'xhigh'])
+        self.assertEqual([r.get('effective_effort') for r in self.rows()], ['xhigh', 'xhigh'])
+
     def test_a_step_back_down_adds_a_message_at_the_frontier_and_keeps_the_first(self):
         self.start(config=self.pme_config())
         self.advise(S, 'xhigh')
