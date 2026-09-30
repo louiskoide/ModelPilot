@@ -29,6 +29,14 @@
   "downgrade_switch_multiplier": 2.0,
   "min_confidence_to_downgrade": 0.3,
   "direct_jump_confidence": 0.6,
-  "decision_points": ["turn_start", "stuck_evidence"],
-  "guesses": "effort_output_factor, defaults, recovery.wasted_fraction, hysteresis_usd and downgrade_switch_multiplier are starting values, not measurements; the 4a tuning run calibrates them."
+  "decision_points": ["turn_start", "stuck_evidence", "step"],
+  "step": {
+    "enabled": true, "min_requests_between": 3, "max_per_revision": 8, "overrun_factor": 1.0,
+    "about": "Mid-task decision points (user request, September 29). A step is due when the host-run test suite flips between failing and passing (run_tests results in the ledger), or when the task's measured spend since the last decision reaches overrun_factor x that decision's forecast for the setting it kept or chose. It needs at least min_requests_between billable requests of the task since the last decision, and there are at most max_per_revision per task revision. Candidates are a turn start's plus Jev's effort on the current model, so an effort-only move is always weighed."
+  },
+  "return_reuse": {
+    "enabled": false,
+    "about": "Price a move to a setting whose own cache entry is still warm (sent within cache_ttl_seconds) as writing only what that entry doesn't cover. M0 measured returns to a warm model or effort without thinking history (runs/m0-replication-opus-5-5-20260924-214653, returns to Opus 5.5 18/18); with thinking history it is untested. Off until the effort-return probe, so a return is priced like a first switch."
+  },
+  "guesses": "effort_output_factor, defaults, recovery.wasted_fraction, hysteresis_usd, downgrade_switch_multiplier and the step spacing, cap and overrun factor are starting values, not measurements; tuning runs calibrate them."
 }

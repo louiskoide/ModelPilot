@@ -182,6 +182,19 @@ class State:
             self._event(task,revision,'observation',payload)
         return self.recommend(task)
 
+    def observations(self, task, revision, field, limit=2):
+        """The latest observations of one revision that carry `field`, newest first, with their event seq."""
+        rows = self.db.execute("SELECT seq,payload FROM events WHERE task=? AND revision=? AND kind='observation' ORDER BY seq DESC",
+                               (task,revision))
+        found = []
+        for row in rows:
+            payload = json.loads(row['payload'])
+            if field in payload:
+                found.append(dict(payload, seq=row['seq']))
+                if len(found) == limit:
+                    break
+        return found
+
     def recommend(self, task):
         row = self.get(task)
         events = self.db.execute("SELECT seq,payload FROM events WHERE task=? AND revision=? AND kind='observation' AND seq>? ORDER BY seq DESC LIMIT 6",

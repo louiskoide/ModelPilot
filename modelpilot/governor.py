@@ -192,6 +192,14 @@ class Governor:
                                      'policy': policy, 'applied': False})
         return policy
 
+    def spend(self, task, since=0):
+        """One task's requests reserved at or after `since` (a journal time) and their measured spend.
+        unknown: any of them is orphaned or settled without a price, so spent_usd is incomplete."""
+        row = self.db.execute(
+            "SELECT COUNT(*), COALESCE(SUM(actual),0), COALESCE(SUM(status='orphaned' OR (status='settled' AND actual IS NULL)),0) "
+            'FROM gov_reservations WHERE session=? AND task=? AND created>=?', (self.session, task, since)).fetchone()
+        return {'requests': row[0], 'spent_usd': row[1], 'unknown': bool(row[2])}
+
     def observe(self, task, revision, owner, observation):
         """Ledger observation plus stuck recommendation; never escalates by itself."""
         result = self.state.observe(task, revision, owner, observation)

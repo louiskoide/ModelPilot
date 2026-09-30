@@ -5,7 +5,7 @@ from pathlib import Path
 import threading
 import unittest
 from unittest import mock
-from modelpilot import policy_actions
+from modelpilot import policy_actions, switch_policy
 from modelpilot.active_policy import ActivePolicy
 from modelpilot.governed_session import OWNER
 from modelpilot.governor import Governor
@@ -42,12 +42,12 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.log = Path(self.tmp.name)/'observations.jsonl'
         self.proxy = None
 
-    def start(self, limit=5, client=S):
+    def start(self, limit=5, client=S, config=None):
         # The ledger records one limit per session, so each test uses a fresh session for its limit.
         self.session = f's{limit}'
         self.advisor = ScriptedAdvisor()
         self.proxy = ProxyServer(('127.0.0.1', 0), self.url, self.log, RATES,
-                                 policy=ActivePolicy(client, OWNER, advisor=self.advisor),
+                                 policy=ActivePolicy(client, OWNER, advisor=self.advisor, config=config),
                                  governor={'db': self.db, 'session': self.session, 'limit_usd': limit, 'task': self.task})
         self.proxy_thread = threading.Thread(target=self.proxy.serve_forever, daemon=True)
         self.proxy_thread.start()
@@ -229,6 +229,77 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertIn('the same error keeps repeating', self.advisor.calls[-1]['evidence'])
         dispatch, = self.dispatches()
         self.assertEqual((dispatch['trigger'], dispatch['status']), ('stuck_evidence', 'confirmed'))
+
+    def suite(self, *failures):
+        """Host-run test results, as bench_tools.run_tests records them in the ledger."""
+        gov = self.gov()
+        try:
+            for n in failures:
+                gov.observe(self.task, 1, OWNER, {'suite': 'suite', 'failures': n})
+        finally:
+            gov.close()
+
+    def test_the_suite_passing_is_a_step_that_can_move_back_down(self):
+        self.start()
+        self.advise(O, 'xhigh')
+        self.post(messages=self.TURN)  # the turn looks hard: straight to Opus xhigh
+        self.suite(2, 0)  # the fix works
+        self.post(messages=self.CONTINUE)
+        self.post(messages=self.CONTINUE)  # two requests since the turn decision: too soon for a step
+        self.advise(S, 'medium')
+        self.post(messages=self.CONTINUE)  # the third: a step, and the rest looks routine
+        self.post(messages=self.CONTINUE)
+        self.assertEqual(self.sent(), [(O, 'xhigh')]*3 + [(S, 'medium')]*2)
+        turn, step = self.decisions()
+        self.assertEqual((step['trigger'], step['action'], step['target'], step['step']['cause'], step['step']['requests']),
+                         ('step', 'jump', [S, 'medium'], 'tests_now_pass', 3))
+        self.assertIn(f'{O}/xhigh', step['profile']['warm_entries'])
+        self.assertEqual(len(self.advisor.calls), 2)
+        self.assertIn('the test suite now passes', self.advisor.calls[-1]['evidence'])
+        self.assertEqual([(d['trigger'], d['status']) for d in self.dispatches()],
+                         [('turn_start', 'confirmed'), ('step', 'confirmed')])
+        # Back on the client's own setting, requests are forwarded unchanged.
+        self.assertEqual(self.rows()[-1]['policy']['reason'], 'no_executable_escalation')
+
+    def test_the_suite_failing_again_is_a_step(self):
+        self.start()
+        self.advise(S, 'medium')
+        self.post(messages=self.TURN)
+        self.suite(0, 3)
+        self.advise(O, 'xhigh')
+        for _ in range(3):
+            self.post(messages=self.CONTINUE)
+        self.assertEqual(self.sent(), [(S, 'medium')]*3 + [(O, 'xhigh')])
+        step = self.decisions()[-1]
+        self.assertEqual((step['step']['cause'], step['action']), ('tests_now_fail', 'jump'))
+        self.assertIn('the test suite now fails', self.advisor.calls[-1]['evidence'])
+
+    def test_spending_past_the_forecast_is_a_step_limited_per_revision(self):
+        cfg = switch_policy.load()
+        cfg['step'].update(overrun_factor=1e-3, max_per_revision=1)  # one scripted reply overruns 0.1% of the forecast
+        self.start(config=cfg)
+        self.advise(S, 'medium')
+        self.post(messages=self.TURN)
+        for _ in range(9):
+            self.post(messages=self.CONTINUE)
+        turn, step = self.decisions()  # the cap: one step per revision
+        self.assertEqual((step['trigger'], step['action'], step['reason'], step['step']['cause']),
+                         ('step', 'stay', 'current_is_cheapest', 'spend_overrun'))
+        self.assertAlmostEqual(step['step']['spent_usd'], 3*ONE)
+        self.assertAlmostEqual(step['step']['forecast_usd'], turn['forecast_usd'])
+        self.assertIn('since the last decision (forecast $', self.advisor.calls[-1]['evidence'])
+        self.assertEqual(self.sent(), [(S, 'medium')]*10)
+
+    def test_steps_can_be_turned_off(self):
+        cfg = switch_policy.load()
+        cfg['step'].update(enabled=False)
+        self.start(config=cfg)
+        self.advise(S, 'medium')
+        self.post(messages=self.TURN)
+        self.suite(2, 0)
+        for _ in range(4):
+            self.post(messages=self.CONTINUE)
+        self.assertEqual([d['trigger'] for d in self.decisions()], ['turn_start'])
 
     def test_stuck_with_nothing_stronger_stops_the_task(self):
         self.start(client=O)
