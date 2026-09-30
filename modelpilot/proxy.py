@@ -151,6 +151,15 @@ def logged_usage(usage):
     return row
 
 
+def effective_effort(request):
+    """The effort the model runs at: the latest effort-only system message's (per-message effort), else the top-level one."""
+    for m in reversed(request.get('messages') or []):
+        if (isinstance(m, dict) and m.get('role') == 'system' and isinstance(m.get('output_config'), dict)
+                and 'effort' in m['output_config']):
+            return m['output_config']['effort']
+    return request_effort(request)
+
+
 def request_effort(request):
     """Requested effort, logged because cache entries are separate per model and effort."""
     config = request.get('output_config')
@@ -500,7 +509,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     policy_row['escalation_deferred'] = ticket['escalation_deferred']
             else:
                 policy_row = {k: outcome[k] for k in ('status', 'reason') if k in outcome}
+                if outcome.get('forward') is not None:  # the client's setting, with earlier effort messages kept
+                    request = outcome['forward']
+                    raw = json.dumps(request).encode()
+                    policy_row['rewritten'] = 'effort_messages'
         headers = clean_headers(self.headers)
+        extra_beta = (outcome.get('beta') if governed and self.server.policy is not None else None)
+        if extra_beta:
+            names = [b.strip() for b in (headers.get('anthropic-beta') or '').split(',') if b.strip()]
+            headers = {k: v for k, v in headers.items() if k.lower() != 'anthropic-beta'}
+            headers['anthropic-beta'] = ','.join(names + ([extra_beta] if extra_beta not in names else []))
         headers['Content-Length'] = str(len(raw))
         # Negotiate identity so usage inspection does not depend on client compression support.
         headers = {k: v for k, v in headers.items() if k.lower() != 'accept-encoding'}
@@ -516,11 +534,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
                'model': request.get('model') if request.get('model') in self.server.rates else 'unknown',
                'effort': request_effort(request), 'stream': bool(request.get('stream')), 'http_status': None,
                'status': 'transport_error', 'cost_usd': None}
+        effective = effective_effort(request)
+        if effective != row['effort'] and (effective is None or isinstance(effective, str) and len(effective) <= 16):
+            row['effective_effort'] = effective  # set by an effort-only system message (per-message effort)
         if policy_row is not None:
             row['policy'] = policy_row
         if ticket is not None:
             row.update(client_request_sha256=client_sha, governor_request_id=ticket['request_id'],
                        governor_status='reserved')
+        elif policy_row and policy_row.get('rewritten'):
+            row['client_request_sha256'] = client_sha
         elif governed:
             stop = self.server.active and outcome['status'] == 'stop'
             if not stop:

@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
-from modelpilot import bench, fixtures
+from modelpilot import bench, fixtures, policy_actions, switch_policy
 from modelpilot.bench_tools import OWNER, ToolServer, excerpt
 from modelpilot.governor import Governor
 from modelpilot.modelpilot_adapter import ModelPilotAdapter
@@ -225,6 +225,27 @@ class ToolTrialTests(unittest.TestCase):
         self.assertTrue(routing['accounting_matches'], routing)
         self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
         self.assertEqual(record['accounting']['cost_scope'], 'complete')  # a stub costs nothing; live Jev is unpriced
+
+    def test_per_message_effort_through_the_real_client(self):
+        """With per-message effort on, the jump to Jev's effort rides in an effort-only system message: every main-loop
+        request keeps the client's top-level effort, and the message stays where it was first sent."""
+        cfg = switch_policy.load()
+        cfg['per_message_effort']['enabled'] = True
+        script = [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
+                  {'tool': 'mcp__modelpilot__run_tests', 'input': {}}, {'text': 'Done.'}]
+        with mock.patch.object(switch_policy, 'load', return_value=cfg):
+            record = self.advised_trial('per-message', script, 'claude-sonnet-5-5', 'xhigh')
+        self.assertTrue(record['passed'], record['grade'])
+        bodies = [json.loads(b) for b in self.upstream.bodies if b'"tools"' in b]
+        self.assertEqual({b['output_config']['effort'] for b in bodies}, {'medium'})
+        self.assertEqual({policy_actions.effective_effort(b) for b in bodies}, {'xhigh'})
+        places = [[i for i, m in enumerate(b['messages']) if m.get('output_config')] for b in bodies]
+        self.assertEqual(places, [places[0]] * len(bodies))
+        first = bodies[0]['messages']
+        self.assertEqual(first[places[0][0] + 1]['role'], 'user')  # before the turn's user message
+        self.assertEqual(record['path']['steps'], [{'setting': ['claude-sonnet-5-5', 'xhigh'], 'requests': len(bodies),
+                                                    'cost_usd': record['path']['steps'][0]['cost_usd']}])
+        self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
 
     def test_a_budget_refusal_ends_the_session_as_a_budget_stop(self):
         script = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}}] +

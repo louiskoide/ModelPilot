@@ -7,12 +7,12 @@
     },
     "claude-sonnet-5-5": {
       "rank": 1, "efforts": ["low", "medium", "high", "xhigh", "max"], "mid_conversation_system": true,
-      "effort_switch_rewrite": "messages", "candidate": true,
+      "effort_switch_rewrite": "messages", "candidate": true, "per_message_effort": true,
       "effort_switch_evidence": "Sonnet 5.5 effort changes read the tools and system (7,871-7,873 tokens) and rewrote only the messages (465-504), 8/8 (runs/thinking-probe-sonnet-5-5-20260928-133426); Sonnet 5 had rewritten everything."
     },
     "claude-opus-5-5": {
       "rank": 2, "efforts": ["low", "medium", "high", "xhigh", "max"], "mid_conversation_system": true,
-      "effort_switch_rewrite": "messages", "candidate": true,
+      "effort_switch_rewrite": "messages", "candidate": true, "per_message_effort": true,
       "effort_switch_evidence": "Opus 5.5 effort changes kept tools and system cached and rewrote only the messages (runs/thinking-probe-opus-5-5-effort-20260926-132158)."
     }
   },
@@ -37,6 +37,10 @@
   "return_reuse": {
     "enabled": true, "max_positions": 25,
     "about": "Price a move to a setting whose own cache entry is still warm (sent within cache_ttl_seconds) and within reach (the conversation has grown by at most max_positions content positions since that setting was last sent) as writing only what that entry doesn't cover. Measured with thinking history in the pinned client's shape (runs/thinking-probe-returns-20260930-091128, $0.4056): returns read the home setting's whole entry 8/8, Sonnet 5.5 effort returns 7 and 25 positions back and Opus 5.5 -> Sonnet 5.5 model returns 8 back. The API documents a 20-position lookback, yet 25 was reached; farther is unmeasured, so it is priced like a first switch."
+  },
+  "per_message_effort": {
+    "enabled": false, "placement": "before_result", "beta": null,
+    "about": "Change effort with an effort-only system message (beta mid-conversation-output-config-2026-07-01; Claude Code 2.1.284 already sends the older spelling per-turn-control-2026-07-01) instead of the top-level effort, so the cached conversation stays valid: the proxy keeps the client's top-level effort, puts the message before the newest user turn (placement) and puts every earlier one back where it was first sent. An effort change then rewrites nothing (models whose per_message_effort is true); a model change still rewrites everything. beta: an extra anthropic-beta value to add, if the client's is not enough. Off until the per-message-effort probe verifies cache, effect and placement."
   },
   "guesses": "effort_output_factor, defaults, recovery.wasted_fraction, hysteresis_usd, downgrade_switch_multiplier and the step spacing, cap and overrun factor are starting values, not measurements; tuning runs calibrate them."
 }

@@ -536,3 +536,104 @@ class MainTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 tp.main(['--suite', 'smoke', '--live', '--out', str(Path(tmp)/'run')])
             send.assert_not_called()
+
+
+class EffortTransport:
+    """Scripted provider for per-message-effort groups. Thinking follows the effective effort (the latest effort
+    message, else the top-level value). The cache keeps the previous request's entry unless the top-level effort
+    left the seed's, which rewrites the messages (tools and system, 7000 tokens, stay)."""
+    THINK = {'low': 10, 'medium': 100, 'high': 200, 'xhigh': 400}
+
+    def __init__(self, reject=lambda p: False):
+        self.calls, self.entries, self.reject = [], {}, reject
+
+    def __call__(self, p, c):
+        self.calls.append((copy.deepcopy(p), dict(c)))
+        if self.reject(p):
+            raise http_error(400)
+        key = p['system'][0]['text']
+        pm = [m['output_config']['effort'] for m in p['messages'] if m.get('role') == 'system' and m.get('output_config')]
+        effort = pm[-1] if pm else p['output_config']['effort']
+        first = key not in self.entries
+        read = 0 if first else self.entries[key] if p['output_config']['effort'] == 'medium' else 7000
+        write = 7000 if first else 300
+        self.entries[key] = read + write
+        usage = dict(USAGE, cache_read_input_tokens=read, cache_creation_input_tokens=write,
+                     cache_creation={'ephemeral_5m_input_tokens': write, 'ephemeral_1h_input_tokens': 0},
+                     output_tokens_details={'thinking_tokens': self.THINK[effort]})
+        turn = sum(m['role'] == 'assistant' for m in p['messages'])
+        return {'model': p['model'], 'stop_reason': 'tool_use', 'usage': usage, 'content': [
+            {'type': 'thinking', 'thinking': 'PRIVATE-THOUGHT', 'signature': 'SIG-SECRET'},
+            {'type': 'tool_use', 'id': f'toolu_{turn + 1}', 'name': 'record_answer', 'input': {'value': 424242}}]}, 'req_fake'
+
+
+class PerMessageEffortTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_suite(self, fake):
+        return tp.execute(tp.plan('r', 'per-message-effort', 1, SHAPE), self.out, Budget(100), 'per-message-effort', 1,
+                          transport=fake)
+
+    def test_plan(self):
+        groups = tp.plan('r', 'per-message-effort', 2, SHAPE)
+        self.assertEqual(tp.planned_calls(groups), 2 * len(tp.EFFORT_CASES) * 4)
+        g = group(groups, 'effort/pm_xhigh_after')
+        self.assertEqual((g['effort_mode'], g['placement'], g['target'], g['steps']),
+                         ('pm', 'after_result', [S, 'xhigh'], ['seed', 'step1', 'step2', 'step3']))
+        self.assertEqual(group(groups, 'effort/opus_pm_low')['source'], [O, 'medium'])
+        self.assertNotEqual(tp.step_puzzle(1), tp.step_puzzle(2))
+
+    def test_effort_messages_go_where_they_were_first_sent(self):
+        messages = [{'role': 'user'}, {'role': 'system'}, {'role': 'assistant'}, {'role': 'user'}, {'role': 'system'}]
+        self.assertEqual((tp.effort_anchor(messages, 'before_result'), tp.effort_anchor(messages, 'after_result')), (3, 4))
+        request = {'output_config': {'effort': 'medium'}, 'messages': messages}
+        out = tp.with_effort_messages(request, [(3, 'high'), (1, 'low')])
+        self.assertEqual([m.get('output_config', {}).get('effort') for m in out['messages']],
+                         [None, 'low', None, None, 'high', None, None])
+        self.assertEqual(out['messages'][1], {'role': 'system', 'content': [], 'output_config': {'effort': 'low'}})
+        self.assertEqual((out['output_config'], len(request['messages'])), ({'effort': 'medium'}, 5))
+
+    def test_per_message_changes_keep_the_cache_and_top_level_ones_rewrite(self):
+        fake = EffortTransport()
+        result = self.run_suite(fake)
+        self.assertEqual((result['status'], result['calls']), ('complete', 4 * len(tp.EFFORT_CASES)))
+        found = result['effort_findings']
+        self.assertEqual(found['effort/pm_xhigh']['mean_thinking_by_step'], [100, 100, 400, 400])
+        self.assertEqual(found['effort/pm_low']['mean_thinking_by_step'], [100, 100, 10, 10])
+        self.assertEqual(found['effort/top_high']['mean_thinking_by_step'], [100, 100, 200, 200])
+        self.assertEqual((found['effort/pm_xhigh']['step2_cache'], found['effort/pm_xhigh']['step3_cache']), (['kept'], ['kept']))
+        self.assertEqual(found['effort/top_xhigh']['step2_cache'], ['rewritten'])
+        self.assertEqual(found['effort/control']['step2_cache'], ['kept'])
+        # The per-message request: top-level effort as the client sent it, the effort message before the tool result,
+        # and at the same place again one request later.
+        pm = [p for p in fake.calls if 'effort/pm_xhigh/tool_continuation' in p[0]['system'][0]['text']]
+        step2, step3 = pm[2][0], pm[3][0]
+        for p in (step2, step3):
+            self.assertEqual(p['output_config']['effort'], 'medium')
+            index = next(i for i, m in enumerate(p['messages']) if m.get('output_config'))
+            self.assertEqual(p['messages'][index + 1]['role'], 'user')
+            self.assertEqual(p['messages'][index - 1]['role'], 'assistant')
+        self.assertEqual(step3['messages'][:len(step2['messages'])], step2['messages'][:len(step2['messages']) - 1] +
+                         [step3['messages'][len(step2['messages']) - 1]])  # history only grows (the note is restrung)
+        top = [p for p, _ in fake.calls if 'effort/top_high/tool_continuation' in p['system'][0]['text']]
+        self.assertEqual([p['output_config']['effort'] for p in top], ['medium', 'medium', 'high', 'high'])
+        for name in ('observations.jsonl', 'summary.json'):
+            text = (self.out/name).read_text()
+            for secret in SECRETS:
+                self.assertNotIn(secret, text, name)
+
+    def test_a_rejected_placement_ends_its_group_and_the_run_continues(self):
+        def before_result(p):
+            return any(m.get('output_config') and p['messages'][i + 1]['role'] == 'user'
+                       for i, m in enumerate(p['messages'][:-1]))
+        result = self.run_suite(EffortTransport(reject=before_result))
+        self.assertEqual(result['status'], 'complete')
+        found = result['effort_findings']
+        self.assertEqual(found['effort/pm_high']['verdicts'], ['rejected'])
+        self.assertEqual(found['effort/pm_xhigh_after']['verdicts'], ['accepted'])
+        self.assertFalse(result['cost_complete'])

@@ -258,3 +258,26 @@ What the result changes: if near returns read home's entry and far ones don't, `
 - The away requests behaved as before: the first effort change read tools and system (7,874) and rewrote the messages; the first Opus request read nothing.
 
 Consequence: `return_reuse` is on (September 30), limited to returns at most 25 content positions after the setting was last sent (`return_reuse.max_positions`, counted by `switch_policy.content_positions`, the rule this probe used). Farther returns are priced like a first switch. Model returns more than 8 positions back and returns to Opus 5.5 are not measured separately; they fall under the same rule.
+
+## Per-message effort (built September 30; not yet run)
+
+User request, September 30: stop an effort change from making the model re-read the conversation at full price. Today the proxy changes the top-level `output_config.effort`, which invalidates the messages cache, so every effort change rewrites the whole conversation (about $0.07 on Sonnet 5.5 and $0.14 on Opus 5.5 for 30,000 tokens). The API's per-message effort (beta `mid-conversation-output-config-2026-07-01`; Claude Code 2.1.284 already sends its older spelling `per-turn-control-2026-07-01`) changes effort with an effort-only system message, `{"role": "system", "content": [], "output_config": {"effort": ...}}`, "from the next user turn" and without invalidating the cache. The docs add that lowering effort this way is reliable and raising it works best for large jumps.
+
+The `per-message-effort` suite checks what the proxy would rely on, in the client's request shape with thinking history. Each group seeds on the home setting, runs step 1 there (the baseline), changes effort at step 2 and continues at step 3. Every step is a fresh puzzle in the tool result, so thinking can respond to effort, and `output_tokens_details.thinking_tokens` measures it.
+
+| Case | Change at step 2 | Question |
+| --- | --- | --- |
+| `effort/control` | none (Sonnet 5.5 medium throughout) | Baseline thinking and cache |
+| `effort/top_high`, `effort/top_xhigh` | top-level effort, as the proxy does today | Reference effect; the messages cache is rewritten |
+| `effort/pm_low`, `effort/pm_high`, `effort/pm_xhigh` | effort message before the tool result | Accepted inside a tool loop? Cache kept? Does thinking move as with the top-level change? |
+| `effort/pm_xhigh_after` | effort message right after the tool result | The fallback placement, and when it takes effect (step 2 or step 3) |
+| `effort/opus_pm_low` | effort message on Opus 5.5 (medium → low) | The same on the top tier |
+
+Each group records thinking tokens per step, whether steps 2 and 3 read everything the previous request had cached (`step2_cache`, `step3_cache`: `kept` or `rewritten`) and the verdict; `effort_findings` in the summary averages thinking by step per case. 8 cases × 2 repeats × 4 requests = 64 requests. Forecast about $1 (seeds about $0.023, xhigh steps up to about $0.04; step `max_tokens` 8,192); the admission ceiling ($18) assumes every request writes everything and uses its whole output allowance.
+
+```sh
+python3 -m modelpilot.thinking_probe --suite per-message-effort                    # plan only, $0
+python3 -m modelpilot.thinking_probe --suite per-message-effort --live --budget 3  # your own Terminal; hidden key prompt
+```
+
+What the result decides: the proxy side is built (`per_message_effort` in `configs/modelpilot-policy.json`, off). It is turned on with the placement that is accepted and keeps the cache, only if raising effort through a message moves thinking about as far as the top-level change does; a 400 about the beta would set `per_message_effort.beta`.

@@ -24,7 +24,7 @@ import threading
 import time
 from . import switch_policy
 from .fixture_dispatch import Dispatcher, ProxyPolicy
-from .policy_actions import escalation_proposal, transform_request
+from .policy_actions import effort_anchor, escalation_proposal, transform_request, with_effort_messages
 from .proxy import request_effort
 
 SIGNALS = {'repeated_error': 'the same error keeps repeating', 'edit_oscillation': 'edits keep going back and forth',
@@ -48,7 +48,25 @@ def parameters(model, effort, config=None):
             'config_sha256': hashlib.sha256(switch_policy.CONFIG.read_bytes()).hexdigest(),
             'admission': 'measured spend below the per-task limit; a move also needs the limit to cover its full '
                          'rebuild (request bytes/3 tokens at the dearest write rate), not its output allowance',
-            'not_implemented': ['per-message effort', 'Haiku targets', 'worker drafts (lever 3)']}
+            'per_message_effort': {k: cfg['per_message_effort'][k] for k in ('enabled', 'placement', 'beta')},
+            'not_implemented': (['per-message effort'] if not cfg['per_message_effort']['enabled'] else [])
+                               + ['Haiku targets', 'worker drafts (lever 3)']}
+
+
+def normalized(message):
+    """A message as the prompt cache sees it, whatever form the client resends it in: Claude Code turns an earlier
+    system note from a text block with a cache marker into a plain string."""
+    content = message.get('content')
+    if isinstance(content, list):
+        content = [{k: v for k, v in b.items() if k != 'cache_control'} if isinstance(b, dict) else b for b in content]
+        if len(content) == 1 and isinstance(content[0], dict) and set(content[0]) == {'type', 'text'} \
+                and content[0]['type'] == 'text':
+            content = content[0]['text']
+    return {'role': message.get('role'), 'content': content}
+
+
+def prefix_digest(messages):
+    return hashlib.sha256(json.dumps([normalized(m) for m in messages], sort_keys=True).encode()).hexdigest()
 
 
 def user_turns(request):
@@ -75,6 +93,9 @@ class ActivePolicy(ProxyPolicy):
         self.catalog, self.prompt_prefix = [], ''  # set by the adapter once the trial is set up
         # task -> {setting: (unix time, prefix tokens, content positions)}: where each setting's cache entry ends
         self.last_sent, self.lock = {}, threading.Lock()
+        # task -> [(index in the client's messages, effort)]: effort messages sent; task -> (message count, digest) of the
+        # previous main-loop request, to see that the client only appended since
+        self.effort_messages, self.history = {}, {}
 
     def check_upstream(self, origin):
         pass  # ProxyServer accepts only direct Anthropic HTTPS or loopback HTTP (offline tests).
@@ -95,8 +116,13 @@ class ActivePolicy(ProxyPolicy):
         with self.lock:
             sent = dict(self.last_sent.get(task, {}))
         reach = self.config['return_reuse']['max_positions']
-        return {switch_policy._label(s): tokens for s, (at, tokens, then) in sent.items()
-                if now - at <= self.config['cache_ttl_seconds'] and positions - then <= reach}
+        live = sorted(((at, s, tokens) for s, (at, tokens, then) in sent.items()
+                       if now - at <= self.config['cache_ttl_seconds'] and positions - then <= reach), key=lambda e: e[0])
+        out = {switch_policy._label(s): tokens for _, s, tokens in live}
+        for _, s, tokens in live:  # per-message effort: a model's cache doesn't depend on its effort ('model/*')
+            if switch_policy.per_message(self.config, s[0]):
+                out[f'{s[0]}/*'] = tokens  # the newest entry for that model wins
+        return out
 
     def sent(self, task, setting, now, tokens, positions):
         with self.lock:
@@ -175,6 +201,53 @@ class ActivePolicy(ProxyPolicy):
         return decision
 
     def plan(self, gov, rates, task, request):
+        """The decision (_plan), then, with per-message effort on, the body rewritten so effort is carried by effort-only
+        system messages and the top-level effort stays the client's: the cached conversation then survives an effort
+        change. A deferral that must still carry earlier effort messages gets a 'forward' body."""
+        result = self._plan(gov, rates, task, request)
+        if not self.config['per_message_effort']['enabled'] or result.get('status') in ('stop', 'not_main_loop'):
+            return result
+        admitted = result.get('status') == 'admitted'
+        if admitted:
+            ticket = result.get('proposal') if result.get('kind') == 'escalation' else result
+            setting = (ticket['target_model'], ticket['target_effort'])
+        else:
+            setting = (request['model'], request_effort(request))
+        body = self.carry_effort(task, request, result['request'] if admitted else request, setting)
+        if body is None:
+            return result
+        beta = self.config['per_message_effort']['beta']
+        extra = {'beta': beta} if beta else {}
+        return dict(result, request=body, **extra) if admitted else dict(result, forward=body, **extra)
+
+    def carry_effort(self, task, request, body, setting):
+        """body with the task's effort messages, top-level effort set back to the client's; a new effort message at
+        this request's frontier when the setting's effort differs from the one in effect. None: nothing to change."""
+        model, effort = setting
+        messages = request.get('messages') or []
+        if (not switch_policy.per_message(self.config, model) or (request.get('thinking') or {}).get('type') != 'adaptive'
+                or len(body.get('messages') or []) != len(messages) or effort is None):
+            return None  # not supported here: the top-level effort (the caller's body) carries it
+        client_effort = request_effort(request)
+        with self.lock:
+            sent, seen = self.effort_messages.get(task, []), self.history.get(task)
+            if seen and (len(messages) < seen[0] or prefix_digest(messages[:seen[0]]) != seen[1]):
+                sent = []  # the client rewrote its history (e.g. compaction): the cache is gone anyway, start over
+            self.history[task] = (len(messages), prefix_digest(messages))
+            current = sent[-1][1] if sent else client_effort
+            if effort != current:
+                anchor = effort_anchor(messages, self.config['per_message_effort']['placement'])
+                if sent and anchor <= sent[-1][0]:
+                    sent = sent[:-1]  # a second change at the same frontier replaces the first
+                if effort != (sent[-1][1] if sent else client_effort):
+                    sent = sent + [(anchor, effort)]
+            self.effort_messages[task] = sent
+        if not sent:
+            return None  # the client's own effort is in effect and nothing was ever changed
+        return with_effort_messages(dict(body, output_config=dict(body.get('output_config') or {}, effort=client_effort)),
+                                    sent)
+
+    def _plan(self, gov, rates, task, request):
         """Returns a ticket for an applied request, a stop, or a deferral dict (forward the original)."""
         if request.get('model') != self.client_model or not request.get('tools'):
             return {'status': 'not_main_loop'}

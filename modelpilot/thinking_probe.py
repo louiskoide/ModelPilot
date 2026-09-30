@@ -23,13 +23,14 @@ import urllib.error
 import uuid
 from . import cache_probe as probe
 from .cache_replication import HAIKU as H, OPUS_5_5, RATES, SONNET_5_5, SOURCE, Budget
-from .policy_actions import MODELS as POLICY_MODELS, transform_request
+from .policy_actions import (MODELS as POLICY_MODELS, PLACEMENTS, effort_anchor, effort_message, transform_request,
+                             with_effort_messages)
 from .switch_policy import content_positions
 
 ROOT = Path(__file__).resolve().parents[1]
 SHAPE_FIXTURE = ROOT/'tests/fixtures/claude-2.1.284-shape.json'
 FAKE_KEY = 'sk-ant-offline-fixture-not-a-key'
-SUITES = ('smoke', 'transitions', 'top-rung', 'opus-5-5-effort', 'sonnet-5-5', 'returns')
+SUITES = ('smoke', 'transitions', 'top-rung', 'opus-5-5-effort', 'sonnet-5-5', 'returns', 'per-message-effort')
 SHAPES = ('tool_continuation', 'new_turn')
 PREFIX_LINES, SEED_MAX_TOKENS, SWITCH_MAX_TOKENS = 260, 4096, 2048
 PUZZLE = ('Find the smallest positive integer n that leaves remainder 3 when divided by 7, remainder 4 when '
@@ -74,6 +75,29 @@ RETURN_CASES = {'return/effort_near': ((S, 'medium'), (S, 'high'), 1, False),
 NEXT_STEP = 'Recorded. Next, call record_answer with the previous value plus 17.'
 CONTINUE = 'Call record_answer with the previous value plus 17.'
 LOOKBACK_POSITIONS = 20
+# Per-message effort (beta; Claude Code 2.1.284 already sends its older header spelling per-turn-control-2026-07-01): an
+# effort-only system message changes effort "from the next user turn" without invalidating the cache, where a top-level
+# change rewrites the messages. Each group seeds at home, runs step 1 there (the baseline), changes effort at step 2 and
+# continues at step 3; every step is a fresh puzzle so thinking can respond. Placement: 'before_result' puts the message
+# between the assistant's tool call and the tool result (the documented spot, if the API allows it inside a tool loop);
+# 'after_result' right after the tool result. case: (home, mode, target effort, placement)
+EFFORT_CASES = {'effort/control': ((S, 'medium'), 'control', 'medium', None),
+                'effort/top_high': ((S, 'medium'), 'top', 'high', None),
+                'effort/top_xhigh': ((S, 'medium'), 'top', 'xhigh', None),
+                'effort/pm_low': ((S, 'medium'), 'pm', 'low', 'before_result'),
+                'effort/pm_high': ((S, 'medium'), 'pm', 'high', 'before_result'),
+                'effort/pm_xhigh': ((S, 'medium'), 'pm', 'xhigh', 'before_result'),
+                'effort/pm_xhigh_after': ((S, 'medium'), 'pm', 'xhigh', 'after_result'),
+                'effort/opus_pm_low': ((TOP, 'medium'), 'pm', 'low', 'before_result')}
+EFFORT_STEPS, EFFORT_MAX_TOKENS = 3, 8192
+
+
+def step_puzzle(step):
+    """A fresh puzzle for each step, so the model has something to think about at every effort level."""
+    a, b, c, d = (step * 3 + 1) % 7, (step * 5 + 2) % 11, (step * 7 + 3) % 13, (step * 11 + 4) % 17
+    return (f'find the smallest positive integer n that leaves remainder {a} when divided by 7, {b} when divided by '
+            f'11, {c} when divided by 13 and {d} when divided by 17. Work it out carefully, then call record_answer '
+            'with n. Do not state the answer in text.')
 
 
 def _blocks(content):
@@ -220,6 +244,13 @@ def plan(run_id, suite, repeats, client_shape):
             for case, (source, target) in O55_CASES.items():
                 groups.append(_group(run_id, case, 'new_turn', repeat, source, target, client_shape))
             continue
+        if suite == 'per-message-effort':
+            for case, (home, mode, effort, placement) in EFFORT_CASES.items():
+                g = _group(run_id, case, 'tool_continuation', repeat, home, (home[0], effort), client_shape)
+                g.update(steps=['seed'] + [f'step{i}' for i in range(1, EFFORT_STEPS + 1)], effort_mode=mode,
+                         placement=placement)
+                groups.append(g)
+            continue
         if suite == 'returns':
             for case, (home, away, count, anchored) in RETURN_CASES.items():
                 g = _group(run_id, case, 'tool_continuation', repeat, home, away, client_shape)
@@ -325,6 +356,28 @@ def with_anchor(request, index):
     return p
 
 
+def puzzle_request(group, request, response, step):
+    """The client's next request with the next puzzle: in the tool result, or as a user turn if the reply ended."""
+    p = copy.deepcopy(request)
+    p['max_tokens'] = EFFORT_MAX_TOKENS
+    content = copy.deepcopy(response['content'])
+    p['messages'].append({'role': 'assistant', 'content': content})
+    uses = [b for b in content if b.get('type') == 'tool_use']
+    text = 'Recorded. Next puzzle: ' + step_puzzle(step)
+    if uses:
+        p['messages'].append({'role': 'user', 'content': [
+            {'type': 'tool_result', 'tool_use_id': b['id'], 'content': text} for b in uses]})
+    else:
+        p['messages'].append({'role': 'user', 'content': [{'type': 'text', 'text': text}]})
+    if group['system_after_tool_result' if uses else 'system_after_prompt']:
+        _append_system(p['messages'])
+    return p
+
+
+def _thinking_tokens(row):
+    return ((row.get('usage') or {}).get('output_tokens_details') or {}).get('thinking_tokens')
+
+
 def _entry_tokens(usage):
     return (usage.get('cache_read_input_tokens') or 0) + (usage.get('cache_creation_input_tokens') or 0)
 
@@ -391,6 +444,8 @@ def max_reserve(groups):
         for step, role in enumerate(g['steps'][1:] if 'away_requests' in g else (), start=1):
             model = g['target'][0] if role == 'away' else g['source'][0]
             total += estimate(size + step*SEED_MAX_TOKENS*4, SWITCH_MAX_TOKENS, model)
+        for step in range(1, len(g['steps']) if 'effort_mode' in g else 1):  # a per-message-effort group
+            total += estimate(size + step*EFFORT_MAX_TOKENS*4, EFFORT_MAX_TOKENS, g['source'][0])
     return total
 
 
@@ -402,7 +457,7 @@ def verdicts(groups, outcomes):
         v = {'case': g['case'], 'shape': g['shape'], 'repeat': g['repeat'], 'source': g['source'], 'target': g['target']}
         v.update(outcomes.get(g['name']) or {'verdict': 'not_run'})
         # A return group is its own control: each away request continues the previous one on the same setting.
-        if ('away_requests' not in g and g['case'] not in CONTROL_CASES
+        if ('away_requests' not in g and 'effort_mode' not in g and g['case'] not in CONTROL_CASES
                 and v['verdict'] in ('accepted', 'rejected', 'refused')):
             model = g['target'][0]
             seen = controls.get((model, 'single_turn' if model == H else g['shape'], g['repeat']))
@@ -452,6 +507,28 @@ def return_findings(verdict_rows):
     return found
 
 
+def effort_findings(verdict_rows):
+    """Per effort case: accepted repeats, whether steps 2 and 3 kept the cache, and mean thinking tokens by step."""
+    found = {}
+    for v in verdict_rows:
+        if v['case'] not in EFFORT_CASES:
+            continue
+        f = found.setdefault(v['case'], {'repeats': 0, 'accepted': 0, 'verdicts': [], 'step2_cache': [],
+                                         'step3_cache': [], 'thinking': []})
+        f['repeats'] += 1
+        f['verdicts'].append(v['verdict'])
+        f['accepted'] += v['verdict'] == 'accepted'
+        for key in ('step2_cache', 'step3_cache'):
+            if v.get(key):
+                f[key].append(v[key])
+        if v.get('thinking'):
+            f['thinking'].append(v['thinking'])
+    for f in found.values():
+        rows = [t for t in f['thinking'] if len(t) == EFFORT_STEPS + 1 and all(x is not None for x in t)]
+        f['mean_thinking_by_step'] = [sum(t[i] for t in rows) / len(rows) for i in range(EFFORT_STEPS + 1)] if rows else None
+    return found
+
+
 def execute(groups, out, budget, suite, repeats, transport=probe.send):
     """Sequential, no retries or threads. A switched-request 400 is an outcome; anything else unexpected stops."""
     rows, outcomes = [], {}
@@ -474,6 +551,8 @@ def execute(groups, out, budget, suite, repeats, transport=probe.send):
         result['verified_transitions'] = verified_transitions(result)
         if suite == 'returns':
             result['return_findings'] = return_findings(result['verdicts'])
+        if suite == 'per-message-effort':
+            result['effort_findings'] = effort_findings(result['verdicts'])
         tmp = out/'summary.tmp'
         tmp.write_text(json.dumps(result, indent=2)+'\n')
         tmp.replace(out/'summary.json')
@@ -565,8 +644,47 @@ def execute(groups, out, budget, suite, repeats, transport=probe.send):
                         return_write=last['usage'].get('cache_creation_input_tokens') or 0,
                         return_reuse=return_reuse(home_entry, read))
 
+        def run_effort(group):
+            home, target = tuple(group['source']), group['target'][1]
+            mode, placement = group['effort_mode'], group['placement']
+            client, reply = group['request'], send(group, 'seed', group['request'])
+            row = rows[-1]
+            outcome = {'mode': mode, 'placement': placement, 'thinking': [_thinking_tokens(row)],
+                       'reads': [row['usage'].get('cache_read_input_tokens') or 0], 'entries': [_entry_tokens(row['usage'])]}
+            problem = seed_problem(group['shape'], reply)
+            if problem:
+                return dict(outcome, verdict='inconclusive', reason=problem)
+            injections = []
+            for step in range(1, EFFORT_STEPS + 1):
+                client = puzzle_request(group, client, reply, step)
+                forwarded = client
+                if step >= 2 and mode == 'top':
+                    forwarded = transform_request(client, home[0], target, allow_thinking_history=True)
+                elif mode == 'pm':
+                    if step == 2:
+                        injections.append((effort_anchor(client['messages'], placement), target))
+                    forwarded = with_effort_messages(client, injections)
+                reply = send(group, f'step{step}', forwarded)
+                row = rows[-1]
+                if reply is None:
+                    return dict(outcome, verdict='rejected', reason=f'step{step}_rejected', api_error=row.get('api_error'))
+                if reply.get('stop_reason') == 'refusal':
+                    return dict(outcome, verdict='inconclusive', reason=f'step{step}_refused:{_refusal_category(reply)}')
+                outcome['thinking'].append(_thinking_tokens(row))
+                outcome['reads'].append(row['usage'].get('cache_read_input_tokens') or 0)
+                outcome['entries'].append(_entry_tokens(row['usage']))
+            reads, entries = outcome['reads'], outcome['entries']
+            # Kept: the step read everything the previous request had cached; else part of it was rewritten.
+            return dict(outcome, verdict='accepted', injections=[[i, e] for i, e in injections],
+                        step2_cache='kept' if reads[2] >= entries[1] else 'rewritten',
+                        step3_cache='kept' if reads[3] >= entries[2] else 'rewritten')
+
         try:
             for group in groups:
+                if 'effort_mode' in group:
+                    outcomes[group['name']] = run_effort(group)
+                    summary()
+                    continue
                 if not group['steps']:
                     record(dict(group=group['name'], case=group['case'], shape=group['shape'], repeat=group['repeat'],
                                 role='switched', status='transform_refused', reason=group['refused']))
@@ -650,7 +768,8 @@ def main(argv=None):
     manifest = dict(run_id=rid, suite=args.suite, repeats=repeats, live=args.live, calls=calls, budget_usd=args.budget,
                     max_reserve_usd=max_reserve(groups), rates=RATES, pricing_source=SOURCE, pricing_checked='2026-09-24',
                     shape=shape, prompts=PROMPTS, follow_up=FOLLOW_UP, controls=CONTROLS, transitions=TRANSITIONS,
-                    opus_5_5_cases=O55_CASES, return_cases=RETURN_CASES, next_step=NEXT_STEP, groups=groups,
+                    opus_5_5_cases=O55_CASES, return_cases=RETURN_CASES, next_step=NEXT_STEP, effort_cases=EFFORT_CASES,
+                    step_puzzles=[step_puzzle(i) for i in range(1, EFFORT_STEPS + 1)], groups=groups,
                     method='Seed at the source setting; continue with its content passed back unchanged, transformed '
                            'by policy_actions.transform_request (Opus 5.5: effort edited directly). Switched requests '
                            'keep the source model\'s beta header, as the proxy would. No retries.')

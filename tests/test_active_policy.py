@@ -239,6 +239,101 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         finally:
             gov.close()
 
+    def pme_config(self, **changes):
+        cfg = switch_policy.load()
+        cfg['per_message_effort'].update(dict(enabled=True), **changes)
+        return cfg
+
+    @staticmethod
+    def convo(rounds, first='go'):
+        """A conversation that grows by one tool round each time, as Claude Code's does."""
+        messages = [{'role': 'user', 'content': first}]
+        for i in range(rounds):
+            messages += [{'role': 'assistant', 'content': [{'type': 'tool_use', 'id': f't{i}', 'name': 'Bash', 'input': {}}]},
+                         {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': f't{i}', 'content': 'x'}]}]
+        return messages
+
+    def forwarded(self):
+        return [json.loads(b) for b in self.upstream.bodies]
+
+    def effort_positions(self, body):
+        return [(i, m['output_config']['effort']) for i, m in enumerate(body['messages']) if m.get('output_config')]
+
+    ADAPTIVE = {'type': 'adaptive'}
+
+    def test_per_message_effort_keeps_the_top_level_effort_and_puts_each_message_back(self):
+        self.start(config=self.pme_config())
+        self.advise(S, 'xhigh')
+        self.post(messages=self.convo(0), thinking=self.ADAPTIVE)  # turn start: straight to Sonnet xhigh
+        self.post(messages=self.convo(1), thinking=self.ADAPTIVE)
+        self.post(messages=self.convo(2), thinking=self.ADAPTIVE)
+        bodies = self.forwarded()
+        self.assertEqual([b['output_config']['effort'] for b in bodies], ['medium'] * 3)  # the cache key never moves
+        self.assertEqual([self.effort_positions(b) for b in bodies], [[(0, 'xhigh')]] * 3)  # first, and kept there
+        self.assertEqual([policy_actions.effective_effort(b) for b in bodies], ['xhigh'] * 3)
+        rows = self.rows()
+        self.assertEqual([(r['effort'], r.get('effective_effort')) for r in rows], [('medium', 'xhigh')] * 3)
+        turn, = self.decisions()
+        self.assertEqual((turn['action'], turn['target']), ('jump', [S, 'xhigh']))
+        switch = next(c for c in turn['candidates'] if c['setting'] == f'{S}/xhigh')
+        self.assertEqual(switch['switch_usd'], 0)  # an effort change through a message rewrites nothing
+
+    def test_a_step_back_down_adds_a_message_at_the_frontier_and_keeps_the_first(self):
+        self.start(config=self.pme_config())
+        self.advise(S, 'xhigh')
+        self.post(messages=self.convo(0), thinking=self.ADAPTIVE)
+        self.suite(2, 0)
+        for rounds in (1, 2):
+            self.post(messages=self.convo(rounds), thinking=self.ADAPTIVE)
+        self.advise(S, 'low', effort_p=.9)
+        self.post(messages=self.convo(3), thinking=self.ADAPTIVE)  # the third since the decision: a step
+        self.post(messages=self.convo(4), thinking=self.ADAPTIVE)
+        step = self.decisions()[-1]
+        self.assertEqual((step['trigger'], step['target']), ('step', [S, 'low']))
+        last = self.forwarded()[-1]
+        # The step's message went before that request's newest user turn (index 6 of the client's messages).
+        self.assertEqual(self.effort_positions(last), [(0, 'xhigh'), (7, 'low')])
+        self.assertEqual((last['output_config']['effort'], policy_actions.effective_effort(last)), ('medium', 'low'))
+
+    def test_a_model_jump_carries_its_effort_in_a_message(self):
+        self.start(config=self.pme_config())
+        self.advise(O, 'xhigh')
+        self.post(messages=self.convo(0), thinking=self.ADAPTIVE)
+        body, = self.forwarded()
+        self.assertEqual((body['model'], body['output_config']['effort'], self.effort_positions(body)),
+                         (O, 'medium', [(0, 'xhigh')]))
+
+    def test_a_rewritten_history_drops_the_old_messages(self):
+        self.start(config=self.pme_config())
+        self.advise(S, 'xhigh')
+        self.post(messages=self.convo(0), thinking=self.ADAPTIVE)
+        self.post(messages=self.convo(1), thinking=self.ADAPTIVE)
+        compacted = self.convo(1, first='summary of the earlier conversation')
+        self.post(messages=compacted, thinking=self.ADAPTIVE)
+        last = self.forwarded()[-1]
+        self.assertEqual(self.effort_positions(last), [(2, 'xhigh')])  # a fresh one at the new frontier
+        # Claude Code resending an earlier system note as a string is not a rewrite.
+        noted = self.convo(2) + [{'role': 'system', 'content': [{'type': 'text', 'text': 'n', 'cache_control': {'type': 'ephemeral'}}]}]
+        again = self.convo(3)
+        again[5:5] = [{'role': 'system', 'content': 'n'}]
+        self.post(messages=noted, thinking=self.ADAPTIVE)
+        self.post(messages=again, thinking=self.ADAPTIVE)
+        self.assertEqual(self.effort_positions(self.forwarded()[-1]), self.effort_positions(self.forwarded()[-2]))
+
+    def test_without_adaptive_thinking_or_when_off_the_top_level_effort_is_used(self):
+        self.start(config=self.pme_config())
+        self.advise(S, 'xhigh')
+        self.post(messages=self.convo(0))  # no thinking field: per-message effort is not available
+        body, = self.forwarded()
+        self.assertEqual((body['output_config']['effort'], self.effort_positions(body)), ('xhigh', []))
+
+    def test_a_configured_beta_is_added_to_the_clients(self):
+        beta = 'mid-conversation-output-config-2026-07-01'
+        self.start(config=self.pme_config(beta=beta))
+        self.advise(S, 'xhigh')
+        self.post(messages=self.convo(0), thinking=self.ADAPTIVE)
+        self.assertEqual(self.upstream.received[-1]['beta'], beta)
+
     def test_the_suite_passing_is_a_step_that_can_move_back_down(self):
         self.start()
         self.advise(O, 'xhigh')

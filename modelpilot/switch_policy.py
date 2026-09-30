@@ -61,6 +61,11 @@ def load(path=CONFIG):
                          'overrun_factor > 0')
     if type(cfg['return_reuse']['enabled']) is not bool or not _count(cfg['return_reuse']['max_positions'], 0):
         raise ValueError('return_reuse: enabled is a boolean, max_positions an integer >= 0')
+    pme = cfg['per_message_effort']
+    if (type(pme['enabled']) is not bool or pme['placement'] not in ('before_result', 'after_result')
+            or not (pme['beta'] is None or isinstance(pme['beta'], str) and pme['beta'] and ',' not in pme['beta'])):
+        raise ValueError('per_message_effort: enabled is a boolean, placement before_result or after_result, beta null '
+                         'or one header value')
     for model, spec in cfg['models'].items():
         if any(e not in order for e in spec['efforts']):
             raise ValueError(f'{model}: an effort is not in effort_order')
@@ -167,12 +172,22 @@ def switch_cost(cfg, rates, current, target, prof, warm=None, reuse=False):
     if current[0] != target[0]:
         tokens = prof['prefix_tokens']
     else:
-        scope = cfg['models'][target[0]]['effort_switch_rewrite']
+        scope = 'none' if per_message(cfg, target[0]) else cfg['models'][target[0]]['effort_switch_rewrite']
         tokens = {'full': prof['prefix_tokens'], 'messages': prof['messages_tokens'], 'none': 0}[scope]
-    covered = prof.get('warm_entries', {}).get(_label(target)) if reuse and cfg['return_reuse']['enabled'] else None
+    covered = None
+    if reuse and cfg['return_reuse']['enabled']:
+        entries = prof.get('warm_entries', {})
+        covered = entries.get(_label(target))
+        if covered is None and per_message(cfg, target[0]):
+            covered = entries.get(f'{target[0]}/*')  # any effort of that model: its cache doesn't depend on effort
     if covered is not None:
         tokens = min(tokens, max(0.0, prof['prefix_tokens'] - covered))
     return tokens * extra / 1e6
+
+
+def per_message(cfg, model):
+    """Effort changes on this model go through effort-only system messages, which rewrite nothing."""
+    return cfg['per_message_effort']['enabled'] and bool(cfg['models'][model].get('per_message_effort'))
 
 
 def is_downgrade(cfg, target, current):

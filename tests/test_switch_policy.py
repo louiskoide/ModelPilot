@@ -176,6 +176,19 @@ class SwitchPolicyTests(unittest.TestCase):
         target = next(c for c in decision['candidates'] if c['setting'] == f'{S}/medium')
         self.assertAlmostEqual(target['switch_usd'], 1000 * extra)
 
+    def test_per_message_effort_makes_effort_changes_free_but_not_model_changes(self):
+        request_ = dict(request(40), tools=[{'name': 'x', 'description': 'y' * 20000}])
+        prof = sp.profile(self.cfg, request_, warm=True)
+        on = copy.deepcopy(self.cfg)
+        on['per_message_effort']['enabled'] = True
+        self.assertEqual(sp.switch_cost(on, self.rates, (S, 'medium'), (S, 'xhigh'), prof), 0)
+        self.assertGreater(sp.switch_cost(on, self.rates, (S, 'medium'), (O, 'medium'), prof), 0)
+        self.assertGreater(sp.switch_cost(self.cfg, self.rates, (S, 'medium'), (S, 'xhigh'), prof), 0)  # off by default
+        # A return to a warm model counts its newest entry, whatever effort it ran at.
+        prof = sp.profile(on, request_, warm=True, entries={f'{S}/*': prof['prefix_tokens'] - 1000})
+        self.assertAlmostEqual(sp.switch_cost(on, self.rates, (O, 'xhigh'), (S, 'low'), prof, reuse=True),
+                               1000 * (2.5 - .2) / 1e6)
+
     def test_a_bad_config_is_refused(self):
         for change in ({'effort_switch_rewrite': 'partial'}, {'efforts': ['medium', 'extreme']}):
             cfg = copy.deepcopy(self.cfg)
@@ -188,7 +201,8 @@ class SwitchPolicyTests(unittest.TestCase):
         for path, value in ((('decision_points',), ['turn_start', 'hourly']), (('step', 'min_requests_between'), 0),
                             (('step', 'max_per_revision'), 1.5), (('step', 'overrun_factor'), 0),
                             (('step', 'enabled'), 'yes'), (('return_reuse', 'enabled'), 1),
-                            (('return_reuse', 'max_positions'), -1), (('return_reuse', 'max_positions'), 2.5)):
+                            (('return_reuse', 'max_positions'), -1), (('return_reuse', 'max_positions'), 2.5),
+                            (('per_message_effort', 'placement'), 'middle'), (('per_message_effort', 'beta'), 'a,b')):
             cfg = copy.deepcopy(self.cfg)
             (cfg[path[0]] if len(path) == 2 else cfg).__setitem__(path[-1], value)
             with tempfile.NamedTemporaryFile('w', suffix='.json') as f:
