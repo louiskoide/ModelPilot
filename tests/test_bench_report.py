@@ -394,3 +394,35 @@ class RebuildPathTests(unittest.TestCase):
             self.assertEqual(loaded['path']['steps'][0]['requests'], 2)
             self.assertAlmostEqual(sum(loaded['cost_components'].values()), rows[0]['cost_usd'] + rows[1]['cost_usd'])
 
+
+
+class SubscriptionPricingTests(unittest.TestCase):
+    """A subscription client asks for 1h cache writes; its dollars are reported as an API key would be billed."""
+    def test_one_hour_writes_are_repriced_at_the_five_minute_rate(self):
+        rows = [row(0, 0, 8000, ttl='1h'), row(5, 8000, 300, ttl='1h'), row(9, 8300, 0),
+                {'kind': 'count_tokens', 'cost_usd': 0.0}, row(12, 0, 0, status=400)]
+        repriced = bench_report.api_key_equivalent(rows, RATES)
+        self.assertAlmostEqual(repriced[0]['cost_usd'], (2*2 + 134*10 + 8000*2.5) / 1e6)
+        self.assertAlmostEqual(repriced[1]['cost_usd'], (2*2 + 134*10 + 8000*.2 + 300*2.5) / 1e6)
+        self.assertEqual(repriced[0]['usage']['cache_creation'],
+                         {'ephemeral_5m_input_tokens': 8000, 'ephemeral_1h_input_tokens': 0})
+        self.assertEqual((repriced[0]['repriced_1h_write_tokens'], repriced[0]['usage']['cache_creation_input_tokens']),
+                         (8000, 8000))
+        self.assertIs(repriced[2], rows[2])  # nothing to reprice
+        self.assertIsNone(repriced[4]['cost_usd'])  # unpriced stays unpriced
+        self.assertEqual(rows[0]['usage']['cache_creation']['ephemeral_1h_input_tokens'], 8000)  # input unchanged
+        self.assertIs(bench_report.priced_rows({'auth': 'api_key'}, rows, RATES), rows)
+        self.assertEqual(bench_report.priced_rows({'auth': 'subscription'}, rows, RATES), repriced)
+        # Cold-equivalent cost of the repriced rows uses 5m lifetimes and rates throughout.
+        cache = cache_attribution(repriced[:3], RATES)
+        self.assertAlmostEqual(cache['measured_cost_usd'], sum(r['cost_usd'] for r in repriced[:3]))
+        self.assertEqual(cache['carried_read_tokens'], 0)  # every read is the trial's own, within 5 minutes
+
+    def test_paired_dollars_name_the_subscription_basis(self):
+        pair = summarize([record('t0', 'sub', scope='api_key_equivalent'), record('t0', 'jev', scope='provider_only_router_unpriced')],
+                         ['sub', 'jev'], seed=0, resamples=20)['paired'][0]
+        self.assertEqual(pair['dollar_basis'], 'lower bound for jev: router cost unpriced; API-key equivalent for sub: '
+                                               'subscription trials, 1h cache writes priced at the 5m rate')
+        arms = {a['arm']: a['cost_scope'] for a in summarize([record('t0', 'sub', scope='api_key_equivalent')], ['sub'],
+                                                               seed=0, resamples=20)['arms']}
+        self.assertEqual(arms, {'sub': 'api_key_equivalent'})

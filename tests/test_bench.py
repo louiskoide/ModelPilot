@@ -103,6 +103,14 @@ class ScheduleTests(unittest.TestCase):
                                  'result': 'Credit balance is too low'}, []), 'account_error'),
                  (('completed', {'subtype': 'success', 'is_error': True, 'api_error_status': 401,
                                  'result': 'Invalid API key · Fix external API key'}, []), 'account_error'),
+                 # A subscription token the API refuses; the message names no API key.
+                 (('completed', {'subtype': 'success', 'is_error': True, 'api_error_status': 401,
+                                 'result': 'OAuth token has expired'}, []), 'account_error'),
+                 # A usage or rate limit: from the client's result, or from the proxy's row when the client says nothing.
+                 (('completed', {'subtype': 'success', 'is_error': True, 'api_error_status': 429,
+                                 'result': 'Claude usage limit reached'}, []), 'rate_limited'),
+                 (('completed', {'subtype': 'error_during_execution', 'is_error': True},
+                   [{'kind': 'messages', 'http_status': 429}]), 'rate_limited'),
                  (('completed', {'subtype': 'error_during_execution', 'is_error': True}, []), 'client_error'),
                  (('completed', {}, []), 'client_error')]
         error = {'subtype': 'success', 'is_error': True}  # how the client ends after a proxy refusal
@@ -198,11 +206,13 @@ class Clock:
 
 class FakeTrial:
     """Stands in for bench.Trial on a fake clock: fixed sessions, duration and cost."""
-    def __init__(self, name, clock, sessions=2, seconds=100, cost=.4, fail_on=None, unavailable_after=None, account_error=False):
+    def __init__(self, name, clock, sessions=2, seconds=100, cost=.4, fail_on=None, unavailable_after=None, account_error=False,
+                 rate_limited=False, auth='api_key'):
         self.key, self.clock, self.sessions, self.seconds, self.cost, self.fail_on = (name, 'sonnet-5', 0), clock, sessions, seconds, cost, fail_on
         self.ran, self.started, self.finished, self.record = 0, False, False, None
         self.unavailable_after, self.router_unavailable, self.closed = unavailable_after, False, False
         self.account_error_after, self.account_error = account_error, False
+        self.rate_limited_after, self.rate_limited, self.auth = rate_limited, False, auth
 
     def step(self):
         if self.fail_on == self.ran + 1:
@@ -213,6 +223,7 @@ class FakeTrial:
         self.ran += 1
         self.router_unavailable = self.ran == self.unavailable_after
         self.account_error = bool(self.account_error_after)
+        self.rate_limited = bool(self.rate_limited_after)
         if self.ran == self.sessions:
             self.finish()
         return self.ran < self.sessions
@@ -257,6 +268,33 @@ class InterleaveTests(unittest.TestCase):
         self.assertEqual(bench.interleave(trials, 0, clock=clock, sleep=clock.sleep, stop=lambda: next(stops)), 'run_budget')
         self.assertEqual(clock.log, [('A', 1), ('A', 2)])
         self.assertFalse(trials[1].started)
+
+
+class SubscriptionAccountingTests(unittest.TestCase):
+    def rows(self):
+        usage = {'input_tokens': 2, 'output_tokens': 100, 'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 8000,
+                 'cache_creation': {'ephemeral_5m_input_tokens': 0, 'ephemeral_1h_input_tokens': 8000}}
+        return [{'kind': 'messages', 'http_status': 200, 'model': 'claude-sonnet-5-5', 'usage': usage,
+                 'cost_usd': (2*2 + 100*10 + 8000*4) / 1e6}]
+
+    def test_dollars_are_api_key_equivalent_and_as_sent_is_kept(self):
+        final = {'total_cost_usd': (2*2 + 100*10 + 8000*4) / 1e6,
+                 'modelUsage': {'claude-sonnet-5-5': {'inputTokens': 2, 'outputTokens': 100, 'cacheReadInputTokens': 0,
+                                                     'cacheCreationInputTokens': 8000}}}
+        out = bench.subscription_accounting(self.rows(), final, RATES)
+        self.assertAlmostEqual(out['cost_usd'], (2*2 + 100*10 + 8000*2.5) / 1e6)
+        self.assertAlmostEqual(out['as_sent']['cost_usd'], (2*2 + 100*10 + 8000*4) / 1e6)
+        self.assertEqual((out['cost_scope'], out['billing']), ('api_key_equivalent', 'subscription'))
+        self.assertTrue(out['client_cost_matches'])  # the client priced what it actually sent
+
+    def test_only_fixed_arms_run_on_a_subscription_with_a_token(self):
+        task = {'id': 't', 'instruction': 'x'}
+        for arm, token in (('sonnet-5.5', None), ('jev-compat-o55', 'sk-ant-oat01-offline')):
+            with self.subTest(arm=arm), self.assertRaises(ValueError):
+                bench.Trial(task, arm, '/tmp/unused', '/fake/claude', None, 'http://127.0.0.1:1', RATES,
+                            auth='subscription', oauth_token=token)
+        with self.assertRaises(ValueError):
+            bench.Trial(task, 'sonnet-5.5', '/tmp/unused', '/fake/claude', 'k', 'http://127.0.0.1:1', RATES, auth='oauth')
 
 
 class RunBenchTests(unittest.TestCase):
@@ -307,6 +345,26 @@ class RunBenchTests(unittest.TestCase):
         self.assertEqual(len(self.made), 1)
         saved = json.loads((self.out/'summary.json').read_text())
         self.assertEqual(saved['stopped'], 'jev_router_unavailable')
+
+    def test_a_rate_limit_stops_the_run(self):
+        first = bench.schedule([{'id': n} for n in 'ABC'], ['sonnet-5'], 1, 0)[0][0]
+        summary = self.run_fake('ABC', fake={first: {'rate_limited': True, 'sessions': 1}}, shape='single')
+        self.assertEqual((summary['stopped'], summary['complete'], len(self.made)), ('rate_limited', False, 1))
+
+    def test_subscription_trials_do_not_count_toward_the_run_budget(self):
+        fake = {n: {'auth': 'subscription', 'sessions': 1} for n in 'ABC'}
+        summary = self.run_fake('ABC', fake=fake, shape='single', run_budget=0.5, subscription_arms=['sonnet-5'],
+                                oauth_token='sk-ant-oat01-offline')
+        self.assertEqual((summary['stopped'], summary['known_spend_usd']), (None, 0))
+        self.assertAlmostEqual(summary['subscription_as_sent_usd'], 1.2)
+        manifest = json.loads((self.out/'manifest.json').read_text())
+        self.assertEqual(manifest['auth'], {'sonnet-5': 'subscription'})
+        self.assertIn('1h cache writes', manifest['subscription_note'])
+
+    def test_subscription_arms_must_be_fixed_arms_of_the_run_with_a_token(self):
+        for arms, token in ((['opus-5.5'], 'sk-ant-oat01-offline'), (['sonnet-5'], None)):
+            with self.subTest(arms=arms), self.assertRaises(ValueError):
+                self.run_fake('A', subscription_arms=arms, oauth_token=token)
 
     def test_an_anthropic_account_error_stops_the_run(self):
         first = bench.schedule([{'id': n} for n in 'ABC'], ['sonnet-5'], 1, 0)[0][0]
@@ -554,6 +612,25 @@ class OfflineTrialTests(unittest.TestCase):
         self.assertEqual(idle['grade']['failing_tests'], ['test_many (tests.test_pkg.T)'])
         saved = json.loads((self.out/'idle'/'trial.json').read_text())
         self.assertEqual(saved['spec_sha256'], idle['spec_sha256'])
+
+    def test_a_subscription_trial_logs_in_with_its_token_and_never_records_it(self):
+        token = 'sk-ant-oat01-offline-fixture-not-a-token-1234'
+        record = self.trial('subscription', self.FIX, auth='subscription', oauth_token=token)
+        self.assertTrue(record['passed'], record['grade'])
+        self.assertEqual((record['auth'], record['sessions'][0]['stop']), ('subscription', 'success'))
+        sent = [r for r in self.upstream.received if 'sha256' in r]
+        self.assertTrue(sent)
+        self.assertTrue(all(r['bearer'] and r['key'] is None for r in sent))  # no API key reached the upstream
+        accounting = record['accounting']
+        self.assertEqual((accounting['cost_scope'], accounting['billing']), ('api_key_equivalent', 'subscription'))
+        self.assertTrue(accounting['tokens_match'], accounting)
+        self.assertIn('as_sent', record)
+        for path in (self.out/'subscription').rglob('*'):
+            if path.is_file():
+                self.assertNotIn(token.encode(), path.read_bytes(), path)
+        # The client's own budget stop still applies when it is logged in with a subscription.
+        stopped = self.trial('subscription-budget', self.FIX, auth='subscription', oauth_token=token, budget_usd=0.0001)
+        self.assertEqual(stopped['sessions'][0]['stop'], 'budget_stop')
 
     def test_follow_up_resumes_the_session_with_an_unchanged_prefix(self):
         self.upstream.keep_bodies = True
