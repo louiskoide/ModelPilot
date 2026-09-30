@@ -538,6 +538,16 @@ class OfflineTrialTests(unittest.TestCase):
         self.assertEqual(fixed['client_version'], self.version)
         self.assertIn(b'items[-1]', (self.out/'fixes'/'agent.diff').read_bytes())
         self.assertFalse((self.out/'fixes'/'workspace').exists())  # only records are kept
+        # An agent that commits its fix (Haiku did in 4a): the diff and the test-config check still see it.
+        commit = 'git add -A && git -c user.name=a -c user.email=a@localhost commit -qm fix'
+        committed = self.trial('commits', self.FIX[:2] + [
+            {'tool': 'Write', 'input': {'file_path': 'conftest.py', 'content': ''}},
+            {'tool': 'Bash', 'input': {'command': commit, 'description': 'commit'}}, {'text': 'Done.'}])
+        self.assertTrue(committed['passed'], committed['grade'])
+        self.assertTrue(committed['agent_moved_head'])
+        self.assertEqual(committed['test_config_changed'], ['conftest.py'])
+        self.assertIn(b'items[-1]', (self.out/'commits'/'agent.diff').read_bytes())
+        self.assertFalse(fixed['agent_moved_head'])
         idle = self.trial('idle', [{'text': 'I could not find the problem.'}])
         self.assertEqual((idle['passed'], idle['grade']['reason']), (False, 'hidden_tests_failed'))
         self.assertEqual(idle['grade']['failing_tests'], ['test_many (tests.test_pkg.T)'])
