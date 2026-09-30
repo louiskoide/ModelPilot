@@ -28,7 +28,7 @@ from .policy_actions import MODELS as POLICY_MODELS, transform_request
 ROOT = Path(__file__).resolve().parents[1]
 SHAPE_FIXTURE = ROOT/'tests/fixtures/claude-2.1.284-shape.json'
 FAKE_KEY = 'sk-ant-offline-fixture-not-a-key'
-SUITES = ('smoke', 'transitions', 'top-rung', 'opus-5-5-effort', 'sonnet-5-5')
+SUITES = ('smoke', 'transitions', 'top-rung', 'opus-5-5-effort', 'sonnet-5-5', 'returns')
 SHAPES = ('tool_continuation', 'new_turn')
 PREFIX_LINES, SEED_MAX_TOKENS, SWITCH_MAX_TOKENS = 260, 4096, 2048
 PUZZLE = ('Find the smallest positive integer n that leaves remainder 3 when divided by 7, remainder 4 when '
@@ -62,6 +62,17 @@ O55_CASES = {'o55/control_high': ((OPUS_5_5, 'high'), (OPUS_5_5, 'high')),
              'o55/high_to_low': ((OPUS_5_5, 'high'), (OPUS_5_5, 'low')),
              'o55/low_to_high': ((OPUS_5_5, 'low'), (OPUS_5_5, 'high'))}
 CONTROL_CASES = set(CONTROLS) | {'control/haiku', 'o55/control_high'}
+# Returns to a warm setting (the policy's return_reuse): seed at home, `away` requests at another setting, then one
+# request back home. The API's breakpoints look back at most 20 content positions for an earlier entry, and a
+# Claude Code step adds about four, so a return reaches home's entry only if it comes soon, or if a breakpoint is
+# put back on home's last cached block (anchored). case: (home, away setting, away requests, anchored)
+RETURN_CASES = {'return/effort_near': ((S, 'medium'), (S, 'high'), 1, False),
+                'return/effort_far': ((S, 'medium'), (S, 'high'), 6, False),
+                'return/effort_far_anchored': ((S, 'medium'), (S, 'high'), 6, True),
+                'return/model_near': ((S, 'medium'), (TOP, 'medium'), 1, False)}
+NEXT_STEP = 'Recorded. Next, call record_answer with the previous value plus 17.'
+CONTINUE = 'Call record_answer with the previous value plus 17.'
+LOOKBACK_POSITIONS = 20
 
 
 def _blocks(content):
@@ -208,6 +219,12 @@ def plan(run_id, suite, repeats, client_shape):
             for case, (source, target) in O55_CASES.items():
                 groups.append(_group(run_id, case, 'new_turn', repeat, source, target, client_shape))
             continue
+        if suite == 'returns':
+            for case, (home, away, count, anchored) in RETURN_CASES.items():
+                g = _group(run_id, case, 'tool_continuation', repeat, home, away, client_shape)
+                g.update(steps=['seed'] + ['away']*count + ['return'], away_requests=count, anchored=anchored)
+                groups.append(g)
+            continue
         cases = dict(CONTROLS, **{case: TRANSITIONS[case] for case in SUITE_TRANSITIONS.get(suite, ())})
         for shape_name in (('tool_continuation',) if suite == 'smoke' else SHAPES):
             for case, (source, target) in cases.items():
@@ -263,6 +280,71 @@ def switched_request(group, response):
     return p
 
 
+def continue_request(group, request, response):
+    """The client's next request after a reply, still at the client's (home) setting: tool results when the reply
+    called the tool, else the instruction as a new user turn, then the client's system note. Content passed back
+    unchanged."""
+    p = copy.deepcopy(request)
+    p['max_tokens'] = SWITCH_MAX_TOKENS
+    content = copy.deepcopy(response['content'])
+    p['messages'].append({'role': 'assistant', 'content': content})
+    uses = [b for b in content if b.get('type') == 'tool_use']
+    if uses:
+        p['messages'].append({'role': 'user', 'content': [
+            {'type': 'tool_result', 'tool_use_id': b['id'], 'content': NEXT_STEP} for b in uses]})
+    else:
+        p['messages'].append({'role': 'user', 'content': [{'type': 'text', 'text': CONTINUE}]})
+    if group['system_after_tool_result' if uses else 'system_after_prompt']:
+        _append_system(p['messages'])
+    return p
+
+
+def marker_index(messages):
+    """The last message carrying a cache breakpoint: where the request's newest cache entry ends."""
+    return max((i for i, m in enumerate(messages) if _cache_marks(m.get('content'))), default=None)
+
+
+def positions_after(messages, index):
+    """Content positions after messages[index], counted as the API's lookback counts them: each block is one,
+    except that a run of tool_use blocks, or of tool_result blocks, is one. A string content is one block."""
+    count = 0
+    for m in messages[index + 1:]:
+        content = m.get('content')
+        blocks = [{'type': 'text'}] if isinstance(content, str) else content
+        previous = None
+        for b in blocks:
+            kind = b.get('type')
+            if not (kind in ('tool_use', 'tool_result') and kind == previous):
+                count += 1
+            previous = kind
+    return count
+
+
+def with_anchor(request, index):
+    """Put a breakpoint back on messages[index] (home's last cached block), so the return can read that entry
+    wherever it is. A string content becomes the same text as a block. At most 4 breakpoints."""
+    p = copy.deepcopy(request)
+    message = p['messages'][index]
+    if isinstance(message['content'], str):
+        message['content'] = [{'type': 'text', 'text': message['content']}]
+    message['content'][-1]['cache_control'] = {'type': 'ephemeral'}
+    marks = (len(_cache_marks(p.get('system'))) + len(_cache_marks(p.get('tools')))
+             + sum(len(_cache_marks(m.get('content'))) for m in p['messages']))
+    if marks > 4:
+        raise ValueError('An anchor would exceed 4 cache breakpoints')
+    return p
+
+
+def _entry_tokens(usage):
+    return (usage.get('cache_read_input_tokens') or 0) + (usage.get('cache_creation_input_tokens') or 0)
+
+
+def return_reuse(home_entry, read):
+    """entry_read: the return read home's whole entry; partial: only an earlier part of it (e.g. tools and system);
+    none: nothing."""
+    return 'entry_read' if read >= home_entry else 'partial' if read > 0 else 'none'
+
+
 def _refusal_category(response):
     return (response.get('stop_details') or {}).get('category')
 
@@ -315,6 +397,10 @@ def max_reserve(groups):
         total += estimate(size, g['request']['max_tokens'], g['request']['model'])
         if 'switched' in g['steps']:
             total += estimate(size + SEED_MAX_TOKENS*4, SWITCH_MAX_TOKENS, g['target'][0])
+        # A return group: every later request carries all earlier replies at their maximum length.
+        for step, role in enumerate(g['steps'][1:] if 'away_requests' in g else (), start=1):
+            model = g['target'][0] if role == 'away' else g['source'][0]
+            total += estimate(size + step*SEED_MAX_TOKENS*4, SWITCH_MAX_TOKENS, model)
     return total
 
 
@@ -325,7 +411,9 @@ def verdicts(groups, outcomes):
     for g in groups:
         v = {'case': g['case'], 'shape': g['shape'], 'repeat': g['repeat'], 'source': g['source'], 'target': g['target']}
         v.update(outcomes.get(g['name']) or {'verdict': 'not_run'})
-        if g['case'] not in CONTROL_CASES and v['verdict'] in ('accepted', 'rejected', 'refused'):
+        # A return group is its own control: each away request continues the previous one on the same setting.
+        if ('away_requests' not in g and g['case'] not in CONTROL_CASES
+                and v['verdict'] in ('accepted', 'rejected', 'refused')):
             model = g['target'][0]
             seen = controls.get((model, 'single_turn' if model == H else g['shape'], g['repeat']))
             if not seen or seen['verdict'] != 'accepted':
@@ -356,6 +444,24 @@ def verified_transitions(summary):
                    if pair not in bad and all((pair, key) in accepted for key in keys)])
 
 
+def return_findings(verdict_rows):
+    """Per return case: the repeats whose return read home's whole entry, and how many positions each return
+    was from home's last breakpoint."""
+    found = {}
+    for v in verdict_rows:
+        if v['case'] not in RETURN_CASES:
+            continue
+        f = found.setdefault(v['case'], {'repeats': 0, 'entry_read': 0, 'positions': [], 'verdicts': []})
+        f['repeats'] += 1
+        f['verdicts'].append(v['verdict'])
+        f['entry_read'] += v.get('return_reuse') == 'entry_read'
+        if 'positions_since_home_marker' in v:
+            f['positions'].append(v['positions_since_home_marker'])
+    for f in found.values():
+        f['all_read'] = f['entry_read'] == f['repeats']
+    return found
+
+
 def execute(groups, out, budget, suite, repeats, transport=probe.send):
     """Sequential, no retries or threads. A switched-request 400 is an outcome; anything else unexpected stops."""
     rows, outcomes = [], {}
@@ -376,6 +482,8 @@ def execute(groups, out, budget, suite, repeats, transport=probe.send):
                       scope='Direct API; thinking blocks passed back unchanged; rejected requests have unknown cost '
                             '(charged to the budget at their admission estimate); no Claude Code integration or savings claim.')
         result['verified_transitions'] = verified_transitions(result)
+        if suite == 'returns':
+            result['return_findings'] = return_findings(result['verdicts'])
         tmp = out/'summary.tmp'
         tmp.write_text(json.dumps(result, indent=2)+'\n')
         tmp.replace(out/'summary.json')
@@ -429,12 +537,54 @@ def execute(groups, out, budget, suite, repeats, transport=probe.send):
                 row['wall_seconds'] = time.monotonic()-now
                 record(row)
 
+        def run_return(group):
+            home, away = tuple(group['source']), tuple(group['target'])
+            seed = send(group, 'seed', group['request'])
+            outcome = {'seed_observation': rows[-1]['observation'], 'seed_thinking_blocks': rows[-1]['thinking_blocks'],
+                       'away_requests': group['away_requests'], 'anchored': group['anchored']}
+            problem = seed_problem(group['shape'], seed)
+            if problem:
+                return dict(outcome, verdict='inconclusive', reason=problem)
+            home_entry = _entry_tokens(rows[-1]['usage'])
+            anchor = marker_index(group['request']['messages'])
+            request, reply, away_reads = group['request'], seed, []
+            for step in range(1, group['away_requests'] + 1):
+                request = continue_request(group, request, reply)
+                reply = send(group, f'away{step}', transform_request(request, *away, allow_thinking_history=True))
+                if reply is None:
+                    return dict(outcome, verdict='rejected', reason=f'away{step}_rejected', api_error=rows[-1].get('api_error'))
+                if reply.get('stop_reason') == 'refusal':
+                    return dict(outcome, verdict='inconclusive', reason=f'away{step}_refused:{_refusal_category(reply)}')
+                away_reads.append(rows[-1]['usage'].get('cache_read_input_tokens') or 0)
+            request = transform_request(continue_request(group, request, reply), *home, allow_thinking_history=True)
+            if group['anchored']:
+                request = with_anchor(request, anchor)
+            positions = positions_after(request['messages'], anchor)
+            outcome.update(home_entry_tokens=home_entry, away_reads=away_reads, positions_since_home_marker=positions,
+                           predicted_reachable=group['anchored'] or positions <= LOOKBACK_POSITIONS)
+            reply = send(group, 'return', request)
+            last = rows[-1]
+            outcome.update(api_error=last.get('api_error'), return_observation=last.get('observation'),
+                           return_thinking_blocks=last.get('thinking_blocks'))
+            if reply is None:
+                return dict(outcome, verdict='rejected')
+            if reply.get('stop_reason') == 'refusal':
+                return dict(outcome, verdict='refused', reason=f'refused:{_refusal_category(reply)}')
+            read = last['usage'].get('cache_read_input_tokens') or 0
+            return dict(outcome, verdict='accepted', return_read=read,
+                        return_write=last['usage'].get('cache_creation_input_tokens') or 0,
+                        return_reuse=return_reuse(home_entry, read))
+
         try:
             for group in groups:
                 if not group['steps']:
                     record(dict(group=group['name'], case=group['case'], shape=group['shape'], repeat=group['repeat'],
                                 role='switched', status='transform_refused', reason=group['refused']))
                     outcomes[group['name']] = {'verdict': 'transform_refused', 'reason': group['refused']}
+                    summary()
+                    continue
+                if 'away_requests' in group:
+                    outcomes[group['name']] = run_return(group)
                     summary()
                     continue
                 if group['steps'] == ['single']:
@@ -510,7 +660,7 @@ def main(argv=None):
     manifest = dict(run_id=rid, suite=args.suite, repeats=repeats, live=args.live, calls=calls, budget_usd=args.budget,
                     max_reserve_usd=max_reserve(groups), rates=RATES, pricing_source=SOURCE, pricing_checked='2026-09-24',
                     shape=shape, prompts=PROMPTS, follow_up=FOLLOW_UP, controls=CONTROLS, transitions=TRANSITIONS,
-                    opus_5_5_cases=O55_CASES, groups=groups,
+                    opus_5_5_cases=O55_CASES, return_cases=RETURN_CASES, next_step=NEXT_STEP, groups=groups,
                     method='Seed at the source setting; continue with its content passed back unchanged, transformed '
                            'by policy_actions.transform_request (Opus 5.5: effort edited directly). Switched requests '
                            'keep the source model\'s beta header, as the proxy would. No retries.')

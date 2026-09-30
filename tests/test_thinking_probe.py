@@ -320,6 +320,145 @@ class ExecuteTests(unittest.TestCase):
         self.assertEqual(row['content_types'], ['thinking', 'tool_use'])
 
 
+def marks(p):
+    return [i for i, m in enumerate(p['messages']) if tp._cache_marks(m.get('content'))]
+
+
+class Stepper:
+    """Scripted provider for return groups: every reply thinks and calls the tool; later requests read `read(p)`
+    and write 300. Seeds write 7000, so home's entry is 7000 tokens."""
+    def __init__(self, read=lambda p: 7000, reject=lambda p: None, reply=None):
+        self.calls, self.read, self.reject, self.reply = [], read, reject, reply
+
+    def __call__(self, p, c):
+        self.calls.append((copy.deepcopy(p), dict(c)))
+        if self.reject(p):
+            raise http_error(400)
+        turn = sum(m['role'] == 'assistant' for m in p['messages'])
+        if turn == 0:
+            return seed_response(p['model']), 'req_fake'
+        if self.reply:
+            return self.reply(p), 'req_fake'
+        usage = dict(USAGE, cache_read_input_tokens=self.read(p), cache_creation_input_tokens=300,
+                     cache_creation={'ephemeral_5m_input_tokens': 300, 'ephemeral_1h_input_tokens': 0})
+        return {'model': p['model'], 'stop_reason': 'tool_use', 'usage': usage, 'content': [
+            {'type': 'thinking', 'thinking': 'PRIVATE-THOUGHT', 'signature': 'SIG-SECRET'},
+            {'type': 'tool_use', 'id': f'toolu_{turn + 1}', 'name': 'record_answer', 'input': {'value': 424242}}]}, 'req_fake'
+
+
+class ReturnTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.out = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def run_returns(self, fake, repeats=1, budget=100):
+        return tp.execute(tp.plan('r', 'returns', repeats, SHAPE), self.out, Budget(budget), 'returns', repeats,
+                          transport=fake)
+
+    def verdict(self, result, case, repeat=0):
+        return next(v for v in result['verdicts'] if v['case'] == case and v['repeat'] == repeat)
+
+    def test_plan_goes_home_away_and_back(self):
+        groups = tp.plan('r', 'returns', 2, SHAPE)
+        # 2 repeats x (3 + 8 + 8 + 3) requests.
+        self.assertEqual(tp.planned_calls(groups), 44)
+        g = group(groups, 'return/effort_far_anchored')
+        self.assertEqual((g['steps'], g['anchored'], g['source'], g['target']),
+                         (['seed'] + ['away']*6 + ['return'], True, [S, 'medium'], [S, 'high']))
+        self.assertEqual(group(groups, 'return/model_near')['target'], [O, 'medium'])
+        self.assertEqual(len({g['request']['system'][0]['text'] for g in groups}), len(groups))
+        self.assertGreater(tp.max_reserve(groups), tp.max_reserve(tp.plan('r', 'sonnet-5-5', 1, SHAPE)) / 4)
+
+    def test_continuations_mirror_the_client(self):
+        g = group(tp.plan('r', 'returns', 1, SHAPE), 'return/effort_near')
+        p = tp.continue_request(g, g['request'], seed_response(S))
+        self.assertEqual([m['role'] for m in p['messages']], ['user', 'system', 'assistant', 'user', 'system'])
+        self.assertEqual(p['messages'][3]['content'], [{'type': 'tool_result', 'tool_use_id': 'toolu_1', 'content': tp.NEXT_STEP}])
+        self.assertEqual(marks(p), [4])  # the moving marker; the earlier system note is now a string
+        p = tp.continue_request(g, g['request'], seed_response(S, tool=False))
+        self.assertEqual(p['messages'][3]['content'], [{'type': 'text', 'text': tp.CONTINUE}])
+
+    def test_positions_collapse_tool_runs_and_count_strings_once(self):
+        messages = [{'role': 'user', 'content': [{'type': 'text'}]},
+                    {'role': 'system', 'content': 'note'},
+                    {'role': 'assistant', 'content': [{'type': 'thinking'}, {'type': 'text'}, {'type': 'tool_use'}, {'type': 'tool_use'}]},
+                    {'role': 'user', 'content': [{'type': 'tool_result'}, {'type': 'tool_result'}]},
+                    {'role': 'system', 'content': [{'type': 'text'}]}]
+        self.assertEqual(tp.positions_after(messages, 0), 1 + 3 + 1 + 1)
+        self.assertEqual(tp.positions_after(messages, 4), 0)
+
+    def test_anchor_restores_the_marker_and_respects_the_limit(self):
+        g = group(tp.plan('r', 'returns', 1, SHAPE), 'return/effort_far_anchored')
+        p = tp.continue_request(g, g['request'], seed_response(S))
+        anchored = tp.with_anchor(p, 1)
+        self.assertEqual(marks(anchored), [1, 4])
+        self.assertEqual(anchored['messages'][1]['content'][0]['text'], p['messages'][1]['content'])
+        self.assertEqual(marks(p), [4])  # the input is not modified
+        crowded = copy.deepcopy(anchored)
+        crowded['system'] = [dict(b, cache_control={'type': 'ephemeral'}) for b in crowded['system'] * 3]
+        with self.assertRaises(ValueError):
+            tp.with_anchor(crowded, 3)
+
+    def test_returns_go_back_to_the_home_setting_and_measure_the_read(self):
+        # Home's entry (7000) is read by a return that anchors it or is near; the far one reads only 6800.
+        def read(p):
+            home = p['output_config']['effort'] == 'medium' and p['model'] == S
+            return 7000 if home and (len(marks(p)) == 2 or len(p['messages']) < 10) else 6800
+        fake = Stepper(read)
+        result = self.run_returns(fake)
+        self.assertEqual((result['status'], result['calls']), ('complete', 22))
+        sent = [(p['model'], p['output_config']['effort']) for p, _ in fake.calls]
+        self.assertEqual(sent[:3], [(S, 'medium'), (S, 'high'), (S, 'medium')])
+        self.assertEqual(sent[3:11], [(S, 'medium')] + [(S, 'high')]*6 + [(S, 'medium')])
+        self.assertEqual(sent[19:], [(S, 'medium'), (O, 'medium'), (S, 'medium')])
+        # The Opus request keeps the client's (Sonnet) betas, as the proxy would.
+        self.assertEqual(fake.calls[20][1]['anthropic_beta'], ','.join(SHAPE['requests'][S]['anthropic_beta']))
+        near, far, anchored = (self.verdict(result, f'return/effort_{c}') for c in ('near', 'far', 'far_anchored'))
+        self.assertEqual((near['verdict'], near['return_reuse'], near['home_entry_tokens'], near['return_read']),
+                         ('accepted', 'entry_read', 7000, 7000))
+        self.assertEqual((near['positions_since_home_marker'], near['predicted_reachable']), (8, True))
+        self.assertEqual((far['return_reuse'], far['positions_since_home_marker'], far['predicted_reachable']),
+                         ('partial', 28, False))
+        self.assertEqual((anchored['return_reuse'], anchored['predicted_reachable']), ('entry_read', True))
+        self.assertEqual(marks(fake.calls[18][0]), [1, 22])  # the anchored return: seed's marker and the moving one
+        self.assertEqual(far['away_reads'], [6800]*6)
+        findings = result['return_findings']
+        self.assertEqual((findings['return/effort_near']['all_read'], findings['return/effort_far']['all_read']), (True, False))
+        self.assertEqual(findings['return/effort_far']['positions'], [28])
+        self.assertEqual(result['verified_transitions'], [])
+        for name in ('observations.jsonl', 'summary.json'):
+            text = (self.out/name).read_text()
+            for secret in SECRETS:
+                self.assertNotIn(secret, text, name)
+
+    def test_a_rejected_away_request_ends_the_group_and_the_run_continues(self):
+        fake = Stepper(reject=lambda p: p['model'] == O)
+        result = self.run_returns(fake)
+        model = self.verdict(result, 'return/model_near')
+        self.assertEqual((result['status'], model['verdict'], model['reason']), ('complete', 'rejected', 'away1_rejected'))
+        self.assertNotIn('return_reuse', model)
+        self.assertFalse(result['cost_complete'])
+
+    def test_a_refused_away_request_is_inconclusive(self):
+        def reply(p):
+            return refusal(p['model']) if p['output_config']['effort'] == 'high' else Stepper()(p, {})[0]
+        result = self.run_returns(Stepper(reply=reply))
+        near = self.verdict(result, 'return/effort_near')
+        self.assertEqual((near['verdict'], near['reason']), ('inconclusive', 'away1_refused:cyber'))
+        self.assertEqual(self.verdict(result, 'return/model_near')['verdict'], 'accepted')
+
+    def test_dry_run_plans_the_returns_suite(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(tp.probe, 'send') as send:
+            tp.main(['--suite', 'returns', '--out', str(Path(tmp)/'run')])
+            send.assert_not_called()
+            plan = json.loads((Path(tmp)/'run'/'plan.json').read_text())
+            self.assertEqual((plan['repeats'], plan['calls']), (2, 44))
+            self.assertEqual(plan['return_cases']['return/effort_far'], [[S, 'medium'], [S, 'high'], 6, False])
+
+
 class VerifiedTransitionTests(unittest.TestCase):
     def summary(self, repeats=2, suite='transitions'):
         verdicts = []
