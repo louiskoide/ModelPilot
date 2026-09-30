@@ -433,6 +433,9 @@ class Trial:
         self.dir.mkdir(mode=0o700, parents=True)
         self.repo = task_repo(self.task)
         self.work = bench_tasks.workspace(self.task, self.repo, self.dir/'workspace')
+        # The agent may commit (Haiku did in 4a), so its fix is diffed against this commit, never against HEAD.
+        self.base_commit = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=self.work, capture_output=True, text=True,
+                                          check=True).stdout.strip()
         dirs = {name: self.dir/name for name in ('home', 'tmp', 'config')}
         for path in dirs.values():
             path.mkdir()
@@ -566,9 +569,11 @@ class Trial:
         self.close()
         self.save('grading')
         subprocess.run(['git', 'add', '-A', '-N'], cwd=self.work, capture_output=True)  # include new files in the diff
-        (self.dir/'agent.diff').write_bytes(subprocess.run(['git', 'diff', '--binary', 'HEAD'], cwd=self.work,
+        head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=self.work, capture_output=True, text=True).stdout.strip()
+        self.record['agent_moved_head'] = head != self.base_commit
+        (self.dir/'agent.diff').write_bytes(subprocess.run(['git', 'diff', '--binary', self.base_commit], cwd=self.work,
                                                            capture_output=True).stdout)
-        changed = subprocess.run(['git', 'diff', '--name-only', 'HEAD'], cwd=self.work, capture_output=True,
+        changed = subprocess.run(['git', 'diff', '--name-only', self.base_commit], cwd=self.work, capture_output=True,
                                  text=True).stdout.splitlines()
         self.record['test_config_changed'] = test_config_changes(changed, self.task['test_dir'])
         graded = bench_tasks.grade(self.task, self.work, self.repo, self.python, self.dir/'grade',

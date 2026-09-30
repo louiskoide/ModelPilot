@@ -135,6 +135,46 @@ class SwitchPolicyTests(unittest.TestCase):
         decision = self.decide(adv, (S, 'medium'))
         self.assertEqual({c['setting'] for c in decision['candidates']}, {f'{S}/medium', f'{O}/medium'})
 
+    def test_a_step_always_weighs_jevs_effort_on_the_current_model(self):
+        # Jev is sure of both answers: a turn start weighs only its setting, a mid-task step also the cheaper
+        # effort-only move, whose rewrite is smaller than a model change's.
+        turn = self.decide(advice(O, 'high'), (S, 'medium'), kb=60, warm=True)
+        step = self.decide(advice(O, 'high'), (S, 'medium'), kb=60, warm=True, trigger='step')
+        self.assertEqual({c['setting'] for c in turn['candidates']}, {f'{S}/medium', f'{O}/high'})
+        self.assertEqual({c['setting'] for c in step['candidates']}, {f'{S}/medium', f'{O}/high', f'{S}/high'})
+        rows = {c['setting']: c for c in step['candidates']}
+        self.assertLess(rows[f'{S}/high']['switch_usd'], rows[f'{O}/high']['switch_usd'])
+
+    def test_every_decision_carries_the_forecast_it_leaves_the_task_on(self):
+        prof = sp.profile(self.cfg, request(11), False)
+        for adv, current in ((advice(O, 'xhigh'), (S, 'medium')), (None, (S, 'medium')), (advice(O, 'max'), (O, 'max'))):
+            trigger = 'stuck_evidence' if current == (O, 'max') else 'turn_start'
+            decision = sp.decide(self.cfg, self.rates, adv, current, prof, trigger)
+            self.assertAlmostEqual(decision['forecast_usd'],
+                                   sp.run_cost(self.cfg, self.rates, tuple(decision['target']), prof))
+
+    def test_a_warm_return_is_priced_by_what_its_entry_does_not_cover(self):
+        request_ = dict(request(40), tools=[{'name': 'x', 'description': 'y' * 20000}])
+        prof = sp.profile(self.cfg, request_, warm=True)
+        covered = prof['prefix_tokens'] - 1000  # Sonnet medium ran until 1,000 tokens ago
+        prof = sp.profile(self.cfg, request_, warm=True, entries={f'{S}/medium': covered})
+        extra = (2.5 - .2) / 1e6
+        on = copy.deepcopy(self.cfg)
+        on['return_reuse']['enabled'] = True
+        # Off (the default until the effort-return probe): a return is priced like a first switch.
+        self.assertAlmostEqual(sp.switch_cost(self.cfg, self.rates, (S, 'high'), (S, 'medium'), prof, reuse=True),
+                               prof['messages_tokens'] * extra)
+        self.assertAlmostEqual(sp.switch_cost(on, self.rates, (S, 'high'), (S, 'medium'), prof, reuse=True), 1000 * extra)
+        self.assertAlmostEqual(sp.switch_cost(on, self.rates, (O, 'xhigh'), (S, 'medium'), prof, reuse=True), 1000 * extra)
+        # A later, hypothetical move (a failure's redo) never counts on an entry that is warm now.
+        self.assertAlmostEqual(sp.switch_cost(on, self.rates, (O, 'xhigh'), (S, 'medium'), prof),
+                               prof['prefix_tokens'] * extra)
+        self.assertAlmostEqual(sp.switch_cost(on, self.rates, (S, 'high'), (S, 'low'), prof, reuse=True),
+                               prof['messages_tokens'] * extra)  # no entry of its own: a first switch
+        decision = sp.decide(on, self.rates, advice(S, 'medium'), (O, 'xhigh'), prof, 'step')
+        target = next(c for c in decision['candidates'] if c['setting'] == f'{S}/medium')
+        self.assertAlmostEqual(target['switch_usd'], 1000 * extra)
+
     def test_a_bad_config_is_refused(self):
         for change in ({'effort_switch_rewrite': 'partial'}, {'efforts': ['medium', 'extreme']}):
             cfg = copy.deepcopy(self.cfg)
@@ -143,6 +183,16 @@ class SwitchPolicyTests(unittest.TestCase):
                 json.dump(cfg, f)
                 f.flush()
                 with self.assertRaises(ValueError):
+                    sp.load(f.name)
+        for path, value in ((('decision_points',), ['turn_start', 'hourly']), (('step', 'min_requests_between'), 0),
+                            (('step', 'max_per_revision'), 1.5), (('step', 'overrun_factor'), 0),
+                            (('step', 'enabled'), 'yes'), (('return_reuse', 'enabled'), 1)):
+            cfg = copy.deepcopy(self.cfg)
+            (cfg[path[0]] if len(path) == 2 else cfg).__setitem__(path[-1], value)
+            with tempfile.NamedTemporaryFile('w', suffix='.json') as f:
+                json.dump(cfg, f)
+                f.flush()
+                with self.assertRaises(ValueError, msg=path):
                     sp.load(f.name)
 
 

@@ -10,10 +10,12 @@ with that of each direct move:
   factor x output). The prefix grows by each request's input and output.
 - switch: the one-time cache rewrite, beyond the read it replaces. A model change rewrites the whole
   prefix; an effort change rewrites what that model rewrites (config: full, messages or none); a
-  cold cache costs nothing extra, since staying would write it too.
+  cold cache costs nothing extra, since staying would write it too. With return_reuse enabled, a move
+  back to a setting whose own entry is still warm writes only what that entry doesn't cover.
 - candidates: staying and Jev's setting; when Jev is unsure of the model (or the effort), also Jev's
   effort (or model) alone, so a move can take the part Jev is sure of. When it is sure of both, nothing
-  cheaper is tried first.
+  cheaper is tried first, except at a mid-task step, where Jev's effort on the current model is always
+  weighed: an effort change rewrites less than a model change.
 - P_ok(c): Jev's model answer is the cheapest model that can finish in one pass, and its effort
   answer the lowest effort that can. So c is enough when both are at or below c's, treated as
   independent. On evidence that the current setting isn't enough, the probabilities are
@@ -34,8 +36,12 @@ import json
 from pathlib import Path
 
 CONFIG = Path(__file__).resolve().parents[1]/'configs/modelpilot-policy.json'
-TRIGGERS = ('turn_start', 'stuck_evidence')
+TRIGGERS = ('turn_start', 'stuck_evidence', 'step')
 REWRITES = ('full', 'messages', 'none')
+
+
+def _count(value, floor):
+    return type(value) is int and value >= floor
 
 
 def load(path=CONFIG):
@@ -43,6 +49,16 @@ def load(path=CONFIG):
     order = cfg['effort_order']
     if set(cfg['effort_output_factor']) != set(order):
         raise ValueError('effort_output_factor must cover effort_order exactly')
+    if not set(cfg['decision_points']) <= set(TRIGGERS):
+        raise ValueError(f'decision_points must be among {TRIGGERS}')
+    step = cfg['step']
+    if (type(step['enabled']) is not bool or not _count(step['min_requests_between'], 1)
+            or not _count(step['max_per_revision'], 0) or not _at_least_number(step['overrun_factor'], 0)
+            or not step['overrun_factor']):
+        raise ValueError('step: enabled is a boolean, min_requests_between >= 1, max_per_revision >= 0, '
+                         'overrun_factor > 0')
+    if type(cfg['return_reuse']['enabled']) is not bool:
+        raise ValueError('return_reuse.enabled must be a boolean')
     for model, spec in cfg['models'].items():
         if any(e not in order for e in spec['efforts']):
             raise ValueError(f'{model}: an effort is not in effort_order')
@@ -95,13 +111,15 @@ def sufficiency(cfg, advice):
     return model_ok, effort_ok
 
 
-def profile(cfg, request, warm, observed=None):
+def profile(cfg, request, warm, observed=None, entries=None):
     """What the cost model needs about the conversation. Token counts from request bytes, as Jev estimates
-    context; per-request input and output from observed usage when given, else the configured defaults."""
+    context; per-request input and output from observed usage when given, else the configured defaults.
+    entries: {'model/effort': prefix tokens its still-warm cache entry covers}, for return_reuse."""
     per = cfg['bytes_per_token']
     out = dict(cfg['defaults'], **(observed or {}))
     out.update(prefix_tokens=len(json.dumps(request)) / per,
-               messages_tokens=len(json.dumps(request.get('messages') or [])) / per, warm=bool(warm))
+               messages_tokens=len(json.dumps(request.get('messages') or [])) / per, warm=bool(warm),
+               warm_entries=dict(entries or {}))
     return out
 
 
@@ -118,8 +136,10 @@ def run_cost(cfg, rates, setting, prof):
                       prof['output_tokens'] * factor * rate['output']) / 1e6
 
 
-def switch_cost(cfg, rates, current, target, prof, warm=None):
-    """The rewrite a move pays beyond the read it replaces; nothing when the cache is cold or nothing changes."""
+def switch_cost(cfg, rates, current, target, prof, warm=None, reuse=False):
+    """The rewrite a move pays beyond the read it replaces; nothing when the cache is cold or nothing changes.
+    reuse: the move happens now, so a target entry that is still warm counts (when return_reuse is enabled);
+    a later, hypothetical move (a failure's redo) never counts on one."""
     warm = prof['warm'] if warm is None else warm
     if not warm or tuple(current) == tuple(target):
         return 0.0
@@ -130,6 +150,9 @@ def switch_cost(cfg, rates, current, target, prof, warm=None):
     else:
         scope = cfg['models'][target[0]]['effort_switch_rewrite']
         tokens = {'full': prof['prefix_tokens'], 'messages': prof['messages_tokens'], 'none': 0}[scope]
+    covered = prof.get('warm_entries', {}).get(_label(target)) if reuse and cfg['return_reuse']['enabled'] else None
+    if covered is not None:
+        tokens = min(tokens, max(0.0, prof['prefix_tokens'] - covered))
     return tokens * extra / 1e6
 
 
@@ -154,7 +177,14 @@ def _label(setting):
 
 def decide(cfg, rates, advice, current, prof, trigger):
     """Stay, jump straight to a target, or stop (stuck with nothing stronger). Returns the decision with every
-    candidate's numbers, so the journal shows why."""
+    candidate's numbers, so the journal shows why, and forecast_usd: run() on the setting it leaves the task on,
+    which a later step compares measured spend against."""
+    decision = _decide(cfg, rates, advice, current, prof, trigger)
+    decision['forecast_usd'] = run_cost(cfg, rates, tuple(decision['target']), prof)
+    return decision
+
+
+def _decide(cfg, rates, advice, current, prof, trigger):
     if trigger not in TRIGGERS:
         raise ValueError(f'Unknown decision point {trigger!r}')
     current = tuple(current)
@@ -188,14 +218,14 @@ def decide(cfg, rates, advice, current, prof, trigger):
     jm = model_answer.get('choice')
     je = effort_answer.get('choice') or current[1]
     sure = cfg['direct_jump_confidence']
-    moves = [(jm, je)]  # Jev's setting; a partial move only in a dimension Jev is unsure of
+    moves = [(jm, je)]  # Jev's setting; a partial move only in a dimension Jev is unsure of, or its effort at a step
     if not _at_least_number(effort_answer.get('confidence'), sure):
         moves.append((jm, current[1]))
-    if not _at_least_number(model_answer.get('confidence'), sure):
+    if trigger == 'step' or not _at_least_number(model_answer.get('confidence'), sure):
         moves.append((current[0], je))
     moves = [(m, e if m in cfg['models'] and cfg['models'][m]['efforts'] else None) for m, e in moves]
     pick = moves[0] if moves[0] in runnable else None
-    if trigger == 'turn_start':
+    if trigger in ('turn_start', 'step'):
         candidates += [c for c in dict.fromkeys(moves) if c in runnable and c != current]
     strongest = max(runnable, key=lambda c: (_rank(cfg, c[0]), _effort_index(cfg, c[1])))
 
@@ -216,7 +246,7 @@ def decide(cfg, rates, advice, current, prof, trigger):
         run = run_cost(cfg, rates, c, prof)
         r = recovery(c)
         recover = wasted * run + switch_cost(cfg, rates, c, r, prof, warm=True) + from_scratch(r)
-        p, switch = probability(c), switch_cost(cfg, rates, current, c, prof)
+        p, switch = probability(c), switch_cost(cfg, rates, current, c, prof, reuse=True)
         rows.append({'setting': _label(c), 'p_ok': p, 'switch_usd': switch, 'run_usd': run, 'recover_usd': recover,
                      'expected_usd': switch + p * run + (1 - p) * recover, '_setting': c})
     out['candidates'] = [{k: v for k, v in r.items() if k != '_setting'} for r in rows]
