@@ -159,10 +159,11 @@ class SwitchPolicyTests(unittest.TestCase):
         covered = prof['prefix_tokens'] - 1000  # Sonnet medium ran until 1,000 tokens ago
         prof = sp.profile(self.cfg, request_, warm=True, entries={f'{S}/medium': covered})
         extra = (2.5 - .2) / 1e6
-        on = copy.deepcopy(self.cfg)
-        on['return_reuse']['enabled'] = True
-        # Off (the default until the effort-return probe): a return is priced like a first switch.
-        self.assertAlmostEqual(sp.switch_cost(self.cfg, self.rates, (S, 'high'), (S, 'medium'), prof, reuse=True),
+        on, off = copy.deepcopy(self.cfg), copy.deepcopy(self.cfg)
+        on['return_reuse']['enabled'], off['return_reuse']['enabled'] = True, False
+        self.assertTrue(self.cfg['return_reuse']['enabled'])  # on since the returns probe (September 30)
+        # Off: a return is priced like a first switch.
+        self.assertAlmostEqual(sp.switch_cost(off, self.rates, (S, 'high'), (S, 'medium'), prof, reuse=True),
                                prof['messages_tokens'] * extra)
         self.assertAlmostEqual(sp.switch_cost(on, self.rates, (S, 'high'), (S, 'medium'), prof, reuse=True), 1000 * extra)
         self.assertAlmostEqual(sp.switch_cost(on, self.rates, (O, 'xhigh'), (S, 'medium'), prof, reuse=True), 1000 * extra)
@@ -186,7 +187,8 @@ class SwitchPolicyTests(unittest.TestCase):
                     sp.load(f.name)
         for path, value in ((('decision_points',), ['turn_start', 'hourly']), (('step', 'min_requests_between'), 0),
                             (('step', 'max_per_revision'), 1.5), (('step', 'overrun_factor'), 0),
-                            (('step', 'enabled'), 'yes'), (('return_reuse', 'enabled'), 1)):
+                            (('step', 'enabled'), 'yes'), (('return_reuse', 'enabled'), 1),
+                            (('return_reuse', 'max_positions'), -1), (('return_reuse', 'max_positions'), 2.5)):
             cfg = copy.deepcopy(self.cfg)
             (cfg[path[0]] if len(path) == 2 else cfg).__setitem__(path[-1], value)
             with tempfile.NamedTemporaryFile('w', suffix='.json') as f:

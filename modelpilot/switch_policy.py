@@ -11,7 +11,9 @@ with that of each direct move:
 - switch: the one-time cache rewrite, beyond the read it replaces. A model change rewrites the whole
   prefix; an effort change rewrites what that model rewrites (config: full, messages or none); a
   cold cache costs nothing extra, since staying would write it too. With return_reuse enabled, a move
-  back to a setting whose own entry is still warm writes only what that entry doesn't cover.
+  back to a setting whose own entry is still warm, and within the measured reach of the conversation's
+  newest breakpoint (return_reuse.max_positions content positions), writes only what that entry doesn't
+  cover.
 - candidates: staying and Jev's setting; when Jev is unsure of the model (or the effort), also Jev's
   effort (or model) alone, so a move can take the part Jev is sure of. When it is sure of both, nothing
   cheaper is tried first, except at a mid-task step, where Jev's effort on the current model is always
@@ -57,8 +59,8 @@ def load(path=CONFIG):
             or not step['overrun_factor']):
         raise ValueError('step: enabled is a boolean, min_requests_between >= 1, max_per_revision >= 0, '
                          'overrun_factor > 0')
-    if type(cfg['return_reuse']['enabled']) is not bool:
-        raise ValueError('return_reuse.enabled must be a boolean')
+    if type(cfg['return_reuse']['enabled']) is not bool or not _count(cfg['return_reuse']['max_positions'], 0):
+        raise ValueError('return_reuse: enabled is a boolean, max_positions an integer >= 0')
     for model, spec in cfg['models'].items():
         if any(e not in order for e in spec['efforts']):
             raise ValueError(f'{model}: an effort is not in effort_order')
@@ -111,10 +113,27 @@ def sufficiency(cfg, advice):
     return model_ok, effort_ok
 
 
+def content_positions(messages):
+    """Content positions in messages, counted as the API's cache lookback counts them: each block is one, except
+    that a run of tool_use blocks, or of tool_result blocks, is one; a string content is one block. A return's
+    reach is the difference between the conversation's count now and when the setting was last sent."""
+    count = 0
+    for m in messages:
+        content = m.get('content')
+        blocks = [{'type': 'text'}] if isinstance(content, str) else content if isinstance(content, list) else []
+        previous = None
+        for b in blocks:
+            kind = b.get('type') if isinstance(b, dict) else None
+            if not (kind in ('tool_use', 'tool_result') and kind == previous):
+                count += 1
+            previous = kind
+    return count
+
+
 def profile(cfg, request, warm, observed=None, entries=None):
     """What the cost model needs about the conversation. Token counts from request bytes, as Jev estimates
     context; per-request input and output from observed usage when given, else the configured defaults.
-    entries: {'model/effort': prefix tokens its still-warm cache entry covers}, for return_reuse."""
+    entries: {'model/effort': prefix tokens its still-warm, reachable cache entry covers}, for return_reuse."""
     per = cfg['bytes_per_token']
     out = dict(cfg['defaults'], **(observed or {}))
     out.update(prefix_tokens=len(json.dumps(request)) / per,

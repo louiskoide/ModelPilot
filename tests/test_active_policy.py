@@ -378,3 +378,17 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class WarmEntryReachTests(unittest.TestCase):
+    """A warm entry counts for a return only within the measured reach (runs/thinking-probe-returns-20260930-091128)."""
+    def test_entries_need_to_be_warm_and_within_reach(self):
+        policy = ActivePolicy(S, OWNER)
+        reach, ttl = policy.config['return_reuse']['max_positions'], policy.config['cache_ttl_seconds']
+        policy.sent('t', (S, 'medium'), 1000.0, 9000, 40)
+        policy.sent('t', (O, 'xhigh'), 1010.0, 9500, 50)
+        self.assertEqual(policy.entries('t', 1020.0, 40 + reach),
+                         {f'{S}/medium': 9000, f'{O}/xhigh': 9500})
+        self.assertEqual(policy.entries('t', 1020.0, 41 + reach), {f'{O}/xhigh': 9500})  # one position too far
+        self.assertEqual(policy.entries('t', 1000.0 + ttl + 1, 50), {f'{O}/xhigh': 9500})  # expired
+        self.assertEqual(policy.entries('other', 1020.0, 40), {})

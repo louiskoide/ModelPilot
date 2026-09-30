@@ -218,7 +218,7 @@ Unlike Sonnet 5, **a Sonnet 5.5 effort change keeps the tools and system cached 
 **`runs/thinking-probe-sonnet-5-5-20260928-150023`: not evidence.** It served 46 requests ($0.9522298 known), then the account's credit ran out. The API answered one switched request (model_up) and the next seed with HTTP 400 "Your credit balance is too low", and the run stopped. The probe recorded that switched request as a *rejected transition*, which it wasn't. Fixed: `cache_probe.send` now keeps the API's error type, and `cache_probe.account_problem` recognises billing and authentication failures. A switched request that fails that way now stops the run with no verdict (`tests/test_thinking_probe.py`).
 
 
-## Returns to a warm setting (September 29; offline, not yet run)
+## Returns to a warm setting (built September 29, run September 30)
 
 The policy's `return_reuse` (off) would price a move back to a setting whose own cache entry is still warm as writing only what that entry misses. M0 measured such returns without thinking history only. The `returns` suite measures them in the pinned client's request shape, with thinking history, and tests one rule from the API documentation: a breakpoint looks back at most 20 content positions for an earlier entry (a run of `tool_use` blocks, or of `tool_result` blocks, is one position). Each Claude Code step adds about four (the reply's thinking and tool call, the tool result and the client's system note). So a return after a few steps may not reach the home setting's entry, even though that entry is warm.
 
@@ -241,3 +241,20 @@ python3 -m modelpilot.thinking_probe --suite returns --live --budget 2  # your o
 ```
 
 What the result changes: if near returns read home's entry and far ones don't, `return_reuse` can be turned on with a reachability condition (the target's last breakpoint within the lookback, or an anchor the proxy adds). If near returns don't read it either, `return_reuse` stays off.
+
+### Results (September 30)
+
+`runs/thinking-probe-returns-20260930-091128`: 44/44 requests, $0.4055632 (the forecast was about $0.40), 143 s, no rejections, refusals or unknown cost. The user ran it with client shape 2.1.284.
+
+| Case | Positions back | Returns that read home's whole entry | Home entry (tokens) | Return writes (tokens) |
+| --- | --- | --- | --- | --- |
+| `return/effort_near` | 7, 7 | 2/2 | 8,052 | 421–422 |
+| `return/effort_far` | 25, 25 | 2/2 | 8,052 | 1,309–1,410 |
+| `return/effort_far_anchored` | 25, 24 | 2/2 | 8,056 | 1,081–1,127 |
+| `return/model_near` (via Opus 5.5) | 8, 8 | 2/2 | 8,051 | 500–550 |
+
+- Every return read exactly home's entry (the seed's cache read plus write) and wrote only what came after it. A return to a warm setting therefore costs what its entry misses, with thinking history, for effort returns and for an Opus 5.5 → Sonnet 5.5 model return.
+- The documented 20-position lookback did not bite at 25 positions by this probe's count, so the anchor wasn't needed at this distance. Either the API counts positions differently or its reach is longer; farther returns are unmeasured.
+- The away requests behaved as before: the first effort change read tools and system (7,874) and rewrote the messages; the first Opus request read nothing.
+
+Consequence: `return_reuse` is on (September 30), limited to returns at most 25 content positions after the setting was last sent (`return_reuse.max_positions`, counted by `switch_policy.content_positions`, the rule this probe used). Farther returns are priced like a first switch. Model returns more than 8 positions back and returns to Opus 5.5 are not measured separately; they fall under the same rule.

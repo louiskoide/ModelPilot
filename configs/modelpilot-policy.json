@@ -35,8 +35,8 @@
     "about": "Mid-task decision points (user request, September 29). A step is due when the host-run test suite flips between failing and passing (run_tests results in the ledger), or when the task's measured spend since the last decision reaches overrun_factor x that decision's forecast for the setting it kept or chose. It needs at least min_requests_between billable requests of the task since the last decision, and there are at most max_per_revision per task revision. Candidates are a turn start's plus Jev's effort on the current model, so an effort-only move is always weighed."
   },
   "return_reuse": {
-    "enabled": false,
-    "about": "Price a move to a setting whose own cache entry is still warm (sent within cache_ttl_seconds) as writing only what that entry doesn't cover. M0 measured returns to a warm model or effort without thinking history (runs/m0-replication-opus-5-5-20260924-214653, returns to Opus 5.5 18/18); with thinking history it is untested. Off until the effort-return probe, so a return is priced like a first switch."
+    "enabled": true, "max_positions": 25,
+    "about": "Price a move to a setting whose own cache entry is still warm (sent within cache_ttl_seconds) and within reach (the conversation has grown by at most max_positions content positions since that setting was last sent) as writing only what that entry doesn't cover. Measured with thinking history in the pinned client's shape (runs/thinking-probe-returns-20260930-091128, $0.4056): returns read the home setting's whole entry 8/8, Sonnet 5.5 effort returns 7 and 25 positions back and Opus 5.5 -> Sonnet 5.5 model returns 8 back. The API documents a 20-position lookback, yet 25 was reached; farther is unmeasured, so it is priced like a first switch."
   },
   "guesses": "effort_output_factor, defaults, recovery.wasted_fraction, hysteresis_usd, downgrade_switch_multiplier and the step spacing, cap and overrun factor are starting values, not measurements; tuning runs calibrate them."
 }
