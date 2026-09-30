@@ -39,7 +39,7 @@ def parameters(model, effort, config=None):
     return {'S0': [model, effort], 'advisor': 'Jev (compat checkout): its model question unchanged, plus one effort question',
             'decision_points': cfg['decision_points'],
             'step': {k: cfg['step'][k] for k in ('enabled', 'min_requests_between', 'max_per_revision', 'overrun_factor')},
-            'return_reuse': cfg['return_reuse']['enabled'],
+            'return_reuse': {k: cfg['return_reuse'][k] for k in ('enabled', 'max_positions')},
             'settings': ['/'.join(str(x) for x in s) for s in switch_policy.settings(cfg)],
             'switch_rule': 'jump directly to the setting with the lowest expected total cost (switch + P_ok x run + '
                            '(1 - P_ok) x recovery) when it beats staying by the hysteresis (downgrades: plus a multiple '
@@ -73,7 +73,8 @@ class ActivePolicy(ProxyPolicy):
         self.client_model, self.owner, self.advisor = client_model, owner, advisor
         self.config = config or switch_policy.load()
         self.catalog, self.prompt_prefix = [], ''  # set by the adapter once the trial is set up
-        self.last_sent, self.lock = {}, threading.Lock()  # task -> {setting: (unix time, prefix tokens)}: warm entries
+        # task -> {setting: (unix time, prefix tokens, content positions)}: where each setting's cache entry ends
+        self.last_sent, self.lock = {}, threading.Lock()
 
     def check_upstream(self, origin):
         pass  # ProxyServer accepts only direct Anthropic HTTPS or loopback HTTP (offline tests).
@@ -86,16 +87,20 @@ class ActivePolicy(ProxyPolicy):
             entry = self.last_sent.get(task, {}).get(tuple(setting))
         return bool(entry) and now - entry[0] <= self.config['cache_ttl_seconds']
 
-    def entries(self, task, now):
-        """{'model/effort': prefix tokens} for this task's settings whose cache entry should still be warm."""
+    def entries(self, task, now, positions):
+        """{'model/effort': prefix tokens} for this task's settings whose cache entry should still be warm and be
+        within reach: the conversation (now `positions` long) has grown by at most return_reuse.max_positions content
+        positions since that setting was last sent (runs/thinking-probe-returns-20260930-091128 read entries 25
+        positions back, 4/4; farther is unmeasured)."""
         with self.lock:
             sent = dict(self.last_sent.get(task, {}))
-        return {switch_policy._label(s): tokens for s, (at, tokens) in sent.items()
-                if now - at <= self.config['cache_ttl_seconds']}
+        reach = self.config['return_reuse']['max_positions']
+        return {switch_policy._label(s): tokens for s, (at, tokens, then) in sent.items()
+                if now - at <= self.config['cache_ttl_seconds'] and positions - then <= reach}
 
-    def sent(self, task, setting, now, tokens):
+    def sent(self, task, setting, now, tokens, positions):
         with self.lock:
-            self.last_sent.setdefault(task, {})[tuple(setting)] = (now, tokens)
+            self.last_sent.setdefault(task, {})[tuple(setting)] = (now, tokens, positions)
 
     def decision_point(self, gov, task, request, revision, proposal):
         """(trigger, key, step facts or None), or None. The key journals the decision once per point."""
@@ -155,7 +160,9 @@ class ActivePolicy(ProxyPolicy):
             advice = self.advisor.ask(request, setting[0], self.catalog, self.config['effort_order'],
                                       self.prompt_prefix, evidence)
         usable = advice if advice and not advice.get('error') else None
-        prof = switch_policy.profile(self.config, current, self.warm(task, setting, now), entries=self.entries(task, now))
+        reach = switch_policy.content_positions(current.get('messages') or [])
+        prof = switch_policy.profile(self.config, current, self.warm(task, setting, now),
+                                     entries=self.entries(task, now, reach))
         decision = switch_policy.decide(self.config, rates, usable, setting, prof, trigger)
         suite = gov.state.observations(task, revision, 'failures', 1)
         decision.update(point=key, suite_seq=suite[0]['seq'] if suite else 0, step=facts,
@@ -185,6 +192,7 @@ class ActivePolicy(ProxyPolicy):
             return {'status': 'deferred', 'reason': 'refused:' + str(exc)}
         point = self.decision_point(gov, task, request, revision, proposal)
         tokens = len(json.dumps(current)) / self.config['bytes_per_token']  # what this request's cache entry covers
+        positions = switch_policy.content_positions(current.get('messages') or [])
         decision = self.decide(gov, rates, task, revision, point, request, current, setting, now) if point else None
         if decision and decision['action'] == 'stop':
             stop = {'status': 'stop', 'reason': 'policy_stop:' + decision['reason'], 'level': proposal['level'],
@@ -201,8 +209,8 @@ class ActivePolicy(ProxyPolicy):
             except ValueError as exc:
                 ticket = {'status': 'deferred', 'reason': 'refused:' + str(exc)}
             if ticket['status'] == 'admitted':
-                self.sent(task, decision['target'], now, tokens)
+                self.sent(task, decision['target'], now, tokens, positions)
                 return dict(ticket, kind='escalation')
             deferral = ticket
-        self.sent(task, setting, now, tokens)
+        self.sent(task, setting, now, tokens, positions)
         return self.keep(gov, rates, task, revision, client, setting, current, deferral)

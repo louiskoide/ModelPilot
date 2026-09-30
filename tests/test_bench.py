@@ -56,7 +56,8 @@ class ScheduleTests(unittest.TestCase):
             ModelPilotAdapter(mode='active', tools=True, model='claude-haiku-4-5-20251001', effort=None)
         parameters = bench.modelpilot_manifest(['sonnet-5', 'modelpilot'], 1.0, 1)['modelpilot']['parameters']
         self.assertEqual(parameters['decision_points'], ['turn_start', 'stuck_evidence', 'step'])
-        self.assertEqual((parameters['step']['enabled'], parameters['return_reuse']), (True, False))
+        self.assertEqual((parameters['step']['enabled'], parameters['return_reuse']),
+                         (True, {'enabled': True, 'max_positions': 25}))
         self.assertIn('claude-opus-5-5/xhigh', parameters['settings'])
         self.assertNotIn('ladder', parameters)
         self.assertIsNone(bench.modelpilot_manifest(['sonnet-5'], 1.0, 1))

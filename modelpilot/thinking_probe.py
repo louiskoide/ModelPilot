@@ -24,6 +24,7 @@ import uuid
 from . import cache_probe as probe
 from .cache_replication import HAIKU as H, OPUS_5_5, RATES, SONNET_5_5, SOURCE, Budget
 from .policy_actions import MODELS as POLICY_MODELS, transform_request
+from .switch_policy import content_positions
 
 ROOT = Path(__file__).resolve().parents[1]
 SHAPE_FIXTURE = ROOT/'tests/fixtures/claude-2.1.284-shape.json'
@@ -305,19 +306,8 @@ def marker_index(messages):
 
 
 def positions_after(messages, index):
-    """Content positions after messages[index], counted as the API's lookback counts them: each block is one,
-    except that a run of tool_use blocks, or of tool_result blocks, is one. A string content is one block."""
-    count = 0
-    for m in messages[index + 1:]:
-        content = m.get('content')
-        blocks = [{'type': 'text'}] if isinstance(content, str) else content
-        previous = None
-        for b in blocks:
-            kind = b.get('type')
-            if not (kind in ('tool_use', 'tool_result') and kind == previous):
-                count += 1
-            previous = kind
-    return count
+    """Content positions after messages[index], counted as the policy counts a return's reach."""
+    return content_positions(messages[index + 1:])
 
 
 def with_anchor(request, index):
