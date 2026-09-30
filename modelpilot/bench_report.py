@@ -7,7 +7,9 @@ unchanged by caching, so nothing else differs. Measured cost is always reported 
 
 A request the API rejected with an error is unpriced, so the trial's headline cost stays
 unknown; a separately labeled sensitivity figure counts such rejections as free. Jev arms
-report provider cost only (router cost unpriced): their dollars are a lower bound.
+report provider cost only (router cost unpriced): their dollars are a lower bound. Trials run
+on a Claude subscription instead of an API key are priced as an API key would have been
+billed for the same tokens (api_key_equivalent); their as-sent price is kept alongside.
 
     python3 -m modelpilot.bench_report runs/bench-<ts> [--out FILE]
 
@@ -20,12 +22,45 @@ import json
 from pathlib import Path
 import random
 import statistics
+from .cache_probe import cost
 
 TTL_SECONDS = {'5m': 300, '1h': 3600}
 MIN_TASKS = 10  # below this a percentile bootstrap interval is too narrow to support a claim
 ASSUMPTIONS = ('Cache entries are per model and effort. A request can use an earlier in-trial prefix '
                '(cache read + write) started within that entry\'s TTL (300 s, or 3600 s for 1h writes); '
                'reads beyond it were inherited and are repriced as writes at the request\'s write TTL.')
+
+
+def api_key_equivalent(rows, rates):
+    """A subscription trial's proxy rows as an API key would have been billed for them.
+
+    Logged in with a subscription, Claude Code (2.1.284, checked at $0 against the owned fixture)
+    marks every cache breakpoint ttl 1h; with an API key it uses the default 5 minutes. Nothing else
+    in the request differs. So each 1h cache write moves to the 5m rate and its row is repriced;
+    tokens and everything unpriced stay as measured."""
+    out = []
+    for r in rows:
+        usage = r.get('usage') if isinstance(r.get('usage'), dict) else {}
+        split = usage.get('cache_creation') if isinstance(usage.get('cache_creation'), dict) else {}
+        hour = split.get('ephemeral_1h_input_tokens') or 0
+        if r.get('kind') != 'messages' or not hour:
+            out.append(r)
+            continue
+        usage = dict(usage, cache_creation=dict(split, ephemeral_1h_input_tokens=0,
+                                                ephemeral_5m_input_tokens=(split.get('ephemeral_5m_input_tokens') or 0) + hour))
+        row = dict(r, usage=usage, repriced_1h_write_tokens=hour)
+        if r.get('cost_usd') is not None:
+            try:
+                row['cost_usd'] = cost(usage, rates.get(r.get('model')), '5m')
+            except (KeyError, TypeError, ValueError):
+                row['cost_usd'] = None
+        out.append(row)
+    return out
+
+
+def priced_rows(record, rows, rates):
+    """The rows a trial's dollar figures come from: as measured, or as an API key would have been billed."""
+    return api_key_equivalent(rows, rates) if record.get('auth') == 'subscription' else rows
 
 
 def cache_attribution(rows, rates):
@@ -211,7 +246,7 @@ def difference(estimate, drawn, tasks):
 
 
 def cost_scope(records):
-    """'complete', 'provider_only_router_unpriced' (Jev), 'mixed', or None without records."""
+    """'complete', 'provider_only_router_unpriced' (Jev), 'api_key_equivalent' (subscription), 'mixed', or None."""
     scopes = {(r.get('accounting') or {}).get('cost_scope', 'complete') for r in records}
     return scopes.pop() if len(scopes) == 1 else 'mixed' if scopes else None
 
@@ -403,10 +438,14 @@ def pair_summary(a, b, cells_a, cells_b, rng, resamples, scopes=('complete', 'co
         point = compute(tasks, dollars)
         drawn = bootstrap(tasks, lambda sample: compute(sample, dollars), rng, resamples)
         differences.update({n: difference(point[n], drawn[n], len(tasks)) for n in point})
-    lower = [arm for arm, scope in zip((a, b), scopes) if scope not in ('complete', None)]
+    lower = [arm for arm, scope in zip((a, b), scopes) if scope not in ('complete', 'api_key_equivalent', None)]
+    equivalent = [arm for arm, scope in zip((a, b), scopes) if scope == 'api_key_equivalent']
+    basis = ([f"lower bound for {', '.join(lower)}: router cost unpriced"] if lower else []) + (
+        [f"API-key equivalent for {', '.join(equivalent)}: subscription trials, 1h cache writes priced at the 5m rate"]
+        if equivalent else [])
     return {'arms': [a, b], 'tasks': len(shared), 'dollar_tasks': len(priced),
             'excluded_unpriced_tasks': len(shared) - len(priced),
-            'dollar_basis': f"lower bound for {', '.join(lower)}: router cost unpriced" if lower else 'complete',
+            'dollar_basis': '; '.join(basis) or 'complete',
             'differences': differences}
 
 
@@ -453,7 +492,7 @@ def load_run(run_dir, rates):
         record.setdefault('complete', record.get('phase', 'graded') == 'graded')
         log = path.parent/'observations.jsonl'
         if log.exists():
-            rows = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
+            rows = priced_rows(record, [json.loads(line) for line in log.read_text().splitlines() if line.strip()], rates)
             record.update(cache=cache_attribution(rows, rates), path=setting_path(rows),
                           cost_components=cost_components(rows, rates))
         records.append(record)

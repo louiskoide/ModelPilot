@@ -100,6 +100,8 @@ class FixtureHandler(BaseHTTPRequestHandler):
         with self.server.lock:
             self.server.received.append({'sha256': hashlib.sha256(raw).hexdigest(),
                                          'key': self.headers.get('x-api-key'), 'path': self.path,
+                                         # A subscription (OAuth) client authenticates this way; the token is never kept.
+                                         'bearer': (self.headers.get('authorization') or '').startswith('Bearer '),
                                          'beta': self.headers.get('anthropic-beta'),
                                          'accept_encoding': self.headers.get('accept-encoding')})
             # Bounded memory during overnight requests.
