@@ -1,0 +1,39 @@
+{
+ "id": "mi-running-statistics",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "feature",
+ "base": "9210d54527ddfa63ebe75cd5b5daa0201902c674",
+ "reference": "18c57c720fc5a7672439ea45a5393a8c1ff40d1e",
+ "hidden_tests": [
+  "tests/test_more.py",
+  "tests/test_recipes.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more",
+  "tests.test_recipes"
+ ],
+ "instruction": "Add sliding windows and running statistics to more_itertools, next to the existing running_median. (1) running_mean(iterable, *, maxlen=None) gets the same maxlen keyword as running_median: None means all values seen so far; a positive integer means the mean of the last maxlen values (the window grows up to maxlen at the start). (2) New running_min(iterable, *, maxlen=None) and running_max(iterable, *, maxlen=None), exported from more_itertools (and in __all__): the smallest or largest of the values seen so far, or of the last maxlen values. list(running_min([4, 3, 7, 0, 8, 1, 6, 2, 9, 5], maxlen=3)) == [4, 3, 3, 0, 0, 0, 1, 1, 2, 2]. (3) New running_statistics(iterable, *, maxlen=None), exported likewise, yields one more_itertools.Stats per input value, describing the values seen so far or the window: size (how many values it covers), minimum, median (as running_median), maximum and mean (as running_mean). For [4, 3, 7] the third item equals Stats(size=3, minimum=3, median=4, maximum=7, mean=14 / 3). Stats is also exported; it is a frozen dataclass with slots and fields size, minimum, median, maximum, mean in that order: instances compare by value and are hashable, have no instance __dict__ (vars() raises TypeError), refuse attribute assignment (AttributeError), and support neither len(), indexing nor iteration (TypeError). For all four functions a non-positive maxlen raises ValueError, maxlen=1 yields values equal to the input for min, max and mean, a maxlen longer than the input gives the unbounded results, and results equal the builtin min/max and statistics.mean/statistics.median of each window. running_statistics raises immediately when called, not when first iterated: TypeError for a non-iterable argument, ValueError for a non-positive maxlen. They support int, float, Decimal and Fraction; complex values raise TypeError in running_min, running_max and running_statistics (running_mean still accepts them). Add tests.",
+ "source": "https://github.com/more-itertools/more-itertools/commit/18c57c720fc5a7672439ea45a5393a8c1ff40d1e",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change",
+ "notes": "Harder tuning task (September 29, 2026): a larger feature than the 3d corpus, mined with --max-source-lines 300, to find settings that separate the arms. Tuning only."
+}

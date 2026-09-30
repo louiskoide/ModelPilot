@@ -41,6 +41,22 @@ Reference and base results when frozen (September 29, `work/bench/py312`):
 | tomli-loads-typeerror | 3 | 0 |
 | tomli-optional-seconds | 4 | 2 |
 
+Harder tuning tasks (added September 29, before any trial ran on them; same rules):
+
+| Task | Tests | Base passes |
+| --- | --- | --- |
+| cachetools-cached-condition | 5 | 2 |
+| cachetools-tlru-cache | 6 | 0 (the module has no `TLRUCache`, so the suite fails to import) |
+| mi-reshape-multidim | 5 | 1 |
+| mi-running-statistics | 5 | 0 |
+| parse-strftime-directives | 6 | 0 |
+| tomli-decode-error-attrs | 4 | 0 |
+| toolz-compose-annotations | 6 | 0 |
+
+Two of these tests were corrected before freezing, both test bugs found by running them on the reference: the
+TLRU `popitem()` case expected the wrong item after an eviction, and a condition test paired a lock with a
+condition built on a different lock. `cachetools-cached-condition`'s threaded tests passed three runs in a row.
+
 The reference fix passes every test. A base that passes some tests is expected: those tests target incomplete
 fixes (for example, a key evicted while it is being updated), not the original bug. `cachetools-setitem-evict`'s
 growth test was changed before freezing, because the buggy base happened to end in the same state.

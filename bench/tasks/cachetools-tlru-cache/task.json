@@ -1,0 +1,39 @@
+{
+ "id": "cachetools-tlru-cache",
+ "repo": "cachetools",
+ "url": "https://github.com/tkem/cachetools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "feature",
+ "base": "0913ada036506e611fdbcbb7f827f02ee533c9cd",
+ "reference": "ec64a4375afda2f936a0c21ef80c9da2d38a01ff",
+ "hidden_tests": [
+  "tests/test_tlru.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_tlru.py"
+ ],
+ "instruction": "Add cachetools.TLRUCache(maxsize, ttu, timer=time.monotonic, getsizeof=None), exported from cachetools: an LRU cache in which each item has its own expiration time, a 'time to use'. When a key and value are inserted, the item's expiration time is ttu(key, value, timer()), any value comparable with later results of timer(). An item has expired once timer() is at or past its expiration time. Expired items are no longer in the cache: membership, [], get(), len() and iteration ignore them, and deleting or popping one raises KeyError. They are actually removed at the next mutating operation. An item whose expiration time is already not after the current time is not stored and evicts nothing (with ttu=lambda k, v, t: t + k at time 0, cache[0] = None leaves the cache unchanged). When room is needed, expired items go first and then the least recently used; popitem() removes and returns the least recently used item that has not expired. expire(time=None) removes every item that would have expired by time, or by timer() when time is None. ttu and timer are read-only properties. timer behaves like TTLCache.timer: calling it returns the current time, `with cache.timer as now:` freezes the time for the block, and attributes of the wrapped timer are reachable through it. Each single operation ([], get(), pop(), setdefault(), clear(), insertion) must see one consistent time even if the underlying timer advances on every call. It must pass the same generic cache tests as the other cache classes. Document it and add tests.",
+ "source": "https://github.com/tkem/cachetools/commit/ec64a4375afda2f936a0c21ef80c9da2d38a01ff",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change",
+ "notes": "Harder tuning task (September 29, 2026): a larger feature than the 3d corpus, mined with --max-source-lines 300, to find settings that separate the arms. Tuning only."
+}

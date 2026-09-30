@@ -137,6 +137,22 @@ Next: the 4a tuning run, designed as below (user decisions, September 27; arms u
 - **Variance check:** a second trial of 4 tasks × the same 5 arms, seed 1, `--run-budget 6`: 20 trials, about $1.7–3.8. The tasks were fixed before any 4a data, the first task of each tuning repository alphabetically: `cachetools-cache-key`, `mi-is-sorted-lt-only`, `parse-decimal-grouping`, `tomli-hex-escape`. Paired with the main run's trial, each (task, arm) has two runs, which estimates the run-to-run cost variation.
 - **Rule for the number of final trials (proposed; the user confirms it before 4b, and it is applied before any final task runs).** From the two runs, estimate the within-task variance of each arm's cost; from the main run, the between-task variance of the paired cost difference between the chosen ModelPilot variant and the cheapest fixed arm. 4b uses the smallest n in {1, 2, 3} whose projected 95% half-width of that paired difference, over 24 final tasks, is at most 15% of the fixed arm's mean cost, and 3 if none is.
 
+**Harder tuning tasks (September 29, $0; user request after 4a).** 4a's tasks didn't separate the arms: Sonnet 5.5 at medium passed all 16, so the switch policy never had anything to win. Seven harder tasks were added to the tuning split, all features, mined with `bench_tasks mine --max-source-lines 300 --since 2016-01-01` from the four tuning repositories and toolz (cloned in 3d, unused until now, never in the final split). Each was picked for a large change with thorough hidden tests, and each instruction states the behaviors those tests check.
+
+| Task | Change | Hidden tests (reference passes) | Why it's harder |
+| --- | --- | --- | --- |
+| `toolz-compose-annotations` | toolz, September 2026, 94 source lines | 39 | Committed September 18, 2026, so probably not in the models' training data; `__annotations__` must follow `inspect.signature` for partials, curry, methods and classes, while the class keeps empty annotations |
+| `parse-strftime-directives` | parse, 160 lines | 93 | 19 directives, date/time/datetime typing, a strftime round trip over every directive, and the existing `%` type kept |
+| `mi-running-statistics` | more-itertools, 2026, 209 lines | 878 | Four functions, sliding windows, a frozen slotted dataclass and errors raised when called, not when iterated |
+| `mi-reshape-multidim` | more-itertools, 73 lines | 189 | Depth-first flattening of any depth, scalar rules and truncation |
+| `tomli-decode-error-attrs` | tomli, 148 lines | 8 | Every parser error site, exact messages, and a deprecated free-form constructor whose `args` must be unchanged |
+| `cachetools-tlru-cache` | cachetools, 161 lines | 20 | A whole new cache class: per-item expiry, LRU order, frozen time per operation, generic cache tests |
+| `cachetools-cached-condition` | cachetools, 85 lines | 37 | Stampede prevention with an exact lock protocol across eight wrapper variants, and a deprecated positional argument |
+
+Rejected: cachetools' `cache_info()` for `@cachedmethod` (750 changed test lines mostly on deprecation messages), parse's hex/bin/oct fix (its tests sit at the repository root, which the grader's test-directory swap doesn't support), and two removals that the miner lists as features. All seven pass `bench_tasks validate` (base fails the hidden tests, reference passes three times, base suite passes; `runs/bench-validate-20260929-184018.json`) and the harness's $0 preflight. They are in `bench/splits.json` under `tuning`; the final specs and lock are unchanged. Each has a frozen edge-case suite (`bench/edge_tests/`, 37 tests), written from the instruction, reference and hidden tests before any trial, which its reference passes.
+
+**Proposed next run (needs approval):** the 7 harder tasks × `sonnet-5.5`, `opus-5.5`, `modelpilot` × 1 trial, seed 0, same limits as 4a (30 turns, $1 per session), `--run-budget 15`. Forecast $4.5–9 plus unpriced TypeSafe, assuming these tasks cost 2–4× 4a's per trial ($0.069 Sonnet, $0.170 Opus, $0.068 ModelPilot, cold-equivalent). It shows whether Sonnet 5.5 at medium fails where Opus passes, gives the mid-task step decisions their first live run, and feeds the re-grader (`python3 -m modelpilot.regrade`) for the priced-quality term. Adding `jev-compat-o55` costs about another $1–2.
+
 ## Question
 
 Across realistic Claude Code repository tasks, what does each arm cost per passed task, and at what pass rate and wall time? The current M6 smoke test (16 one-turn direct-API requests) cannot answer that. It is not reused as a baseline.

@@ -1,0 +1,39 @@
+{
+ "id": "cachetools-cached-condition",
+ "repo": "cachetools",
+ "url": "https://github.com/tkem/cachetools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "feature",
+ "base": "e0dde4e5d0eea45a648e51810c5a488831b40d4d",
+ "reference": "e0b98aa418a0b933abbe8146a0b6f65ed3b207b7",
+ "hidden_tests": [
+  "tests/test_cached.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_cached.py"
+ ],
+ "instruction": "Add an optional condition parameter to cachetools.cached, so the signature becomes cached(cache, key=hashkey, lock=None, condition=None, info=False). condition is an object like threading.Condition (a context manager with wait_for() and notify_all()). When it is given, concurrent calls for the same key don't all compute the value (no cache stampede): the others wait until the first has finished. The protocol, with the lock being lock if given and otherwise condition itself: acquire the lock, call condition.wait_for(predicate) until no other call is computing this key, then return the cached value if there is one, else mark the key as being computed and release; compute the value without holding the lock; acquire it again to store the value (a value too large for the cache is returned but not stored); and finally acquire it once more to unmark the key and call condition.notify_all(), even if computing failed. So a miss enters the lock three times and calls wait_for() and notify_all() once each; a hit enters it once and calls wait_for() once; cache_clear() and cache_info() (with info=True, same counts and values as today) enter it once each. Without condition, behavior is unchanged. The fourth positional argument used to be info: cached(cache, key, lock, True) must keep working as info=True but emit a DeprecationWarning. Make cachetools.func's decorators pass their threading.Condition as condition. Add tests.",
+ "source": "https://github.com/tkem/cachetools/commit/e0b98aa418a0b933abbe8146a0b6f65ed3b207b7",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change",
+ "notes": "Harder tuning task (September 29, 2026): a larger feature than the 3d corpus, mined with --max-source-lines 300, to find settings that separate the arms. Tuning only."
+}

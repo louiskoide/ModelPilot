@@ -1,0 +1,37 @@
+{
+ "id": "mi-reshape-multidim",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "feature",
+ "base": "5e0a7f46d69156389511d61314e3d737ab2d6b82",
+ "reference": "21d3d88359437146a6d8882328df4bd73edd685c",
+ "hidden_tests": [
+  "tests/test_recipes.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_recipes"
+ ],
+ "instruction": "more_itertools.reshape(matrix, cols) only turns a 2-D matrix into rows of cols columns. Change it to reshape(matrix, shape) (the second parameter is named shape). With an int shape it behaves exactly as before. With a tuple (or other iterable) of ints, the input may have any number of dimensions: it is flattened and rebuilt to that shape, iterating over the first dimension with inner dimensions as tuples. For matrix = [(0, 1), (2, 3), (4, 5)]: list(reshape(matrix, (2, 3))) == [(0, 1, 2), (3, 4, 5)]; (6,) gives [0, 1, 2, 3, 4, 5]; (6, 1) gives [(0,), (1,), (2,), (3,), (4,), (5,)]; (2, 1, 3, 1) gives [(((0,), (1,), (2,)),), (((3,), (4,), (5,)),)]. Flattening is depth first and assumes every dimension is uniform: the first value at a level decides whether that level holds scalars or nested iterables, so a scalar where a nested iterable is expected raises TypeError (list(reshape([[10, 20, 30], 40], shape=(4,))) raises TypeError). Strings and bytes are scalars: list(reshape([[['ab', b'de', 'gh', b'jk']]], (2, 2))) == [('ab', b'de'), ('gh', b'jk')]. Output stops when the requested shape is complete or the input runs out, whichever comes first: list(reshape(matrix, [3])) == [0, 1, 2], list(reshape(matrix, [8])) == [0, 1, 2, 3, 4, 5], list(reshape([[]], shape=(1,))) == []. A dimension smaller than one raises ValueError, and a non-integer dimension raises TypeError or ValueError, at the latest when the result is iterated. Update the docstring and add tests.",
+ "source": "https://github.com/more-itertools/more-itertools/commit/21d3d88359437146a6d8882328df4bd73edd685c",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change",
+ "notes": "Harder tuning task (September 29, 2026): a larger feature than the 3d corpus, mined with --max-source-lines 300, to find settings that separate the arms. Tuning only."
+}
