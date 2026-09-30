@@ -74,6 +74,10 @@ ARMS = {
                    'policy': 'docs/m6-modelpilot-policy.md'},
 }
 RUNNABLE = ('fixed', 'jev')
+AUTHS = ('api_key', 'subscription')
+# Fixed arms can run on a Claude subscription (claude setup-token) instead of an API key. The client then asks for 1h
+# cache writes, so dollars are reported API-key equivalent (bench_report.api_key_equivalent), as-sent alongside.
+SUBSCRIPTION_KINDS = ('fixed',)
 IDLE_SECONDS = 130  # the proxy's upstream socket timeout (120 s) bounds any request still in flight
 # Client result subtypes, pinned by the offline tests against Claude Code 2.1.281.
 STOPS = {'error_max_turns': 'turn_limit', 'error_max_budget_usd': 'budget_stop'}
@@ -171,6 +175,23 @@ def accounting(rows, final, jev=False):
     return out
 
 
+def subscription_accounting(rows, final, price_table):
+    """A subscription trial: dollars as an API key would have been billed for its tokens (1h cache writes at the
+    5m rate); the client comparison and the as-sent price use the rows as measured."""
+    measured = accounting(rows, final)
+    equivalent = accounting(bench_report.api_key_equivalent(rows, price_table), final)
+    fields = ('cost_usd', 'known_cost_usd', 'cost_if_rejected_free_usd')
+    return dict(measured, **{k: equivalent[k] for k in fields}, cost_scope='api_key_equivalent', billing='subscription',
+                as_sent={k: measured[k] for k in fields},
+                repricing='1h cache writes (subscription client) priced at the 5m rate an API-key client gets')
+
+
+def rate_limited(final, rows):
+    """A 429 ended the session: the account's rate or usage limit, not a model result."""
+    return final.get('api_error_status') == 429 or any(r.get('kind') == 'messages' and r.get('http_status') == 429
+                                                        for r in rows)
+
+
 def stop_reason(status, final, rows):
     """How one client session ended."""
     if status == 'timeout':
@@ -185,7 +206,10 @@ def stop_reason(status, final, rows):
         return REFUSALS.get(refusal, 'policy_stop' if refusal.startswith('policy_stop') else 'policy_refused')
     if any(r.get('status') in ('transport_error', 'connection_closed') for r in rows):
         return 'transport_error'
-    if final.get('api_error_status') and ACCOUNT_MESSAGE.search(str(final.get('result') or '')):
+    if rate_limited(final, rows):
+        return 'rate_limited'  # a subscription's usage limit, or an API rate limit: not a model result
+    if final.get('api_error_status') in (401, 403) or (
+            final.get('api_error_status') and ACCOUNT_MESSAGE.search(str(final.get('result') or ''))):
         return 'account_error'  # the Anthropic account can't pay or authenticate: not a model result
     if final.get('api_error_status'):
         return 'api_error'
@@ -362,8 +386,12 @@ class Trial:
     def __init__(self, task, arm_id, trial_dir, cli, key, upstream, price_table, *, trial=0, python=None,
                  max_turns=30, budget_usd=1.0, timeout=900, grace=10, shape='single', gap=0,
                  expected_hidden_passed=None, client_version=None, jev_key=None, jev_stub=None, router=None,
-                 adapter=None):
+                 adapter=None, auth='api_key', oauth_token=None):
         arm = ARMS[arm_id]
+        if auth not in AUTHS:
+            raise ValueError(f'unknown auth {auth}')
+        if auth == 'subscription' and (arm['kind'] not in SUBSCRIPTION_KINDS or adapter is not None or not oauth_token):
+            raise ValueError(f'{arm_id}: only fixed arms run on a subscription, and they need its token')
         if arm['kind'] not in RUNNABLE and adapter is None:
             raise NotImplementedError(f'{arm_id}: launcher not implemented yet (CLAUDE.md work item 4)')
         if shape not in SHAPES:
@@ -384,7 +412,8 @@ class Trial:
         self.prompts = [PREAMBLE + task['instruction']] + ([FOLLOW_UP] if shape == 'followup' else [])
         self.session_id = str(uuid.uuid4())
         self.sessions, self.final = [], {}
-        self.started = self.finished = self.router_unavailable = self.account_error = False
+        self.started = self.finished = self.router_unavailable = self.account_error = self.rate_limited = False
+        self.auth, self.oauth_token = auth, oauth_token
         self.proxy = self.proxy_thread = self.route = None
         self.router = (router or bench_jev.JevRouter(arm)) if arm['kind'] == 'jev' else None
         self.jev_key, self.jev_stub = jev_key, jev_stub
@@ -392,7 +421,7 @@ class Trial:
                        'spec_sha256': bench_tasks.spec_hash(task), 'shape': shape,
                        'gap_requested_seconds': gap if shape == 'followup' else None,
                        'expected_hidden_passed': expected_hidden_passed, 'limits': self.limits,
-                       'client_path': str(cli), 'client_version': client_version, 'complete': False}
+                       'client_path': str(cli), 'client_version': client_version, 'auth': auth, 'complete': False}
         if self.router:
             self.record.update(self.router.describe())
 
@@ -401,8 +430,10 @@ class Trial:
         return self.dir/'observations.jsonl'
 
     def known_cost(self):
+        """Measured dollars (a subscription trial: as sent, API-key priced; its account is not billed per token)."""
         if self.finished:  # checked before every session of a run; a finished log no longer changes
-            return self.record['accounting']['known_cost_usd']
+            accounting = self.record['accounting']
+            return (accounting.get('as_sent') or accounting)['known_cost_usd']
         return sum(r['cost_usd'] for r in read_rows(self.log) if r.get('cost_usd') is not None)
 
     def step(self):
@@ -439,7 +470,10 @@ class Trial:
         dirs = {name: self.dir/name for name in ('home', 'tmp', 'config')}
         for path in dirs.values():
             path.mkdir()
-        env = client_env(os.environ, self.api_key, dirs, self.cli, {})
+        env = client_env(os.environ, self.api_key or '', dirs, self.cli, {})
+        if self.auth == 'subscription':  # the client's own login path for a subscription; no API key in its environment
+            env.pop('ANTHROPIC_API_KEY')
+            env['CLAUDE_CODE_OAUTH_TOKEN'] = self.oauth_token
         # The agent's python3/pip/pytest are the grader's interpreter, not whatever the system has.
         env['PATH'] = os.pathsep.join([str(Path(self.python).parent), env['PATH']])
         # Same import paths as the grader, as an editable install would give a developer.
@@ -491,7 +525,8 @@ class Trial:
             idle = self.proxy.wait_idle(IDLE_SECONDS)
         for name, suffix in (('stdout', 'jsonl'), ('stderr', 'txt')):
             with (self.dir/f'client.{name}.{suffix}').open('a') as f:
-                f.write(redact(redact(result[name], self.adapter.key) if self.adapter else result[name], self.api_key))
+                f.write(redact(redact(redact(result[name], self.adapter.key) if self.adapter else result[name],
+                                      self.api_key), self.oauth_token))
         final = next((e for e in reversed(parse_events(result['stdout'])) if e.get('type') == 'result'), {})
         if final:
             self.final = final  # a resumed session's totals are cumulative for the whole session
@@ -506,6 +541,7 @@ class Trial:
                   'started_unix': started_unix, 'ended_unix': time.time(), 'first_read_tokens': first_read,
                   'proxy_idle': idle}
         self.account_error = self.account_error or record['stop'] == 'account_error'
+        self.rate_limited = self.rate_limited or record['stop'] == 'rate_limited'
         if self.router:
             record['router_pid'] = self.router.pid
             self.router.collect(self.dir/'tmp', self.dir/'decisions.json')
@@ -534,9 +570,14 @@ class Trial:
             client={'subtype': self.final.get('subtype'), 'is_error': self.final.get('is_error'),
                     'num_turns': self.final.get('num_turns'), 'stop': last.get('stop')},
             accounting=self.adapter.accounting(rows, self.final) if self.adapter else
+            subscription_accounting(rows, self.final, self.rates) if self.auth == 'subscription' else
             accounting(rows, self.final, jev=bool(self.router)),
-            cache=bench_report.cache_attribution(rows, self.rates),
-            path=bench_report.setting_path(rows), cost_components=bench_report.cost_components(rows, self.rates))
+            cache=bench_report.cache_attribution(bench_report.priced_rows(self.record, rows, self.rates), self.rates),
+            path=bench_report.setting_path(rows),
+            cost_components=bench_report.cost_components(bench_report.priced_rows(self.record, rows, self.rates), self.rates))
+        if self.auth == 'subscription':
+            self.record['as_sent'] = {'cache': bench_report.cache_attribution(rows, self.rates),
+                                      'cost_components': bench_report.cost_components(rows, self.rates)}
         if self.adapter and (self.dir/'tmp').exists():
             self.record['routing'] = self.adapter.evidence(self.dir)
             # The ModelPilot arm's advisor uses the same TypeSafe key as Jev's router: a rejected key stops the run
@@ -589,9 +630,11 @@ class Trial:
         for name in ('workspace', 'grade', 'home', 'tmp'):
             shutil.rmtree(self.dir/name, ignore_errors=True)
         # A trial the account couldn't pay for is not a model result: counted as incomplete, never as a failure.
-        self.record['complete'] = stopped is None and not self.account_error
+        self.record['complete'] = stopped is None and not self.account_error and not self.rate_limited
         if self.account_error:
             self.record['excluded_reason'] = 'anthropic_account_error'
+        elif self.rate_limited:  # a usage or rate limit cut the session short: not a model result either
+            self.record['excluded_reason'] = 'rate_limited'
         self.finished = True
         self.save('graded')
         return self.record
@@ -697,7 +740,13 @@ def modelpilot_manifest(arms, budget_usd, sessions):
 
 def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *, client_version=None, shape='single',
               gap=0, run_budget=None, expected=None, jev_key=None, trial_factory=None, clock=time.monotonic,
-              sleep=time.sleep, **limits):
+              sleep=time.sleep, subscription_arms=(), oauth_token=None, **limits):
+    """subscription_arms: fixed arms whose client logs in with a Claude subscription token (oauth_token) instead of
+    the API key. Their tokens are not billed to the API account, so the run budget counts only API-key trials."""
+    subscription_arms = tuple(subscription_arms)
+    wrong = [a for a in subscription_arms if a not in arms or ARMS[a]['kind'] not in SUBSCRIPTION_KINDS]
+    if wrong or (subscription_arms and not oauth_token):
+        raise ValueError(f'Subscription arms must be fixed arms of this run, with a token: {wrong or subscription_arms}')
     out = Path(out)
     out.mkdir(mode=0o700, parents=True)
     order = schedule(tasks, arms, trials, seed)
@@ -713,6 +762,11 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
                 'follow_up_prompt': FOLLOW_UP if shape == 'followup' else None, 'run_budget_usd': run_budget,
                 'reference_preflight': expected, 'cost_basis': 'cold-equivalent; measured alongside',
                 'jev': jev_manifest(arms),
+                'auth': {a: 'subscription' if a in subscription_arms else 'api_key' for a in arms},
+                'subscription_note': ('Subscription arms log in with a claude setup-token token. The client asks for 1h cache '
+                                      'writes then (5m with an API key); dollars are API-key equivalent (1h writes at the 5m '
+                                      'rate), as-sent alongside, and do not count toward the run budget.')
+                if subscription_arms else None,
                 'modelpilot': modelpilot_manifest(arms, limits.get('budget_usd', 1.0), 2 if shape == 'followup' else 1),
                 'note': 'Stop thresholds are not billing caps: per session, and the run threshold between sessions. No retries.'}
     with (out/'manifest.json').open('x') as f:
@@ -720,15 +774,18 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
 
     def default_factory(task, arm, trial_dir, n):
         adapter = arm_adapter(arm, limits.get('budget_usd', 1.0), 2 if shape == 'followup' else 1, jev_key)
+        subscription = arm in subscription_arms
         return Trial(task, arm, trial_dir, cli, key, upstream, price_table, trial=n, shape=shape, gap=gap,
                      client_version=client_version, jev_key=jev_key, adapter=adapter,
+                     auth='subscription' if subscription else 'api_key', oauth_token=oauth_token if subscription else None,
                      expected_hidden_passed=((expected or {}).get(task['id']) or {}).get('hidden_passed'), **limits)
     factory = trial_factory or default_factory
     executed = []
     lazy = [LazyTrial(lambda t=t, a=a, n=n: factory(by_id[t], a, out/t/a/str(n), n), executed) for t, a, n in order]
 
-    def spend():
-        return sum(item.trial.known_cost() for item in lazy if item.trial)
+    def spend(billing='api_key'):
+        return sum(item.trial.known_cost() for item in lazy
+                   if item.trial and getattr(item.trial, 'auth', 'api_key') == billing)
 
     def stop():
         # A rejected TypeSafe key would make every later Jev trial fail open onto Opus.
@@ -737,6 +794,9 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
         # An Anthropic account that can't pay or authenticate fails every later trial the same way.
         if any(item.trial.account_error for item in lazy if item.trial):
             return 'anthropic_account_error'
+        # A usage or rate limit would cut every later session short the same way; no retries.
+        if any(getattr(item.trial, 'rate_limited', False) for item in lazy if item.trial):
+            return 'rate_limited'
         return 'run_budget' if run_budget is not None and spend() >= run_budget else None
     reason = error = None
     try:
@@ -755,6 +815,7 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
         summary = bench_report.summarize(records, arms, seed=seed)
         summary.update(trials=len(records), complete=reason is None and error is None, stopped=reason, error=error,
                        known_spend_usd=spend(), executed=executed,
+                       subscription_as_sent_usd=spend('subscription') if subscription_arms else None,
                        unknown_cost_trials=[f"{r['task']}/{r['arm']}/{r['trial']}" for r in records
                                             if (r.get('accounting') or {}).get('cost_usd') is None])
         (out/'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
@@ -775,6 +836,9 @@ def main():
     parser.add_argument('--claude', type=Path)
     parser.add_argument('--live', action='store_true', help='Required to send billable requests')
     parser.add_argument('--final', action='store_true', help='Allow final-split tasks (only for the frozen evaluation)')
+    parser.add_argument('--subscription-arms', default='',
+                        help='Comma-separated fixed arms that run on a Claude subscription (a claude setup-token token, '
+                             'asked for at a hidden prompt) instead of the API key; dollars are reported API-key equivalent')
     args = parser.parse_args()
     tasks = [t for i in args.tasks.split(',') for t in bench_tasks.load(i)]
     arms = args.arms.split(',')
@@ -783,6 +847,11 @@ def main():
         raise SystemExit(f'Unknown task or arm. Arms: {", ".join(ARMS)}')
     if args.gap and args.shape != 'followup':
         raise SystemExit('--gap applies only to --shape followup.')
+    subscription_arms = [a for a in args.subscription_arms.split(',') if a]
+    wrong = [a for a in subscription_arms if a not in arms or ARMS[a]['kind'] not in SUBSCRIPTION_KINDS]
+    if wrong:
+        raise SystemExit(f'--subscription-arms takes fixed arms of this run only: {", ".join(wrong)}.')
+    api_arms = [a for a in arms if a not in subscription_arms]
     if bench_tasks.SPLITS.exists():
         final = [t['id'] for t in tasks if bench_tasks.split_of(t['id']) == 'final']
         if final and not args.final:
@@ -827,7 +896,7 @@ def main():
         if planned:
             print('Client: ' + planned + ' A live run would stop here.')
         shape = f'follow-up after {args.gap:g} s' if args.shape == 'followup' else 'single prompt'
-        ceiling = runs * sessions * args.budget
+        ceiling = len(tasks) * len(api_arms) * args.trials * sessions * args.budget  # API-billed sessions only
         if args.run_budget is None:
             run_stop, worst = 'No run stop threshold yet (--live needs --run-budget).', ceiling
         else:
@@ -836,12 +905,17 @@ def main():
             worst = min(ceiling, args.run_budget + args.budget)
         print(f'Prepared {runs} trials ({len(tasks)} tasks × {len(arms)} arms × {args.trials}), {shape}, seed {args.seed}, '
               f'max {args.max_turns} turns and ${args.budget:.2f} stop threshold per session. {run_stop} Up to about '
-              f'${worst:.2f} if sessions reach their thresholds. Thresholds are not billing caps. No retries. Add --live.')
+              f'${worst:.2f} of API spend if sessions reach their thresholds. Thresholds are not billing caps. No retries. Add --live.')
         if jev_arms:
             print(f'Jev arms {", ".join(jev_arms)}: checkouts verified. TypeSafe routing is billed separately and unpriced, '
                   'so their dollars are a lower bound; the client stop threshold is priced on the jev-router sentinel. '
                   'Stock Jev is expected not to route on this client (run as Opus plus router overhead). '
                   '--live asks for a TypeSafe key; consider python3 -m modelpilot.jev_check --live first.')
+        if subscription_arms:
+            print(f'Subscription arms {", ".join(subscription_arms)}: the client logs in with a claude setup-token token '
+                  '(hidden prompt with --live) and asks for 1h cache writes; their dollars are reported API-key '
+                  'equivalent (1h writes at the 5m rate), as-sent alongside, and do not count toward the run budget. '
+                  'A usage or rate limit (HTTP 429) excludes the trial and stops the run.')
         for arm in (a for a in arms if ARMS[a]['kind'] == 'modelpilot'):
             print(f'ModelPilot arm {arm}: active policy (benchmark arm only). Jev (compat checkout, advice only) predicts '
                   'the model and effort at each turn start and on stuck evidence; ModelPilot jumps straight there when '
@@ -857,10 +931,18 @@ def main():
         bench_tasks.lock_benchmark_environment(python)
     except (OSError, ValueError) as e:
         raise SystemExit(f'Cannot lock benchmark dependencies: {e}')
-    key = os.environ.get('ANTHROPIC_API_KEY') or getpass.getpass('Anthropic API key (hidden): ').strip()
-    problem = check_anthropic_key(key)
-    if problem:
-        raise SystemExit(problem + ' No billable requests sent.')
+    key = None
+    if api_arms:
+        key = os.environ.get('ANTHROPIC_API_KEY') or getpass.getpass('Anthropic API key (hidden): ').strip()
+        problem = check_anthropic_key(key)
+        if problem:
+            raise SystemExit(problem + ' No billable requests sent.')
+    oauth_token = None
+    if subscription_arms:
+        oauth_token = (os.environ.get('CLAUDE_CODE_OAUTH_TOKEN') or
+                       getpass.getpass('Claude subscription token from `claude setup-token` (hidden): ').strip())
+        if not oauth_token or any(c.isspace() for c in oauth_token):
+            raise SystemExit('Missing or malformed subscription token. No requests sent.')
     jev_key = None
     if jev_arms or advised:
         jev_key = (os.environ.get('JEV_API_KEY') or os.environ.get('TYPESAFE_API_KEY')
@@ -872,7 +954,8 @@ def main():
           f'results: {out}', flush=True)
     summary = run_bench(tasks, arms, args.trials, args.seed, out, cli, key, 'https://api.anthropic.com', table,
                         client_version=version, shape=args.shape, gap=args.gap, run_budget=args.run_budget,
-                        expected=expected, jev_key=jev_key, max_turns=args.max_turns, budget_usd=args.budget)
+                        expected=expected, jev_key=jev_key, max_turns=args.max_turns, budget_usd=args.budget,
+                        subscription_arms=subscription_arms, oauth_token=oauth_token)
     print(json.dumps(summary, indent=2))
 
 
