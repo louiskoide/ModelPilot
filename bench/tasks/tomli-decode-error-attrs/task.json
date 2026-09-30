@@ -1,0 +1,37 @@
+{
+ "id": "tomli-decode-error-attrs",
+ "repo": "tomli",
+ "url": "https://github.com/hukkin/tomli",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "feature",
+ "base": "59ed9efb3d6bb7ec71454601a72088b0a6853b8c",
+ "reference": "d1d6a8571b06b18005af8bf9078c1d37de5353e1",
+ "hidden_tests": [
+  "tests/test_error.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_error"
+ ],
+ "instruction": "Give tomli.TOMLDecodeError the attributes json.JSONDecodeError has. It is constructed as TOMLDecodeError(msg, doc, pos): msg the unformatted message (str), doc the TOML document being parsed (str), pos the index in doc where parsing failed (int). It has attributes msg, doc, pos, lineno and colno, the 1-based line and column of pos. Its str() and its only arg are msg followed by the position: '<msg> (at line <lineno>, column <colno>)', or '<msg> (at end of document)' when pos is at or past the end of doc. For example, e = TOMLDecodeError('error parsing', \"v=1\\n[table]\\nv='val'\", 13) has e.lineno == 3, e.colno == 2 and e.args == ('error parsing (at line 3, column 2)',). Every error the parser raises must be constructed this way, with the same messages and positions it reports today. Any other call (no arguments, fewer or more than three, or arguments that are not (str, str, int)) still works, as a plain ValueError whose args are exactly the arguments passed (TOMLDecodeError(None, 'doc').args == (None, 'doc')), but emits a DeprecationWarning. The class's __module__ stays 'tomli'. Add tests and a changelog entry.",
+ "source": "https://github.com/hukkin/tomli/commit/d1d6a8571b06b18005af8bf9078c1d37de5353e1",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change",
+ "notes": "Harder tuning task (September 29, 2026): a larger feature than the 3d corpus, mined with --max-source-lines 300, to find settings that separate the arms. Tuning only."
+}

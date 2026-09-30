@@ -217,3 +217,27 @@ Unlike Sonnet 5, **a Sonnet 5.5 effort change keeps the tools and system cached 
 
 **`runs/thinking-probe-sonnet-5-5-20260928-150023`: not evidence.** It served 46 requests ($0.9522298 known), then the account's credit ran out. The API answered one switched request (model_up) and the next seed with HTTP 400 "Your credit balance is too low", and the run stopped. The probe recorded that switched request as a *rejected transition*, which it wasn't. Fixed: `cache_probe.send` now keeps the API's error type, and `cache_probe.account_problem` recognises billing and authentication failures. A switched request that fails that way now stops the run with no verdict (`tests/test_thinking_probe.py`).
 
+
+## Returns to a warm setting (September 29; offline, not yet run)
+
+The policy's `return_reuse` (off) would price a move back to a setting whose own cache entry is still warm as writing only what that entry misses. M0 measured such returns without thinking history only. The `returns` suite measures them in the pinned client's request shape, with thinking history, and tests one rule from the API documentation: a breakpoint looks back at most 20 content positions for an earlier entry (a run of `tool_use` blocks, or of `tool_result` blocks, is one position). Each Claude Code step adds about four (the reply's thinking and tool call, the tool result and the client's system note). So a return after a few steps may not reach the home setting's entry, even though that entry is warm.
+
+Each group seeds at home (Sonnet 5.5 medium, the arm's start), sends `away` requests at another setting, then one request back home. Every request is a tool continuation: the tool result asks for the next value, and a reply that ends its turn gets the same instruction as a new user turn. Requests are built at the client's setting and rewritten by `transform_request`, as the proxy would, and keep the client's betas.
+
+| Case | Away setting | Away requests | Positions from home's last breakpoint to the return's | Question |
+| --- | --- | --- | --- | --- |
+| `return/effort_near` | Sonnet 5.5 high | 1 | about 8 | Does an effort return read home's messages entry? |
+| `return/effort_far` | Sonnet 5.5 high | 6 | about 28 | Does the 20-position lookback miss it? |
+| `return/effort_far_anchored` | Sonnet 5.5 high | 6 | about 28, plus a breakpoint put back on home's last cached block | Does an anchor recover it? |
+| `return/model_near` | Opus 5.5 medium | 1 | about 8 | Does a model return read home's entry, after the away model's thinking (which Sonnet 5.5 drops)? |
+
+Each return records home's entry size (the seed's cache read plus write), its own read and write, the counted positions and `return_reuse`: `entry_read` (read at least home's entry), `partial` (e.g. tools and system only) or `none`. `return_findings` in the summary gives each case's repeats with `entry_read`. A return group is its own control: every away request after the first continues the previous one on the same setting, and the rows record what it read. A rejected away request ends the group as `rejected`; a refusal makes it `inconclusive`.
+
+Forecast from the Sonnet 5.5 run's measured costs (seeds about $0.023, continuations about $0.003, a switch to Opus 5.5 about $0.045): about $0.40 for 44 requests over 2 repeats. The admission ceiling ($8.87) counts every request as a full write at `max_tokens`, so use `--budget 2`:
+
+```sh
+python3 -m modelpilot.thinking_probe --suite returns                    # plan only, $0
+python3 -m modelpilot.thinking_probe --suite returns --live --budget 2  # your own Terminal; hidden key prompt
+```
+
+What the result changes: if near returns read home's entry and far ones don't, `return_reuse` can be turned on with a reachability condition (the target's last breakpoint within the lookback, or an anchor the proxy adds). If near returns don't read it either, `return_reuse` stays off.

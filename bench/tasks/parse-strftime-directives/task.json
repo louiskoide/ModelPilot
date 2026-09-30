@@ -1,0 +1,43 @@
+{
+ "id": "parse-strftime-directives",
+ "repo": "parse",
+ "url": "https://github.com/r1chardj0n3s/parse",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "-o",
+  "addopts=",
+  "tests"
+ ],
+ "type": "feature",
+ "base": "04314d815703ecab7b00a160085d82ebfa724447",
+ "reference": "a2e1334e4d1de24161331779a1e46108899ce728",
+ "hidden_tests": [
+  "tests/test_parse.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "-o",
+  "addopts=",
+  "tests/test_parse.py"
+ ],
+ "instruction": "Let parse fields use strftime-style datetime formats (the 1989 C standard directives) as their type, e.g. parse('a {:%Y-%m-%d} b', 'a 1997-07-16 b'), '{dt:%Y-%m-%d %H:%M:%S}' or '{:%Y%m%d}'. A format spec that contains a supported directive is a datetime format; the existing '%' (percentage) type and every other type, including tg/ta/te/th/ti/tt/tc/ts, must behave as before. Supported directives: %a %A %w %d %b %B %m %y %Y %H %I %p %M %S %f %z %j %U %W. Expose them as a module-level dict parse.dt_format_to_regex that maps each supported directive to the regular expression it matches (tests iterate over its keys). The result type depends on the directives in the format: date directives (%a %A %w %d %b %B %m %y %Y %j %U %W) and time directives (%H %I %p %M %S %f %z) together give datetime.datetime, date directives alone datetime.date, time directives alone datetime.time. A format without %y or %Y uses the current year; missing time parts are 0 (parse('a {time:%M:%S} b', 'a 23:27 b') gives time(0, 23, 27); '{:%M:%S:%f}' on '23:27:123456' gives time(0, 23, 27, 123456)). %d and %m accept one or two digits ('{:%Y/%m/%d}' on '2023/1/1' gives date(2023, 1, 1)); %j accepts one to three digits ('{:%Y/%j}' on '2023/9' and on '2023/009' gives date(2023, 1, 9)); %f is six digits; %z accepts +HHMM and colon-separated offsets with optional seconds ('+0000', '+00:00', '+00:00:00'), giving an aware result; %b %B %a %A match English names ('{:%Y-%b-%d}' on '1997-Feb-16', '{:%Y-%B-%d}' on '1997-February-16'). These fields are ordinary fixed or named fields: parse('a {:%Y-%b-%d} {:d} b', 'a 1997-Feb-16 8 b') has two fixed results. For every supported directive except %z, a datetime formatted with strftime using all of them joined by '_' must parse back to the same datetime. Document the feature in the README and add tests.",
+ "source": "https://github.com/r1chardj0n3s/parse/commit/a2e1334e4d1de24161331779a1e46108899ce728",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change",
+ "notes": "Harder tuning task (September 29, 2026): a larger feature than the 3d corpus, mined with --max-source-lines 300, to find settings that separate the arms. Tuning only."
+}

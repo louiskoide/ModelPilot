@@ -1,0 +1,42 @@
+{
+ "id": "toolz-compose-annotations",
+ "repo": "toolz",
+ "url": "https://github.com/pytoolz/toolz",
+ "license": "BSD-3-Clause",
+ "test_dir": "toolz/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "setup_files": {
+  "toolz-1.1.1.dev0.dist-info/METADATA": "Metadata-Version: 2.1\nName: toolz\nVersion: 1.1.1.dev0\n"
+ },
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "toolz/tests"
+ ],
+ "type": "feature",
+ "base": "80ddcb3e104eda18838a2e7f7a10b9dc4e8086a8",
+ "reference": "a1e25cbd2c398b534f0736f5838e416202b0cb28",
+ "hidden_tests": [
+  "toolz/tests/test_functoolz.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "toolz/tests/test_functoolz.py"
+ ],
+ "instruction": "toolz's Compose (what compose() and compose_left() return) already reports a combined signature through __signature__: the parameters of the first function applied and the return annotation of the last. Its __annotations__ does not match that, so typing.get_type_hints, inspect.get_annotations and functools.wraps don't see the composed types. Make a Compose instance's __annotations__ a dict built the same way as its signature: the annotated parameters of the first function applied, plus 'return' from the last function applied if it has a return annotation. For def f(x: int) -> str and def g(y: str) -> float: compose(g, f).__annotations__ == {'x': int, 'return': float}; with an unannotated h, compose(h, f) gives {'x': int}, compose(f, h) gives {'return': str} and compose(h, h) gives {}. It must equal what inspect.signature(c) reports for plain functions, functools.partial, curry, bound methods, classes (their __init__ parameters; class-level variable annotations are not part of it, so for class A with __init__(self, a: int), compose(g, A) gives {'a': int, 'return': float}) and nested compositions. A callable or object without a retrievable signature (e.g. compose(str, object())) contributes nothing, and nothing raises. String annotations (from `from __future__ import annotations`) stay strings in __annotations__, and typing.get_type_hints(composition) must still resolve them. functools.wraps(composition)(wrapper) must copy the combined annotations. The Compose class itself keeps ordinary, empty annotations: typing.get_type_hints(Compose) == {} and inspect.get_annotations(Compose) == {}. Add tests.",
+ "source": "https://github.com/pytoolz/toolz/commit/a1e25cbd2c398b534f0736f5838e416202b0cb28",
+ "notes": "toolz reads __version__ from install metadata; setup_files stands in for pip install -e (as for click). The hidden test for Python 3.14 annotation formats is skipped on the benchmark's 3.12. Harder tuning task (September 29, 2026): a larger feature than the 3d corpus, mined with --max-source-lines 300, to find settings that separate the arms. Tuning only.",
+ "instruction_source": "written from the fix commit message, linked issue and hidden tests; describes behavior, not the change"
+}
