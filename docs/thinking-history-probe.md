@@ -259,7 +259,7 @@ What the result changes: if near returns read home's entry and far ones don't, `
 
 Consequence: `return_reuse` is on (September 30), limited to returns at most 25 content positions after the setting was last sent (`return_reuse.max_positions`, counted by `switch_policy.content_positions`, the rule this probe used). Farther returns are priced like a first switch. Model returns more than 8 positions back and returns to Opus 5.5 are not measured separately; they fall under the same rule.
 
-## Per-message effort (built September 30; not yet run)
+## Per-message effort (built September 30, run October 1)
 
 User request, September 30: stop an effort change from making the model re-read the conversation at full price. Today the proxy changes the top-level `output_config.effort`, which invalidates the messages cache, so every effort change rewrites the whole conversation (about $0.07 on Sonnet 5.5 and $0.14 on Opus 5.5 for 30,000 tokens). The API's per-message effort (beta `mid-conversation-output-config-2026-07-01`; Claude Code 2.1.284 already sends its older spelling `per-turn-control-2026-07-01`) changes effort with an effort-only system message, `{"role": "system", "content": [], "output_config": {"effort": ...}}`, "from the next user turn" until a later one changes it, without invalidating the cache. The docs add that lowering effort this way is reliable and raising it works best for large jumps.
 
@@ -285,3 +285,26 @@ python3 -m modelpilot.thinking_probe --suite per-message-effort --live --budget 
 ```
 
 What the result decides: the proxy side is built (`per_message_effort` in `configs/modelpilot-policy.json`, off). It is turned on with the placement that is accepted and keeps the cache, if raising effort through a message moves thinking to about the native reference. If `top_xhigh` stays at the control's thinking, today's effort changes did nothing after a turn's first reply, and the per-message path replaces them; a 400 about the beta would set `per_message_effort.beta`.
+
+### Results (October 1)
+
+`runs/thinking-probe-per-message-effort-20261001-160146`: 74 of 80 requests, $0.9300466, 320 s, no rejections or refusals, client shape 2.1.284 with the client's own effort message. Mean thinking tokens per step (2 repeats):
+
+| Case | Seed | Step 1 | Step 2 | Step 3 | Cache at steps 2 and 3 |
+| --- | --- | --- | --- | --- | --- |
+| `control` (medium) | 228 | 476 | 346 | 257 | kept |
+| `native_xhigh` | 350 | 619 | 572 | 394 | kept |
+| `top_xhigh` (top-level from step 2) | 228 | 522 | 394 | 274 | kept |
+| `pm_xhigh` (message from step 2) | 222 | 426 | 380 | 243 | kept |
+| `pm_xhigh_after` | 222 | 472 | 330 | 255 | kept |
+| `pm_high` | 236 | 493 | 347 | 248 | kept |
+| `pm_low` | 235 | 448 | 324 | 252 | kept |
+| `pm_xhigh_at_start` (message from the first request) | 314 | 725 | 520 | 393 | kept |
+
+- **An effort message at a turn start works.** Placed after the client's note on the turn's first request, it raised thinking at every step to about the native xhigh reference, and the cache was kept.
+- **Inside a turn's tool loop, effort doesn't change.** Effort messages from step 2 (xhigh, high or low, before or after the tool result) left steps 2 and 3 at the control's thinking. "From the next user turn" means the next user turn proper; tool results don't start one.
+- **The top-level change did nothing either, and cost nothing.** With the client's effort message present, a top-level change from step 2 kept the cache (the earlier probes, without that message, saw the messages rewritten) and didn't change thinking. So the proxy's top-level effort changes have very likely never taken effect in real Claude Code traffic: "Opus 5.5 xhigh" jumps ran Opus at the client's medium.
+- Every placement was accepted, including between a tool call and its result.
+- Not measured: the `native_low` reference (at low effort Sonnet skipped thinking on the seed, which the probe then treated as inconclusive; fixed since: a seed without thinking counts in this suite) and Opus lowering (`opus_pm_low` had no Opus control).
+
+Consequence (October 1): `per_message_effort` is on, and new effort messages are added only at turn starts; `effort_changes_at: ["turn_start"]` makes the switch policy keep the turn's effort at mid-task steps and on stuck evidence, where only the model can move. The user chose not to run a confirmation probe.

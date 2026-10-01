@@ -666,7 +666,7 @@ def execute(groups, out, budget, suite, repeats, transport=probe.send):
             outcome = {'mode': mode, 'placement': placement, 'thinking': [_thinking_tokens(row)],
                        'reads': [row['usage'].get('cache_read_input_tokens') or 0], 'entries': [_entry_tokens(row['usage'])]}
             problem = seed_problem(group['shape'], reply)
-            if problem:
+            if problem and problem != 'seed_without_thinking':  # at low effort a seed may skip thinking; it still counts
                 return dict(outcome, verdict='inconclusive', reason=problem)
             for step in range(1, EFFORT_STEPS + 1):
                 client = puzzle_request(group, client, reply, step)

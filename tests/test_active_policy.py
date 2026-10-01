@@ -293,7 +293,9 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertEqual([policy_actions.effective_effort(b) for b in bodies], ['xhigh', 'xhigh'])
         self.assertEqual([r.get('effective_effort') for r in self.rows()], ['xhigh', 'xhigh'])
 
-    def test_a_step_back_down_adds_a_message_at_the_frontier_and_keeps_the_first(self):
+    def test_effort_changes_at_the_next_user_turn_not_at_a_step(self):
+        """Inside a turn's tool loop an effort change doesn't take effect (per-message-effort probe): a mid-task step
+        keeps the turn's effort, and the next user turn can change it."""
         self.start(config=self.pme_config())
         self.advise(S, 'xhigh')
         self.post(messages=self.convo(0), thinking=self.ADAPTIVE)
@@ -302,12 +304,15 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
             self.post(messages=self.convo(rounds), thinking=self.ADAPTIVE)
         self.advise(S, 'low', effort_p=.9)
         self.post(messages=self.convo(3), thinking=self.ADAPTIVE)  # the third since the decision: a step
-        self.post(messages=self.convo(4), thinking=self.ADAPTIVE)
         step = self.decisions()[-1]
-        self.assertEqual((step['trigger'], step['target']), ('step', [S, 'low']))
+        self.assertEqual((step['trigger'], step['action'], step['target']), ('step', 'stay', [S, 'xhigh']))
+        self.assertEqual(self.effort_positions(self.forwarded()[-1]), [(0, 'xhigh')])  # nothing added mid-turn
+        follow_up = self.convo(4) + [{'role': 'user', 'content': 'Now also handle the empty case.'}]
+        self.post(messages=follow_up, thinking=self.ADAPTIVE)  # a new user turn: effort can move
+        turn = self.decisions()[-1]
+        self.assertEqual((turn['trigger'], turn['target']), ('turn_start', [S, 'low']))
         last = self.forwarded()[-1]
-        # The step's message went before that request's newest user turn (index 6 of the client's messages).
-        self.assertEqual(self.effort_positions(last), [(0, 'xhigh'), (7, 'low')])
+        self.assertEqual(self.effort_positions(last), [(0, 'xhigh'), (10, 'low')])  # before the new user message
         self.assertEqual((last['output_config']['effort'], policy_actions.effective_effort(last)), ('medium', 'low'))
 
     def test_a_model_jump_carries_its_effort_in_a_message(self):
@@ -322,18 +327,17 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.start(config=self.pme_config())
         self.advise(S, 'xhigh')
         self.post(messages=self.convo(0), thinking=self.ADAPTIVE)
-        self.post(messages=self.convo(1), thinking=self.ADAPTIVE)
-        compacted = self.convo(1, first='summary of the earlier conversation')
-        self.post(messages=compacted, thinking=self.ADAPTIVE)
-        last = self.forwarded()[-1]
-        self.assertEqual(self.effort_positions(last), [(2, 'xhigh')])  # a fresh one at the new frontier
-        # Claude Code resending an earlier system note as a string is not a rewrite.
-        noted = self.convo(2) + [{'role': 'system', 'content': [{'type': 'text', 'text': 'n', 'cache_control': {'type': 'ephemeral'}}]}]
-        again = self.convo(3)
-        again[5:5] = [{'role': 'system', 'content': 'n'}]
+        # Claude Code resending an earlier system note as a string is not a rewrite: the message stays.
+        noted = self.convo(1) + [{'role': 'system', 'content': [{'type': 'text', 'text': 'n', 'cache_control': {'type': 'ephemeral'}}]}]
+        again = self.convo(2)
+        again[3:3] = [{'role': 'system', 'content': 'n'}]
         self.post(messages=noted, thinking=self.ADAPTIVE)
         self.post(messages=again, thinking=self.ADAPTIVE)
-        self.assertEqual(self.effort_positions(self.forwarded()[-1]), self.effort_positions(self.forwarded()[-2]))
+        self.assertEqual([self.effort_positions(b) for b in self.forwarded()[-2:]], [[(0, 'xhigh')]] * 2)
+        compacted = self.convo(2, first='summary of the earlier conversation')
+        self.post(messages=compacted, thinking=self.ADAPTIVE)
+        # Dropped; mid-turn a new one would not take effect, so the next user turn sets the effort again.
+        self.assertEqual(self.effort_positions(self.forwarded()[-1]), [])
 
     def test_without_adaptive_thinking_or_when_off_the_top_level_effort_is_used(self):
         self.start(config=self.pme_config())
@@ -349,7 +353,7 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.post(messages=self.convo(0), thinking=self.ADAPTIVE)
         self.assertEqual(self.upstream.received[-1]['beta'], beta)
 
-    def test_the_suite_passing_is_a_step_that_can_move_back_down(self):
+    def test_the_suite_passing_is_a_step_that_can_move_back_down_at_the_turns_effort(self):
         self.start()
         self.advise(O, 'xhigh')
         self.post(messages=self.TURN)  # the turn looks hard: straight to Opus xhigh
@@ -359,17 +363,17 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.advise(S, 'medium')
         self.post(messages=self.CONTINUE)  # the third: a step, and the rest looks routine
         self.post(messages=self.CONTINUE)
-        self.assertEqual(self.sent(), [(O, 'xhigh')]*3 + [(S, 'medium')]*2)
+        # Back to Sonnet, at the turn's effort: inside the tool loop the effort can't change.
+        self.assertEqual(self.sent(), [(O, 'xhigh')]*3 + [(S, 'xhigh')]*2)
         turn, step = self.decisions()
         self.assertEqual((step['trigger'], step['action'], step['target'], step['step']['cause'], step['step']['requests']),
-                         ('step', 'jump', [S, 'medium'], 'tests_now_pass', 3))
+                         ('step', 'jump', [S, 'xhigh'], 'tests_now_pass', 3))
         self.assertIn(f'{O}/xhigh', step['profile']['warm_entries'])
         self.assertEqual(len(self.advisor.calls), 2)
         self.assertIn('the test suite now passes', self.advisor.calls[-1]['evidence'])
         self.assertEqual([(d['trigger'], d['status']) for d in self.dispatches()],
                          [('turn_start', 'confirmed'), ('step', 'confirmed')])
-        # Back on the client's own setting, requests are forwarded unchanged.
-        self.assertEqual(self.rows()[-1]['policy']['reason'], 'no_executable_escalation')
+        self.assertEqual(self.rows()[-1]['policy']['kind'], 'keep_escalated')
 
     def test_the_suite_failing_again_is_a_step(self):
         self.start()
@@ -379,7 +383,7 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.advise(O, 'xhigh')
         for _ in range(3):
             self.post(messages=self.CONTINUE)
-        self.assertEqual(self.sent(), [(S, 'medium')]*3 + [(O, 'xhigh')])
+        self.assertEqual(self.sent(), [(S, 'medium')]*3 + [(O, 'medium')])  # Opus, at the turn's effort
         step = self.decisions()[-1]
         self.assertEqual((step['step']['cause'], step['action']), ('tests_now_fail', 'jump'))
         self.assertIn('the test suite now fails', self.advisor.calls[-1]['evidence'])
@@ -448,11 +452,11 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
 
     def test_a_deferred_jump_is_recorded_on_the_request_that_keeps_the_setting(self):
         self.start(limit=.001)
-        self.advise(O, 'xhigh')
+        self.advise(S, 'xhigh')
         self.post(messages=self.TURN)  # a small request's rebuild fits
         self.stuck()
         big = self.CONTINUE + [{'role': 'user', 'content': 'x' * 30000}]
-        self.post(messages=big)  # the only stronger setting, Opus max: its rebuild does not fit
+        self.post(messages=big)  # the only stronger setting in the turn, Opus xhigh: its rebuild does not fit
         last = self.rows()[-1]
         self.assertEqual((last['effort'], last['policy']['kind'], last['policy']['escalation_deferred']),
                          ('xhigh', 'keep_escalated', 'insufficient_write_reservation'))
@@ -497,8 +501,9 @@ class WarmEntryReachTests(unittest.TestCase):
         reach, ttl = policy.config['return_reuse']['max_positions'], policy.config['cache_ttl_seconds']
         policy.sent('t', (S, 'medium'), 1000.0, 9000, 40)
         policy.sent('t', (O, 'xhigh'), 1010.0, 9500, 50)
+        # With per-message effort a model's cache doesn't depend on effort, so each model's newest entry is also '/*'.
         self.assertEqual(policy.entries('t', 1020.0, 40 + reach),
-                         {f'{S}/medium': 9000, f'{O}/xhigh': 9500})
-        self.assertEqual(policy.entries('t', 1020.0, 41 + reach), {f'{O}/xhigh': 9500})  # one position too far
-        self.assertEqual(policy.entries('t', 1000.0 + ttl + 1, 50), {f'{O}/xhigh': 9500})  # expired
+                         {f'{S}/medium': 9000, f'{O}/xhigh': 9500, f'{S}/*': 9000, f'{O}/*': 9500})
+        self.assertEqual(policy.entries('t', 1020.0, 41 + reach), {f'{O}/xhigh': 9500, f'{O}/*': 9500})  # too far
+        self.assertEqual(policy.entries('t', 1000.0 + ttl + 1, 50), {f'{O}/xhigh': 9500, f'{O}/*': 9500})  # expired
         self.assertEqual(policy.entries('other', 1020.0, 40), {})

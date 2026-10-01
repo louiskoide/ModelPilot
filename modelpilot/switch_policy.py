@@ -15,9 +15,9 @@ with that of each direct move:
   newest breakpoint (return_reuse.max_positions content positions), writes only what that entry doesn't
   cover.
 - candidates: staying and Jev's setting; when Jev is unsure of the model (or the effort), also Jev's
-  effort (or model) alone, so a move can take the part Jev is sure of. When it is sure of both, nothing
-  cheaper is tried first, except at a mid-task step, where Jev's effort on the current model is always
-  weighed: an effort change rewrites less than a model change.
+  effort (or model) alone, so a move can take the part Jev is sure of. Effort changes only where
+  effort_changes_at allows (a turn start): inside a turn's tool loop it does not take effect, so at a
+  mid-task step or on stuck evidence only the model moves, at the turn's effort.
 - P_ok(c): Jev's model answer is the cheapest model that can finish in one pass, and its effort
   answer the lowest effort that can. So c is enough when both are at or below c's, treated as
   independent. On evidence that the current setting isn't enough, the probabilities are
@@ -61,6 +61,8 @@ def load(path=CONFIG):
                          'overrun_factor > 0')
     if type(cfg['return_reuse']['enabled']) is not bool or not _count(cfg['return_reuse']['max_positions'], 0):
         raise ValueError('return_reuse: enabled is a boolean, max_positions an integer >= 0')
+    if not (isinstance(cfg['effort_changes_at'], list) and set(cfg['effort_changes_at']) <= set(TRIGGERS)):
+        raise ValueError(f'effort_changes_at must be a list of decision points among {TRIGGERS}')
     pme = cfg['per_message_effort']
     if (type(pme['enabled']) is not bool or pme['placement'] not in ('before_result', 'after_result')
             or not (pme['beta'] is None or isinstance(pme['beta'], str) and pme['beta'] and ',' not in pme['beta'])):
@@ -224,10 +226,17 @@ def _decide(cfg, rates, advice, current, prof, trigger):
     current = tuple(current)
     out = {'trigger': trigger, 'current': list(current), 'target': list(current), 'applied': False}
     runnable = settings(cfg)
+    # Effort is set per user turn: an effort change inside a turn's tool loop does not take effect (per-message-effort
+    # probe, September 30), so elsewhere only the model can move, at the turn's effort.
+    effort_fixed = trigger not in cfg['effort_changes_at']
+    if effort_fixed:
+        runnable = [c for c in runnable if c[1] == current[1] or c == current]
     probabilities = sufficiency(cfg, advice) if advice else None
     if probabilities is None:
         return dict(out, action='stay', reason='advice_unavailable')
     model_ok, effort_ok = probabilities
+    if effort_fixed:  # every candidate runs at the turn's effort, which can't change here: compare the models only
+        effort_ok = lambda effort: 1.0
     model_answer, effort_answer = advice.get('model') or {}, advice.get('effort') or {}
     out['jev'] = {'model': model_answer.get('choice'), 'model_confidence': model_answer.get('confidence'),
                   'effort': effort_answer.get('choice'), 'effort_confidence': effort_answer.get('confidence')}
@@ -257,6 +266,8 @@ def _decide(cfg, rates, advice, current, prof, trigger):
         moves.append((jm, current[1]))
     if trigger == 'step' or not _at_least_number(model_answer.get('confidence'), sure):
         moves.append((current[0], je))
+    if effort_fixed:
+        moves = [(m, current[1]) for m, _ in moves]
     moves = [(m, e if m in cfg['models'] and cfg['models'][m]['efforts'] else None) for m, e in moves]
     pick = moves[0] if moves[0] in runnable else None
     if trigger in ('turn_start', 'step'):

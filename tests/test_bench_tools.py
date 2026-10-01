@@ -185,7 +185,8 @@ class ToolTrialTests(unittest.TestCase):
         self.assertFalse(routing['benchmark_eligible'])
 
     def main_loop(self):
-        return [(json.loads(b)['model'], json.loads(b)['output_config']['effort'])
+        """(model, effort in force) per main-loop request: the latest effort message, else the top-level effort."""
+        return [(json.loads(b)['model'], policy_actions.effective_effort(json.loads(b)))
                 for b in self.upstream.bodies if b'"tools"' in b]
 
     OPUS_RATES = dict(test_bench.RATES, **{'claude-opus-5-5': dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)})
@@ -206,17 +207,20 @@ class ToolTrialTests(unittest.TestCase):
     def test_the_active_arm_jumps_straight_to_jevs_setting_and_again_on_stuck_evidence(self):
         script = self.STALLED + [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
                                  {'tool': 'mcp__modelpilot__run_tests', 'input': {}}, {'text': 'Done.'}]
-        record = self.advised_trial('active', script, 'claude-opus-5-5', 'xhigh', rates=self.OPUS_RATES)
+        record = self.advised_trial('active', script, 'claude-sonnet-5-5', 'high', rates=self.OPUS_RATES)
         self.assertTrue(record['passed'], record['grade'])
-        # The first request jumps from the client's Sonnet 5.5 medium straight to Jev's Opus 5.5 xhigh; three stalled
-        # suite runs are evidence it isn't enough, and the only stronger setting is Opus 5.5 max.
-        self.assertEqual(self.main_loop(), [('claude-opus-5-5', 'xhigh')]*4 + [('claude-opus-5-5', 'max')]*3)
+        # The first request (a turn start) jumps from the client's Sonnet 5.5 medium straight to Jev's Sonnet 5.5 high;
+        # three stalled suite runs are evidence it isn't enough, and inside the turn only the model can move: Opus 5.5,
+        # at the turn's effort.
+        self.assertEqual(self.main_loop(), [('claude-sonnet-5-5', 'high')]*4 + [('claude-opus-5-5', 'high')]*3)
         routing = record['routing']
         self.assertEqual((routing['mode'], routing['benchmark_eligible'], routing['ineligible_reason']),
                          ('active', False, 'advisor_stub'))
         policy = routing['policy']
-        self.assertEqual([(e['action'], e['trigger'], e['status'], e['target_effort']) for e in policy['escalations']],
-                         [('jump', 'turn_start', 'confirmed', 'xhigh'), ('jump', 'stuck_evidence', 'confirmed', 'max')])
+        self.assertEqual([(e['action'], e['trigger'], e['status'], e['target_model'], e['target_effort'])
+                          for e in policy['escalations']],
+                         [('jump', 'turn_start', 'confirmed', 'claude-sonnet-5-5', 'high'),
+                          ('jump', 'stuck_evidence', 'confirmed', 'claude-opus-5-5', 'high')])
         self.assertEqual([(d['trigger'], d['action']) for d in policy['decisions']],
                          [('turn_start', 'jump'), ('stuck_evidence', 'jump')])
         self.assertEqual((routing['advisor']['calls'], routing['advisor']['failures'], routing['advisor']['live']), (2, 0, False))

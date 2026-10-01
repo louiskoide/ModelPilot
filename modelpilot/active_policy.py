@@ -37,7 +37,7 @@ def parameters(model, effort, config=None):
     """The arm's frozen parameters: its fallback start, where it decides, and the switch rule."""
     cfg = config or switch_policy.load()
     return {'S0': [model, effort], 'advisor': 'Jev (compat checkout): its model question unchanged, plus one effort question',
-            'decision_points': cfg['decision_points'],
+            'decision_points': cfg['decision_points'], 'effort_changes_at': cfg['effort_changes_at'],
             'step': {k: cfg['step'][k] for k in ('enabled', 'min_requests_between', 'max_per_revision', 'overrun_factor')},
             'return_reuse': {k: cfg['return_reuse'][k] for k in ('enabled', 'max_positions')},
             'settings': ['/'.join(str(x) for x in s) for s in switch_policy.settings(cfg)],
@@ -235,7 +235,8 @@ class ActivePolicy(ProxyPolicy):
                 sent = []  # the client rewrote its history (e.g. compaction): the cache is gone anyway, start over
             self.history[task] = (len(messages), prefix_digest(messages))
             current = sent[-1][1] if sent else client_effort
-            if effort != current:
+            # Only at a turn start: inside a turn's tool loop an effort message does not take effect.
+            if effort != current and user_turns(request)[1]:
                 anchor = effort_anchor(messages, self.config['per_message_effort']['placement'])
                 if sent and anchor <= sent[-1][0]:
                     sent = sent[:-1]  # a second change at the same frontier replaces the first
