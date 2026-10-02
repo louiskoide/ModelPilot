@@ -136,7 +136,7 @@ def setting_path(rows):
         if reason and reason not in IDLE_DEFERRALS:
             deferred['thinking_history_unverified' if reason.startswith('refused:Thinking history') else reason] += 1
         if r.get('tool_count'):
-            setting = [r.get('model'), r.get('effort')]
+            setting = [r.get('model'), r.get('effective_effort') or r.get('effort')]  # per-message effort, if set
             if not steps or steps[-1]['setting'] != setting:
                 steps.append({'setting': setting, 'requests': 0, 'cost_usd': 0.0})
             bucket = steps[-1]

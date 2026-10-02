@@ -4,7 +4,7 @@ import copy
 import json
 import math
 from pathlib import Path
-from .proxy import reservation_estimate
+from .proxy import effective_effort, reservation_estimate  # effective_effort: re-exported
 
 # The policy's models, cheapest first, and what each accepts, from configs/modelpilot-policy.json so the tier set
 # can change without code. Opus 5.5 replaced Opus 5 on September 26 and Sonnet 5.5 replaced Sonnet 5 on
@@ -78,6 +78,34 @@ def transform_request(request,model,effort,allow_thinking_history=False):
                     raise ValueError('Only text system context can be relocated')
                 content.extend(blocks)
             messages[-1]['content']=content
+    return out
+
+
+# Per-message effort (beta): an effort-only system message changes effort from the next user turn without invalidating
+# the prompt cache, where a top-level effort change rewrites the messages. It must stay where it was first sent.
+PLACEMENTS=('before_result','after_result')
+
+
+def effort_message(effort):
+    return {'role':'system','content':[],'output_config':{'effort':effort}}
+
+
+def effort_anchor(messages,placement):
+    """Where an effort message goes in a request: before its newest user message, or right after it, and always after
+    the client's own effort message. Claude Code 2.1.284 puts its --effort value in the system note after the prompt;
+    a later effort message is the one that holds, so an earlier one would be overridden by the client's."""
+    if placement not in PLACEMENTS:raise ValueError(f'Unknown placement {placement!r}')
+    last_user=max(i for i,m in enumerate(messages) if m.get('role')=='user')
+    clients=[i for i,m in enumerate(messages) if m.get('role')=='system' and isinstance(m.get('output_config'),dict)]
+    return max(last_user if placement=='before_result' else last_user+1,(clients[-1]+1) if clients else 0)
+
+
+def with_effort_messages(request,injections):
+    """The request with each (index, effort, ...) effort message inserted at its index in the client's own message
+    list, the one it was first sent at; the top-level effort is left as it is."""
+    out=copy.deepcopy(request)
+    for item in sorted(injections,key=lambda i:i[0],reverse=True):
+        out['messages'].insert(item[0],effort_message(item[1]))
     return out
 
 
