@@ -98,14 +98,22 @@ class SwitchPolicyTests(unittest.TestCase):
         self.assertEqual(hopeless['action'], 'jump')
         self.assertLess(hopeless['required_usd'], .05)
 
+    def off(self):
+        """Top-level effort changes, as before per-message effort (September 30)."""
+        cfg = copy.deepcopy(self.cfg)
+        cfg['per_message_effort']['enabled'] = False
+        return cfg
+
     def test_switch_costs_by_kind(self):
         prof = sp.profile(self.cfg, dict(request(40), tools=[{'name': 'x', 'description': 'y' * 20000}]), warm=True)
-        model_change = sp.switch_cost(self.cfg, self.rates, (S, 'medium'), (O, 'medium'), prof)
-        opus_effort = sp.switch_cost(self.cfg, self.rates, (O, 'medium'), (O, 'high'), prof)
-        sonnet_effort = sp.switch_cost(self.cfg, self.rates, (S, 'medium'), (S, 'high'), prof)
+        self.assertEqual(sp.switch_cost(self.cfg, self.rates, (S, 'medium'), (S, 'high'), prof), 0)  # per-message effort
+        off = self.off()
+        model_change = sp.switch_cost(off, self.rates, (S, 'medium'), (O, 'medium'), prof)
+        opus_effort = sp.switch_cost(off, self.rates, (O, 'medium'), (O, 'high'), prof)
+        sonnet_effort = sp.switch_cost(off, self.rates, (S, 'medium'), (S, 'high'), prof)
         self.assertAlmostEqual(model_change, prof['prefix_tokens'] * (5 - .2) / 1e6)
         self.assertAlmostEqual(opus_effort, prof['messages_tokens'] * (5 - .2) / 1e6)  # Opus 5.5 keeps tools and system
-        cfg = copy.deepcopy(self.cfg)
+        cfg = copy.deepcopy(off)
         cfg['models'][S]['effort_switch_rewrite'] = 'full'  # as Sonnet 5 did
         self.assertAlmostEqual(sp.switch_cost(cfg, self.rates, (S, 'medium'), (S, 'high'), prof),
                                prof['prefix_tokens'] * (2.5 - .2) / 1e6)
@@ -120,6 +128,11 @@ class SwitchPolicyTests(unittest.TestCase):
         self.assertEqual(rows[f'{S}/medium']['p_ok'], 0)
         self.assertTrue(all(sp.at_least(self.cfg, tuple(c.split('/')), (S, 'medium')) for c in rows))
         self.assertNotIn(f'{O}/low', rows)  # weaker effort: not ruled in by the evidence
+        # Inside the turn the effort can't change: only a stronger model at the turn's effort is offered.
+        self.assertEqual(set(rows), {f'{S}/medium', f'{O}/medium'})
+        self.assertEqual(decision['target'], [O, 'medium'])
+        # On the top model nothing stronger is left in the turn (raising the effort would not take effect).
+        self.assertEqual(self.decide(advice(O, 'max'), (O, 'xhigh'), trigger='stuck_evidence')['action'], 'stop')
 
     def test_stuck_with_nothing_stronger_stops(self):
         decision = self.decide(advice(O, 'max'), (O, 'max'), trigger='stuck_evidence')
@@ -135,15 +148,20 @@ class SwitchPolicyTests(unittest.TestCase):
         decision = self.decide(adv, (S, 'medium'))
         self.assertEqual({c['setting'] for c in decision['candidates']}, {f'{S}/medium', f'{O}/medium'})
 
-    def test_a_step_always_weighs_jevs_effort_on_the_current_model(self):
-        # Jev is sure of both answers: a turn start weighs only its setting, a mid-task step also the cheaper
-        # effort-only move, whose rewrite is smaller than a model change's.
+    def test_effort_moves_only_at_a_turn_start(self):
+        # Inside a turn's tool loop an effort change does not take effect (per-message-effort probe), so a mid-task
+        # step offers Jev's model at the turn's effort; a turn start offers Jev's whole setting.
         turn = self.decide(advice(O, 'high'), (S, 'medium'), kb=60, warm=True)
         step = self.decide(advice(O, 'high'), (S, 'medium'), kb=60, warm=True, trigger='step')
         self.assertEqual({c['setting'] for c in turn['candidates']}, {f'{S}/medium', f'{O}/high'})
+        self.assertEqual({c['setting'] for c in step['candidates']}, {f'{S}/medium', f'{O}/medium'})
+        down = self.decide(advice(S, 'low'), (O, 'xhigh'), kb=60, warm=True, trigger='step')
+        self.assertEqual({c['setting'] for c in down['candidates']}, {f'{O}/xhigh', f'{S}/xhigh'})
+        # A configuration that allows effort moves at steps gets the effort-only candidate back.
+        cfg = self.off()
+        cfg['effort_changes_at'] = ['turn_start', 'step']
+        step = self.decide(advice(O, 'high'), (S, 'medium'), kb=60, warm=True, trigger='step', cfg=cfg)
         self.assertEqual({c['setting'] for c in step['candidates']}, {f'{S}/medium', f'{O}/high', f'{S}/high'})
-        rows = {c['setting']: c for c in step['candidates']}
-        self.assertLess(rows[f'{S}/high']['switch_usd'], rows[f'{O}/high']['switch_usd'])
 
     def test_every_decision_carries_the_forecast_it_leaves_the_task_on(self):
         prof = sp.profile(self.cfg, request(11), False)
@@ -159,7 +177,7 @@ class SwitchPolicyTests(unittest.TestCase):
         covered = prof['prefix_tokens'] - 1000  # Sonnet medium ran until 1,000 tokens ago
         prof = sp.profile(self.cfg, request_, warm=True, entries={f'{S}/medium': covered})
         extra = (2.5 - .2) / 1e6
-        on, off = copy.deepcopy(self.cfg), copy.deepcopy(self.cfg)
+        on, off = self.off(), self.off()  # effort rewrites, to see what a warm entry saves
         on['return_reuse']['enabled'], off['return_reuse']['enabled'] = True, False
         self.assertTrue(self.cfg['return_reuse']['enabled'])  # on since the returns probe (September 30)
         # Off: a return is priced like a first switch.
@@ -172,9 +190,21 @@ class SwitchPolicyTests(unittest.TestCase):
                                prof['prefix_tokens'] * extra)
         self.assertAlmostEqual(sp.switch_cost(on, self.rates, (S, 'high'), (S, 'low'), prof, reuse=True),
                                prof['messages_tokens'] * extra)  # no entry of its own: a first switch
-        decision = sp.decide(on, self.rates, advice(S, 'medium'), (O, 'xhigh'), prof, 'step')
+        decision = sp.decide(on, self.rates, advice(S, 'medium'), (O, 'xhigh'), prof, 'turn_start')
         target = next(c for c in decision['candidates'] if c['setting'] == f'{S}/medium')
         self.assertAlmostEqual(target['switch_usd'], 1000 * extra)
+
+    def test_per_message_effort_makes_effort_changes_free_but_not_model_changes(self):
+        request_ = dict(request(40), tools=[{'name': 'x', 'description': 'y' * 20000}])
+        prof = sp.profile(self.cfg, request_, warm=True)
+        on = self.cfg  # on by default since the probe
+        self.assertEqual(sp.switch_cost(on, self.rates, (S, 'medium'), (S, 'xhigh'), prof), 0)
+        self.assertGreater(sp.switch_cost(on, self.rates, (S, 'medium'), (O, 'medium'), prof), 0)
+        self.assertGreater(sp.switch_cost(self.off(), self.rates, (S, 'medium'), (S, 'xhigh'), prof), 0)
+        # A return to a warm model counts its newest entry, whatever effort it ran at.
+        prof = sp.profile(on, request_, warm=True, entries={f'{S}/*': prof['prefix_tokens'] - 1000})
+        self.assertAlmostEqual(sp.switch_cost(on, self.rates, (O, 'xhigh'), (S, 'low'), prof, reuse=True),
+                               1000 * (2.5 - .2) / 1e6)
 
     def test_a_bad_config_is_refused(self):
         for change in ({'effort_switch_rewrite': 'partial'}, {'efforts': ['medium', 'extreme']}):
@@ -188,7 +218,9 @@ class SwitchPolicyTests(unittest.TestCase):
         for path, value in ((('decision_points',), ['turn_start', 'hourly']), (('step', 'min_requests_between'), 0),
                             (('step', 'max_per_revision'), 1.5), (('step', 'overrun_factor'), 0),
                             (('step', 'enabled'), 'yes'), (('return_reuse', 'enabled'), 1),
-                            (('return_reuse', 'max_positions'), -1), (('return_reuse', 'max_positions'), 2.5)):
+                            (('return_reuse', 'max_positions'), -1), (('return_reuse', 'max_positions'), 2.5),
+                            (('per_message_effort', 'placement'), 'middle'), (('per_message_effort', 'beta'), 'a,b'),
+                            (('effort_changes_at',), ['turn_start', 'hourly'])):
             cfg = copy.deepcopy(self.cfg)
             (cfg[path[0]] if len(path) == 2 else cfg).__setitem__(path[-1], value)
             with tempfile.NamedTemporaryFile('w', suffix='.json') as f:
