@@ -17,6 +17,13 @@ H = 'claude-haiku-4-5-20251001'
 ONE = 100*2/1e6 + 4*10/1e6  # one scripted Sonnet 5.5 reply: 100 input and 4 output tokens
 
 
+def jev_only():
+    """The shipped policy with calibration off: these tests script Jev's advice to drive the proxy's moves."""
+    cfg = switch_policy.load()
+    cfg['calibration']['enabled'] = False
+    return cfg
+
+
 class ScriptedAdvisor:
     """Stands in for Jev (advisor.JevAdvisor): returns a scripted answer and records each call."""
     live = False
@@ -47,7 +54,7 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.session = f's{limit}'
         self.advisor = ScriptedAdvisor()
         self.proxy = ProxyServer(('127.0.0.1', 0), self.url, self.log, RATES,
-                                 policy=ActivePolicy(client, OWNER, advisor=self.advisor, config=config),
+                                 policy=ActivePolicy(client, OWNER, advisor=self.advisor, config=config or jev_only()),
                                  governor={'db': self.db, 'session': self.session, 'limit_usd': limit, 'task': self.task})
         self.proxy_thread = threading.Thread(target=self.proxy.serve_forever, daemon=True)
         self.proxy_thread.start()
@@ -206,14 +213,18 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         long = [{'role': 'user', 'content': 'x' * 300000}]
         self.advise(O, 'high')
         self.post(model=O, output_config={'effort': 'high'}, messages=long)
-        self.advise(S, 'medium')  # the next turn looks easy, but moving would rewrite ~75K cached tokens
+        self.advise(S, 'medium')  # the next turn looks easy, but moving would rewrite ~107K cached tokens
         turn2 = long + [{'role': 'assistant', 'content': 'done'}, {'role': 'user', 'content': 'next'}]
         self.post(model=O, output_config={'effort': 'high'}, messages=turn2)
         self.assertEqual(self.sent(), [(O, 'high')]*2)
         first, second = self.decisions()
-        self.assertEqual((second['trigger'], second['action'], second['reason'], second['profile']['warm'], second['downgrade']),
-                         ('turn_start', 'stay', 'not_worth_switching', True, True))
-        self.assertGreater(second['required_usd'], second['benefit_usd'])
+        self.assertEqual((second['trigger'], second['action'], second['reason'], second['profile']['warm']),
+                         ('turn_start', 'stay', 'current_is_cheapest', True))
+        stay, down = second['candidates']
+        self.assertEqual(down['setting'], f'{S}/medium')
+        self.assertGreater(down['switch_usd'], .2)  # the rewrite outweighs Sonnet's cheaper requests
+        self.assertGreater(down['expected_usd'] - down['switch_usd'], 0)
+        self.assertLess(down['expected_usd'] - down['switch_usd'], stay['expected_usd'])  # without it, moving would pay
 
     def test_stuck_evidence_jumps_to_a_stronger_setting_with_jevs_advice(self):
         self.start()
@@ -240,7 +251,7 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
             gov.close()
 
     def pme_config(self, **changes):
-        cfg = switch_policy.load()
+        cfg = jev_only()
         cfg['per_message_effort'].update(dict(enabled=True), **changes)
         return cfg
 
@@ -389,7 +400,7 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertIn('the test suite now fails', self.advisor.calls[-1]['evidence'])
 
     def test_spending_past_the_forecast_is_a_step_limited_per_revision(self):
-        cfg = switch_policy.load()
+        cfg = jev_only()
         cfg['step'].update(overrun_factor=1e-3, max_per_revision=1)  # one scripted reply overruns 0.1% of the forecast
         self.start(config=cfg)
         self.advise(S, 'medium')
@@ -405,7 +416,7 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertEqual(self.sent(), [(S, 'medium')]*10)
 
     def test_steps_can_be_turned_off(self):
-        cfg = switch_policy.load()
+        cfg = jev_only()
         cfg['step'].update(enabled=False)
         self.start(config=cfg)
         self.advise(S, 'medium')

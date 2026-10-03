@@ -21,9 +21,16 @@ def request(kb):
     return {'model': S, 'messages': [{'role': 'user', 'content': 'x' * (kb * 1000 - 200)}]}
 
 
+def jev_only(cfg=None):
+    """The shipped config with calibration off: Jev's probabilities as given, to test the mechanics around them."""
+    cfg = copy.deepcopy(cfg or sp.load())
+    cfg['calibration']['enabled'] = False
+    return cfg
+
+
 class SwitchPolicyTests(unittest.TestCase):
     def setUp(self):
-        self.cfg, self.rates = sp.load(), bench.rates()
+        self.cfg, self.rates = jev_only(), bench.rates()
 
     def decide(self, adv, current, kb=11, warm=False, trigger='turn_start', cfg=None):
         cfg = cfg or self.cfg
@@ -56,7 +63,10 @@ class SwitchPolicyTests(unittest.TestCase):
     def test_a_clear_prediction_jumps_whatever_the_guessed_parameters(self):
         # A redo can fail too: staying on a setting that will likely fail carries the same downstream risk as moving
         # now, so the guesses (horizon, effort output factors, wasted fraction) can't turn a clear case into a stay.
-        for horizon, spread, wasted in itertools.product([5, 15, 40], [.5, 1, 2], [.25, .5, .75]):
+        # Not at a wasted fraction as low as 0.25: a failure is redone at the turn's effort first (Opus 5.5 medium,
+        # which Jev gives about 15% here) before a new turn can raise it, and when a failure wastes little, that
+        # cheaper path comes within a few percent of jumping now (since October 3).
+        for horizon, spread, wasted in itertools.product([5, 15, 40], [.5, 1, 2], [.5, .75]):
             cfg = copy.deepcopy(self.cfg)
             cfg['defaults']['horizon_requests'] = horizon
             cfg['effort_output_factor'] = {e: 1 + (f - 1) * spread for e, f in self.cfg['effort_output_factor'].items()}
@@ -78,9 +88,10 @@ class SwitchPolicyTests(unittest.TestCase):
 
     def test_a_downgrade_pays_when_cold_but_not_in_a_warm_long_session(self):
         adv = advice(S, 'medium', model_p=.85, models={H: .1, S: .85, O: .05})
-        warm = self.decide(adv, (O, 'high'), kb=300, warm=True)
-        self.assertEqual((warm['action'], warm['reason'], warm['downgrade']), ('stay', 'not_worth_switching', True))
-        self.assertGreater(warm['required_usd'], self.cfg['hysteresis_usd'])  # plus a multiple of the rewrite
+        self.assertEqual(self.decide(adv, (O, 'high'), kb=300, warm=True)['action'], 'stay')
+        shorter = self.decide(adv, (O, 'high'), kb=100, warm=True)
+        self.assertTrue(shorter['downgrade'])
+        self.assertGreater(shorter['required_usd'], self.cfg['hysteresis_usd'])  # plus a multiple of the rewrite
         self.assertEqual(self.decide(adv, (O, 'high'), kb=20, warm=False)['action'], 'jump')
 
     def test_a_low_confidence_downgrade_is_refused(self):
@@ -90,13 +101,13 @@ class SwitchPolicyTests(unittest.TestCase):
 
     def test_hysteresis_protects_a_plausible_setting_not_a_hopeless_one(self):
         plausible = advice(S, 'high', model_p=.9, effort_p=.6)  # Sonnet medium has about a 20% chance of being enough
-        self.assertEqual(self.decide(plausible, (S, 'medium'))['action'], 'jump')  # a small gain, with a small margin
-        cfg = dict(self.cfg, hysteresis_usd=1.0)
+        self.assertEqual(self.decide(plausible, (S, 'medium'))['action'], 'jump')  # with a small margin
+        cfg = dict(self.cfg, hysteresis_usd=5.0)
         decision = self.decide(plausible, (S, 'medium'), cfg=cfg)
         self.assertEqual((decision['action'], decision['reason']), ('stay', 'not_worth_switching'))
         hopeless = self.decide(advice(O, 'xhigh'), (S, 'medium'), cfg=cfg)  # almost surely not enough: little protection
         self.assertEqual(hopeless['action'], 'jump')
-        self.assertLess(hopeless['required_usd'], .05)
+        self.assertLess(hopeless['required_usd'], .1)
 
     def off(self):
         """Top-level effort changes, as before per-message effort (September 30)."""
@@ -220,7 +231,12 @@ class SwitchPolicyTests(unittest.TestCase):
                             (('step', 'enabled'), 'yes'), (('return_reuse', 'enabled'), 1),
                             (('return_reuse', 'max_positions'), -1), (('return_reuse', 'max_positions'), 2.5),
                             (('per_message_effort', 'placement'), 'middle'), (('per_message_effort', 'beta'), 'a,b'),
-                            (('effort_changes_at',), ['turn_start', 'hourly'])):
+                            (('effort_changes_at',), ['turn_start', 'hourly']),
+                            (('effort_request_factor',), {'medium': 1.0}), (('effort_output_factor',), dict.fromkeys(EFFORTS, 0)),
+                            (('calibration', 'enabled'), 'yes'), (('calibration', 'jev_weight'), 1.5),
+                            (('calibration', 'applies_at'), ['stuck_evidence']),
+                            (('calibration', 'outcomes'), {f'{S}/medium': {'passed': 5, 'trials': 4}}),
+                            (('calibration', 'outcomes'), {f'{S}/extreme': {'passed': 1, 'trials': 1}})):
             cfg = copy.deepcopy(self.cfg)
             (cfg[path[0]] if len(path) == 2 else cfg).__setitem__(path[-1], value)
             with tempfile.NamedTemporaryFile('w', suffix='.json') as f:
@@ -228,6 +244,123 @@ class SwitchPolicyTests(unittest.TestCase):
                 f.flush()
                 with self.assertRaises(ValueError, msg=path):
                     sp.load(f.name)
+        cfg = copy.deepcopy(self.cfg)
+        cfg['models'][O]['request_factor'] = 0
+        with tempfile.NamedTemporaryFile('w', suffix='.json') as f:
+            json.dump(cfg, f)
+            f.flush()
+            with self.assertRaises(ValueError):
+                sp.load(f.name)
+
+    def test_a_failure_is_redone_at_the_turns_effort_and_then_in_a_new_turn(self):
+        # Jev's Opus 5.5 xhigh: a failure of Sonnet 5.5 medium shows inside the turn, where only the model can move, so
+        # it is redone on Opus 5.5 medium; if that fails too, a new turn can raise the effort to Jev's setting.
+        prof = sp.profile(self.cfg, request(11), False)
+        adv = advice(O, 'xhigh', model_p=.85, effort_p=.7)
+        decision = sp.decide(self.cfg, self.rates, adv, (S, 'medium'), prof, 'turn_start')
+        stay = decision['candidates'][0]
+        model_ok, effort_ok = sp.sufficiency(self.cfg, adv)
+        run = lambda s: sp.run_cost(self.cfg, self.rates, s, prof)
+        switch = lambda a, b: sp.switch_cost(self.cfg, self.rates, a, b, prof, warm=True)
+        w = self.cfg['recovery']['wasted_fraction']
+        p_om, p_ox = model_ok(O) * effort_ok('medium'), model_ok(O) * effort_ok('xhigh')
+        top = run((O, 'max'))  # the strongest of all: where a failure of Jev's setting goes
+        jev = p_ox * run((O, 'xhigh')) + (1 - p_ox) * (w * run((O, 'xhigh')) + switch((O, 'xhigh'), (O, 'max')) + top)
+        opus_medium = p_om * run((O, 'medium')) + (1 - p_om) * (w * run((O, 'medium')) + jev)
+        self.assertAlmostEqual(stay['recover_usd'], w * run((S, 'medium')) + switch((S, 'medium'), (O, 'medium')) + opus_medium)
+        # A configuration whose stuck evidence could change the effort redoes it on Jev's setting straight away.
+        cfg = copy.deepcopy(self.cfg)
+        cfg['effort_changes_at'] = ['turn_start', 'stuck_evidence']
+        anywhere = sp.decide(cfg, self.rates, adv, (S, 'medium'), prof, 'turn_start')['candidates'][0]
+        self.assertAlmostEqual(anywhere['recover_usd'], w * run((S, 'medium')) + switch((S, 'medium'), (O, 'xhigh')) + jev)
+
+
+class CostModelTests(unittest.TestCase):
+    """run_cost against the measured shape of a task (configs/modelpilot-policy.json, defaults_evidence)."""
+
+    def setUp(self):
+        self.cfg, self.rates = sp.load(), bench.rates()
+        self.prof = dict(self.cfg['defaults'], prefix_tokens=7100, messages_tokens=1500, warm=False, warm_entries={})
+
+    def expected(self, model, requests, reply, warm=False):
+        rate, d = self.rates[model], self.cfg['defaults']
+        growth = d['new_input_tokens'] + reply
+        prefix = 7100 + (requests - 1) / 2 * growth
+        cold = 0 if warm else 7100 * (rate['write_5m'] - rate['read'])
+        return (requests * (prefix * rate['read'] + growth * rate['write_5m'] + reply * rate['output']) + cold) / 1e6
+
+    def test_each_request_reads_the_prefix_writes_what_it_adds_and_a_cold_start_writes_the_prefix(self):
+        d = self.cfg['defaults']
+        self.assertAlmostEqual(sp.run_cost(self.cfg, self.rates, (S, 'medium'), self.prof),
+                               self.expected(S, d['horizon_requests'], d['output_tokens']))
+        warm = dict(self.prof, warm=True)
+        self.assertAlmostEqual(sp.run_cost(self.cfg, self.rates, (S, 'medium'), warm),
+                               self.expected(S, d['horizon_requests'], d['output_tokens'], warm=True))
+        # The measured shape forecasts what a Sonnet 5.5 and an Opus 5.5 medium task cost on the tuning split.
+        self.assertAlmostEqual(sp.run_cost(self.cfg, self.rates, (S, 'medium'), self.prof), .085, delta=.01)
+        self.assertAlmostEqual(sp.run_cost(self.cfg, self.rates, (O, 'medium'), self.prof), .219, delta=.02)
+
+    def test_effort_and_model_scale_the_requests_and_the_output_per_request(self):
+        d, cfg = self.cfg['defaults'], self.cfg
+        for model, effort in ((S, 'high'), (O, 'medium'), (O, 'xhigh')):
+            spec = cfg['models'][model]
+            requests = d['horizon_requests'] * cfg['effort_request_factor'][effort] * spec['request_factor']
+            reply = d['output_tokens'] * cfg['effort_output_factor'][effort] * spec['output_factor']
+            self.assertAlmostEqual(sp.run_cost(cfg, self.rates, (model, effort), self.prof),
+                                   self.expected(model, requests, reply), msg=(model, effort))
+
+
+class CalibrationTests(unittest.TestCase):
+    """P_ok blends Jev with the pass rates measured on the tuning split (configs/modelpilot-policy.json, calibration)."""
+
+    # Jev's recorded answer for cachetools-tlru-cache (bench-20261003-095823): Sonnet 5.5, effort high at 0.34.
+    TLRU = {'model': {'choice': S, 'confidence': .81, 'probabilities': {O: .12, S: .87, H: .01}},
+            'effort': {'choice': 'high', 'confidence': .34,
+                       'probabilities': {'low': 0, 'medium': .11, 'high': .48, 'xhigh': .4, 'max': .01}}}
+
+    def setUp(self):
+        self.cfg, self.rates = sp.load(), bench.rates()
+        self.prof = sp.profile(self.cfg, request(16), False)
+
+    def decide(self, adv, current=(S, 'medium'), trigger='turn_start', cfg=None):
+        return sp.decide(cfg or self.cfg, self.rates, adv, current, self.prof, trigger)
+
+    def test_the_shipped_config_is_calibrated_on_the_fixed_arms_tuning_results(self):
+        cal = self.cfg['calibration']
+        self.assertTrue(cal['enabled'])
+        self.assertEqual(cal['outcomes'], {f'{S}/medium': {'passed': 23, 'trials': 23},
+                                           f'{O}/medium': {'passed': 23, 'trials': 23}})
+        self.assertAlmostEqual(sp.measured_ok(self.cfg, (S, 'medium')), 24 / 25)
+        self.assertAlmostEqual(sp.measured_ok(self.cfg, (O, 'xhigh')), 24 / 25)  # at least as strong as a measured one
+        self.assertIsNone(sp.measured_ok(self.cfg, (S, 'low')))  # nothing measured that weak: Jev's estimate alone
+
+    def test_p_ok_blends_the_measured_rate_with_jevs_estimate(self):
+        decision = self.decide(self.TLRU)
+        w = self.cfg['calibration']['jev_weight']
+        self.assertEqual(decision['calibration'], {'jev_weight': w})
+        for row in decision['candidates']:
+            self.assertAlmostEqual(row['p_ok'], (1 - w) * row['p_measured'] + w * row['p_jev'])
+        stay = decision['candidates'][0]
+        self.assertLess(stay['p_jev'], .15)  # Jev's answer read as given: medium is probably not enough
+        self.assertGreater(stay['p_ok'], .75)
+
+    def test_the_recorded_harder_task_advice_now_stays_where_it_jumped(self):
+        self.assertEqual(self.decide(self.TLRU)['action'], 'stay')
+        before = self.decide(self.TLRU, cfg=jev_only(self.cfg))
+        self.assertEqual((before['action'], before['target']), ('jump', [S, 'high']))
+
+    def test_an_unmeasured_weaker_setting_keeps_jevs_estimate(self):
+        decision = self.decide(advice(S, 'low', effort_p=.9), current=(S, 'medium'))
+        low = next(c for c in decision['candidates'] if c['setting'] == f'{S}/low')
+        self.assertIsNone(low['p_measured'])
+        self.assertAlmostEqual(low['p_ok'], low['p_jev'])
+
+    def test_stuck_evidence_is_never_calibrated(self):
+        adv = advice(S, 'medium')
+        calibrated = self.decide(adv, trigger='stuck_evidence')
+        self.assertNotIn('calibration', calibrated)
+        self.assertEqual(calibrated, self.decide(adv, trigger='stuck_evidence', cfg=jev_only(self.cfg)))
+        self.assertEqual(calibrated['target'], [O, 'medium'])  # the safety net: a stronger model at the turn's effort
 
 
 if __name__ == '__main__':

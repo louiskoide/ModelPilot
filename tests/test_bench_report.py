@@ -246,6 +246,33 @@ class RebuildTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 bench_report.write_summary(run, RATES, out, resamples=50)  # evidence is never overwritten
 
+    def test_several_runs_pair_by_task_and_an_arm_in_two_runs_is_labeled_by_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def run(name, commit, arms, cost):
+                path = Path(tmp)/name
+                path.mkdir()
+                (path/'manifest.json').write_text(json.dumps({'seed': 0, 'arms': dict.fromkeys(arms, {}),
+                                                              'code': {'commit': commit}, 'client_version': '2.1.284'}))
+                for task in ('t0', 't1'):
+                    for arm in arms:
+                        trial = path/task/arm/'0'
+                        trial.mkdir(parents=True)
+                        (trial/'trial.json').write_text(json.dumps(record(task, arm, cost_usd=cost[arm])))
+                return path
+            before = run('bench-before', 'aaa', ['sonnet-5', 'opus-5'], {'sonnet-5': .1, 'opus-5': .3})
+            after = run('bench-after', 'bbb', ['sonnet-5'], {'sonnet-5': .2})
+            out = Path(tmp)/'paired.json'
+            summary = bench_report.write_summary([before, after], RATES, out, resamples=50)
+            self.assertEqual([a['arm'] for a in summary['arms']], ['sonnet-5@bench-before', 'opus-5', 'sonnet-5@bench-after'])
+            self.assertEqual([round(a['mean_cost_usd'], 6) for a in summary['arms']], [.1, .3, .2])
+            pair = next(p for p in summary['paired'] if p['arms'] == ['sonnet-5@bench-before', 'sonnet-5@bench-after'])
+            self.assertEqual(pair['tasks'], 2)
+            self.assertAlmostEqual(pair['differences']['mean_cost_usd']['estimate'], -.1)
+            self.assertEqual([(r['arms'], r['code']['commit']) for r in summary['runs']],
+                             [(['sonnet-5@bench-before', 'opus-5'], 'aaa'), (['sonnet-5@bench-after'], 'bbb')])
+            self.assertIn('cross_run', summary)
+            self.assertEqual(json.loads(out.read_text())['rebuilt_from'], [str(before), str(after)])
+
 
 if __name__ == '__main__': unittest.main()
 

@@ -11,10 +11,11 @@ report provider cost only (router cost unpriced): their dollars are a lower boun
 on a Claude subscription instead of an API key are priced as an API key would have been
 billed for the same tokens (api_key_equivalent); their as-sent price is kept alongside.
 
-    python3 -m modelpilot.bench_report runs/bench-<ts> [--out FILE]
+    python3 -m modelpilot.bench_report runs/bench-<ts> [runs/bench-<ts2> ...] [--out FILE]
 
-rebuilds the summary from a run's trial records (for example after a crash). Evidence is
-never overwritten.
+rebuilds the summary from a run's trial records (for example after a crash). Given several
+runs, it pairs their arms by task; an arm in more than one run is labeled arm@<run>. Evidence
+is never overwritten.
 """
 import argparse
 from collections import Counter
@@ -499,10 +500,39 @@ def load_run(run_dir, rates):
     return manifest, records
 
 
-def write_summary(run_dir, rates, out, resamples=10000):
-    manifest, records = load_run(run_dir, rates)
-    summary = summarize(records, list(manifest['arms']), seed=manifest.get('seed', 0), resamples=resamples)
-    summary.update(trials=len(records), rebuilt_from=str(run_dir))
+def load_runs(run_dirs, rates):
+    """Several runs' trial records as one set of arms, paired by task.
+
+    An arm that appears in more than one run is labeled arm@<run directory name>, so the same arm
+    measured before and after a change stays apart. The runs ran at different times, possibly on
+    different code, clients and auth; each run's manifest facts are listed with the arms it gave.
+    The seed is the first run's."""
+    loaded = [(Path(d),) + load_run(d, rates) for d in run_dirs]
+    seen = Counter(a for _, manifest, _ in loaded for a in manifest['arms'])
+    arms, records, runs = [], [], []
+    for path, manifest, run_records in loaded:
+        label = {a: f'{a}@{path.name}' if seen[a] > 1 else a for a in manifest['arms']}
+        arms += label.values()
+        records += [dict(r, arm=label[r['arm']]) for r in run_records if r['arm'] in label]
+        runs.append({'run': str(path), 'arms': list(label.values()), 'code': manifest.get('code'),
+                     'client_version': manifest.get('client_version'), 'auth': manifest.get('auth')})
+    return loaded[0][1].get('seed', 0), arms, records, runs
+
+
+def summary_of(run_dirs, rates, resamples=10000):
+    seed, arms, records, runs = load_runs(run_dirs, rates)
+    summary = summarize(records, arms, seed=seed, resamples=resamples)
+    summary.update(trials=len(records), rebuilt_from=str(run_dirs[0]) if len(run_dirs) == 1 else [r['run'] for r in runs])
+    if len(run_dirs) > 1:
+        summary.update(runs=runs, cross_run='Arms from different runs are paired by task; they ran at different '
+                                            'times and possibly on different code, clients and auth (see runs).')
+    return summary
+
+
+def write_summary(run_dirs, rates, out, resamples=10000):
+    """Rebuild one run's summary, or pair several runs' arms (see load_runs). Never overwrites."""
+    run_dirs = [run_dirs] if isinstance(run_dirs, (str, Path)) else list(run_dirs)
+    summary = summary_of(run_dirs, rates, resamples)
     with Path(out).open('x') as f:  # never overwrite evidence
         json.dump(summary, f, indent=2)
         f.write('\n')
@@ -512,17 +542,15 @@ def write_summary(run_dir, rates, out, resamples=10000):
 def main():
     from .bench import rates
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('run', type=Path)
+    parser.add_argument('runs', type=Path, nargs='+', help='One run, or several whose arms are paired by task')
     parser.add_argument('--out', type=Path, help='Write here (must not exist); default prints the summary')
     parser.add_argument('--resamples', type=int, default=10000)
     args = parser.parse_args()
     if args.out:
-        write_summary(args.run, rates(), args.out, args.resamples)
+        write_summary(args.runs, rates(), args.out, args.resamples)
         print('summary:', args.out)
         return
-    manifest, records = load_run(args.run, rates())
-    summary = summarize(records, list(manifest['arms']), seed=manifest.get('seed', 0), resamples=args.resamples)
-    print(json.dumps(dict(summary, trials=len(records)), indent=2))
+    print(json.dumps(summary_of(args.runs, rates(), args.resamples), indent=2))
 
 
 if __name__ == '__main__':
