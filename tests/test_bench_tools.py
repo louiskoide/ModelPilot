@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
-from modelpilot import bench, fixtures
+from modelpilot import bench, fixtures, policy_actions, switch_policy
 from modelpilot.bench_tools import OWNER, ToolServer, excerpt
 from modelpilot.governor import Governor
 from modelpilot.modelpilot_adapter import ModelPilotAdapter
@@ -185,7 +185,8 @@ class ToolTrialTests(unittest.TestCase):
         self.assertFalse(routing['benchmark_eligible'])
 
     def main_loop(self):
-        return [(json.loads(b)['model'], json.loads(b)['output_config']['effort'])
+        """(model, effort in force) per main-loop request: the latest effort message, else the top-level effort."""
+        return [(json.loads(b)['model'], policy_actions.effective_effort(json.loads(b)))
                 for b in self.upstream.bodies if b'"tools"' in b]
 
     OPUS_RATES = dict(test_bench.RATES, **{'claude-opus-5-5': dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)})
@@ -206,17 +207,20 @@ class ToolTrialTests(unittest.TestCase):
     def test_the_active_arm_jumps_straight_to_jevs_setting_and_again_on_stuck_evidence(self):
         script = self.STALLED + [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
                                  {'tool': 'mcp__modelpilot__run_tests', 'input': {}}, {'text': 'Done.'}]
-        record = self.advised_trial('active', script, 'claude-opus-5-5', 'xhigh', rates=self.OPUS_RATES)
+        record = self.advised_trial('active', script, 'claude-sonnet-5-5', 'high', rates=self.OPUS_RATES)
         self.assertTrue(record['passed'], record['grade'])
-        # The first request jumps from the client's Sonnet 5.5 medium straight to Jev's Opus 5.5 xhigh; three stalled
-        # suite runs are evidence it isn't enough, and the only stronger setting is Opus 5.5 max.
-        self.assertEqual(self.main_loop(), [('claude-opus-5-5', 'xhigh')]*4 + [('claude-opus-5-5', 'max')]*3)
+        # The first request (a turn start) jumps from the client's Sonnet 5.5 medium straight to Jev's Sonnet 5.5 high;
+        # three stalled suite runs are evidence it isn't enough, and inside the turn only the model can move: Opus 5.5,
+        # at the turn's effort.
+        self.assertEqual(self.main_loop(), [('claude-sonnet-5-5', 'high')]*4 + [('claude-opus-5-5', 'high')]*3)
         routing = record['routing']
         self.assertEqual((routing['mode'], routing['benchmark_eligible'], routing['ineligible_reason']),
                          ('active', False, 'advisor_stub'))
         policy = routing['policy']
-        self.assertEqual([(e['action'], e['trigger'], e['status'], e['target_effort']) for e in policy['escalations']],
-                         [('jump', 'turn_start', 'confirmed', 'xhigh'), ('jump', 'stuck_evidence', 'confirmed', 'max')])
+        self.assertEqual([(e['action'], e['trigger'], e['status'], e['target_model'], e['target_effort'])
+                          for e in policy['escalations']],
+                         [('jump', 'turn_start', 'confirmed', 'claude-sonnet-5-5', 'high'),
+                          ('jump', 'stuck_evidence', 'confirmed', 'claude-opus-5-5', 'high')])
         self.assertEqual([(d['trigger'], d['action']) for d in policy['decisions']],
                          [('turn_start', 'jump'), ('stuck_evidence', 'jump')])
         self.assertEqual((routing['advisor']['calls'], routing['advisor']['failures'], routing['advisor']['live']), (2, 0, False))
@@ -225,6 +229,28 @@ class ToolTrialTests(unittest.TestCase):
         self.assertTrue(routing['accounting_matches'], routing)
         self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
         self.assertEqual(record['accounting']['cost_scope'], 'complete')  # a stub costs nothing; live Jev is unpriced
+
+    def test_per_message_effort_through_the_real_client(self):
+        """With per-message effort on, the jump to Jev's effort rides in an effort-only system message: every main-loop
+        request keeps the client's top-level effort, and the message stays where it was first sent."""
+        cfg = switch_policy.load()
+        cfg['per_message_effort']['enabled'] = True
+        script = [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
+                  {'tool': 'mcp__modelpilot__run_tests', 'input': {}}, {'text': 'Done.'}]
+        with mock.patch.object(switch_policy, 'load', return_value=cfg):
+            record = self.advised_trial('per-message', script, 'claude-sonnet-5-5', 'xhigh', rates=self.OPUS_RATES)
+        self.assertTrue(record['passed'], record['grade'])
+        bodies = [json.loads(b) for b in self.upstream.bodies if b'"tools"' in b]
+        self.assertEqual({b['output_config']['effort'] for b in bodies}, {'medium'})
+        self.assertEqual({policy_actions.effective_effort(b) for b in bodies}, {'xhigh'})
+        ours = [[i for i, m in enumerate(b['messages']) if m.get('output_config') and m.get('content') == []] for b in bodies]
+        clients = [[i for i, m in enumerate(b['messages']) if m.get('output_config') and m.get('content') != []] for b in bodies]
+        self.assertEqual(ours, [ours[0]] * len(bodies))  # put back where it was first sent
+        self.assertEqual(len(ours[0]), 1)
+        self.assertLess(clients[0][-1], ours[0][0])  # after Claude Code's own effort message, so it holds
+        self.assertEqual(record['path']['steps'], [{'setting': ['claude-sonnet-5-5', 'xhigh'], 'requests': len(bodies),
+                                                    'cost_usd': record['path']['steps'][0]['cost_usd']}])
+        self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
 
     def test_a_budget_refusal_ends_the_session_as_a_budget_stop(self):
         script = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}}] +

@@ -71,7 +71,10 @@
     },
     {
      "role": "system",
-     "blocks": "str"
+     "blocks": "str",
+     "output_config": [
+      "effort"
+     ]
     },
     {
      "role": "assistant",
@@ -169,7 +172,10 @@
     },
     {
      "role": "system",
-     "blocks": "str"
+     "blocks": "str",
+     "output_config": [
+      "effort"
+     ]
     },
     {
      "role": "assistant",

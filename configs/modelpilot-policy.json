@@ -7,12 +7,12 @@
     },
     "claude-sonnet-5-5": {
       "rank": 1, "efforts": ["low", "medium", "high", "xhigh", "max"], "mid_conversation_system": true,
-      "effort_switch_rewrite": "messages", "candidate": true,
+      "effort_switch_rewrite": "messages", "candidate": true, "per_message_effort": true,
       "effort_switch_evidence": "Sonnet 5.5 effort changes read the tools and system (7,871-7,873 tokens) and rewrote only the messages (465-504), 8/8 (runs/thinking-probe-sonnet-5-5-20260928-133426); Sonnet 5 had rewritten everything."
     },
     "claude-opus-5-5": {
       "rank": 2, "efforts": ["low", "medium", "high", "xhigh", "max"], "mid_conversation_system": true,
-      "effort_switch_rewrite": "messages", "candidate": true,
+      "effort_switch_rewrite": "messages", "candidate": true, "per_message_effort": true,
       "effort_switch_evidence": "Opus 5.5 effort changes kept tools and system cached and rewrote only the messages (runs/thinking-probe-opus-5-5-effort-20260926-132158)."
     }
   },
@@ -38,5 +38,10 @@
     "enabled": true, "max_positions": 25,
     "about": "Price a move to a setting whose own cache entry is still warm (sent within cache_ttl_seconds) and within reach (the conversation has grown by at most max_positions content positions since that setting was last sent) as writing only what that entry doesn't cover. Measured with thinking history in the pinned client's shape (runs/thinking-probe-returns-20260930-091128, $0.4056): returns read the home setting's whole entry 8/8, Sonnet 5.5 effort returns 7 and 25 positions back and Opus 5.5 -> Sonnet 5.5 model returns 8 back. The API documents a 20-position lookback, yet 25 was reached; farther is unmeasured, so it is priced like a first switch."
   },
+  "per_message_effort": {
+    "enabled": true, "placement": "before_result", "beta": null,
+    "about": "Effort rides in an effort-only system message (beta mid-conversation-output-config-2026-07-01; Claude Code 2.1.284 already sends its older spelling per-turn-control-2026-07-01) placed after the client's own effort message, which 2.1.284 puts on the system note after the prompt; the top-level effort stays the client's. Every earlier message is put back where it was first sent. Evidence (runs/thinking-probe-per-message-effort-20261001-160146, $0.93): a message at a turn start raised thinking to the native xhigh level at every step with the cache kept; changes inside the tool loop, by message or top-level, changed nothing and also kept the cache (the client's message outranks the top-level effort). So new messages are added only at turn starts (effort_changes_at)."
+  },
+  "effort_changes_at": ["turn_start"],
   "guesses": "effort_output_factor, defaults, recovery.wasted_fraction, hysteresis_usd, downgrade_switch_multiplier and the step spacing, cap and overrun factor are starting values, not measurements; tuning runs calibrate them."
 }
