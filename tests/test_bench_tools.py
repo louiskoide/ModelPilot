@@ -191,15 +191,20 @@ class ToolTrialTests(unittest.TestCase):
 
     OPUS_RATES = dict(test_bench.RATES, **{'claude-opus-5-5': dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)})
 
-    def advised_trial(self, name, script, model, effort, limit=1, **kwargs):
-        """The active arm with Jev's real bridge and code, its TypeSafe answer stubbed ($0, never eligible)."""
+    def advised_trial(self, name, script, model, effort, limit=1, config=None, **kwargs):
+        """The active arm with Jev's real bridge and code, its TypeSafe answer stubbed ($0, never eligible). The policy
+        runs with calibration off unless a config is given: the stub's answer is what should drive its moves."""
+        if config is None:
+            config = switch_policy.load()
+            config['calibration']['enabled'] = False
         stub = {'model': {'choice': model, 'confidence': .9,
                           'probabilities': {m: .9 if m == model else .05 for m in POLICY_TIERS}},
                 'effort': {'choice': effort, 'confidence': .85,
                            'probabilities': {e: .85 if e == effort else .0375 for e in EFFORTS}}}
-        adapter = bench.arm_adapter('modelpilot', limit, 1, advisor_stub=stub)
-        with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
-            return self.modelpilot_trial(name, script, adapter, **kwargs)
+        with mock.patch.object(switch_policy, 'load', return_value=config):
+            adapter = bench.arm_adapter('modelpilot', limit, 1, advisor_stub=stub)
+            with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
+                return self.modelpilot_trial(name, script, adapter, **kwargs)
 
     STALLED = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': BROKEN}}] +
                [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 3)
@@ -235,10 +240,10 @@ class ToolTrialTests(unittest.TestCase):
         request keeps the client's top-level effort, and the message stays where it was first sent."""
         cfg = switch_policy.load()
         cfg['per_message_effort']['enabled'] = True
+        cfg['calibration']['enabled'] = False
         script = [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
                   {'tool': 'mcp__modelpilot__run_tests', 'input': {}}, {'text': 'Done.'}]
-        with mock.patch.object(switch_policy, 'load', return_value=cfg):
-            record = self.advised_trial('per-message', script, 'claude-sonnet-5-5', 'xhigh', rates=self.OPUS_RATES)
+        record = self.advised_trial('per-message', script, 'claude-sonnet-5-5', 'xhigh', config=cfg, rates=self.OPUS_RATES)
         self.assertTrue(record['passed'], record['grade'])
         bodies = [json.loads(b) for b in self.upstream.bodies if b'"tools"' in b]
         self.assertEqual({b['output_config']['effort'] for b in bodies}, {'medium'})

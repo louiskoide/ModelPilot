@@ -6,8 +6,10 @@ with that of each direct move:
 
     expected(c) = switch(current -> c) + P_ok(c) * run(c) + (1 - P_ok(c)) * recover(c)
 
-- run(c): the remaining work on c, horizon x (prefix x read + new input x input + output x effort
-  factor x output). The prefix grows by each request's input and output.
+- run(c): the remaining work on c: horizon requests, each reading the prefix, writing what it adds to
+  the cache (its new input and the previous reply) and paying for its output; on a cold cache the first
+  request also writes the prefix. Effort and model scale the number of requests and the output per
+  request (measured factors in the config). The prefix grows by each request's input and output.
 - switch: the one-time cache rewrite, beyond the read it replaces. A model change rewrites the whole
   prefix; an effort change rewrites what that model rewrites (config: full, messages or none); a
   cold cache costs nothing extra, since staying would write it too. With return_reuse enabled, a move
@@ -20,12 +22,17 @@ with that of each direct move:
   mid-task step or on stuck evidence only the model moves, at the turn's effort.
 - P_ok(c): Jev's model answer is the cheapest model that can finish in one pass, and its effort
   answer the lowest effort that can. So c is enough when both are at or below c's, treated as
-  independent. On evidence that the current setting isn't enough, the probabilities are
-  conditioned on that.
+  independent. With calibration, at the decision points it names, that estimate is blended with
+  the pass rate measured on the tuning split for the strongest measured setting c is at least as
+  strong as: (1 - jev_weight) x measured + jev_weight x Jev. On evidence that the current setting
+  isn't enough, Jev's probabilities are conditioned on that, uncalibrated: the measured rates say
+  nothing about which setting rescues a task the current one can't finish.
 - recover(c): a failure wastes part of run(c), and the task is redone where Jev says it needs to be (its
-  recommendation, when at least as strong as c), or else on the strongest setting. That redo can fail
-  too (then it is done again on the strongest setting), so staying on a setting likely to fail carries
-  the same downstream risk as moving to Jev's setting now.
+  recommendation, when at least as strong as c), or else on the strongest setting a failure can reach.
+  A failure shows inside the turn, where the effort can't change (unless effort_changes_at allows it on
+  stuck evidence), so that is a stronger model at c's effort. That redo can fail too (then it is done
+  again on the strongest), so staying on a setting likely to fail carries the same downstream risk as
+  moving to Jev's setting now.
 
 A move goes straight to its target and never climbs. It must beat staying by the hysteresis, scaled
 by how plausible the current setting is: the margin protects a setting that may well be enough from
@@ -46,11 +53,27 @@ def _count(value, floor):
     return type(value) is int and value >= floor
 
 
+def _positive(value):
+    return _at_least_number(value, 0) and value > 0
+
+
 def load(path=CONFIG):
     cfg = json.loads(Path(path).read_text())
     order = cfg['effort_order']
-    if set(cfg['effort_output_factor']) != set(order):
-        raise ValueError('effort_output_factor must cover effort_order exactly')
+    for name in ('effort_output_factor', 'effort_request_factor'):
+        if set(cfg[name]) != set(order) or not all(_positive(v) for v in cfg[name].values()):
+            raise ValueError(f'{name} must cover effort_order exactly, with positive numbers')
+    if not all(_positive(spec.get(k, 1)) for spec in cfg['models'].values() for k in ('request_factor', 'output_factor')):
+        raise ValueError('a model request_factor or output_factor must be a positive number')
+    cal = cfg['calibration']
+    measured = [k.split('/') for k in cal['outcomes']]
+    if (type(cal['enabled']) is not bool or not (_at_least_number(cal['jev_weight'], 0) and cal['jev_weight'] <= 1)
+            or not (isinstance(cal['applies_at'], list) and set(cal['applies_at']) <= {'turn_start', 'step'})
+            or any(len(k) != 2 or k[0] not in cfg['models'] or k[1] not in order for k in measured)
+            or not all(_count(o['trials'], 1) and _count(o['passed'], 0) and o['passed'] <= o['trials']
+                       for o in cal['outcomes'].values())):
+        raise ValueError('calibration: enabled is a boolean, jev_weight in [0, 1], applies_at among turn_start and step, outcomes '
+                         "'model/effort' -> passed <= trials (integers, trials >= 1)")
     if not set(cfg['decision_points']) <= set(TRIGGERS):
         raise ValueError(f'decision_points must be among {TRIGGERS}')
     step = cfg['step']
@@ -149,17 +172,32 @@ def profile(cfg, request, warm, observed=None, entries=None):
     return out
 
 
-def run_cost(cfg, rates, setting, prof):
+def _scale(cfg, setting, prof):
+    """(requests, output per request) on setting relative to the shape the profile describes (output_model at
+    output_effort): measured effort and model factors from the config."""
     model, effort = setting
-    rate = rates[model]
-    factor = 1.0
-    if effort is not None and prof.get('output_effort'):
-        factor = cfg['effort_output_factor'][effort] / cfg['effort_output_factor'][prof['output_effort']]
-    horizon = prof['horizon_requests']
-    growth = prof['new_input_tokens'] + prof['output_tokens'] * factor
+    requests = output = 1.0
+    base_effort, base_model = prof.get('output_effort'), prof.get('output_model')
+    if effort is not None and base_effort:
+        requests = cfg['effort_request_factor'][effort] / cfg['effort_request_factor'][base_effort]
+        output = cfg['effort_output_factor'][effort] / cfg['effort_output_factor'][base_effort]
+    if base_model and base_model != model:
+        spec, base = cfg['models'][model], cfg['models'][base_model]
+        requests *= spec.get('request_factor', 1) / base.get('request_factor', 1)
+        output *= spec.get('output_factor', 1) / base.get('output_factor', 1)
+    return requests, output
+
+
+def run_cost(cfg, rates, setting, prof):
+    rate = rates[setting[0]]
+    requests, output = _scale(cfg, setting, prof)
+    horizon = max(1.0, prof['horizon_requests'] * requests)
+    reply = prof['output_tokens'] * output
+    growth = prof['new_input_tokens'] + reply  # written to the cache by the next request
     prefix = prof['prefix_tokens'] + (horizon - 1) / 2 * growth  # average prefix over the remaining requests
-    return horizon * (prefix * rate['read'] + prof['new_input_tokens'] * rate['input'] +
-                      prof['output_tokens'] * factor * rate['output']) / 1e6
+    write = rate['write_' + cfg['cache_write_ttl']]
+    cold = 0.0 if prof['warm'] else prof['prefix_tokens'] * (write - rate['read'])  # the first request writes it
+    return (horizon * (prefix * rate['read'] + growth * write + reply * rate['output']) + cold) / 1e6
 
 
 def switch_cost(cfg, rates, current, target, prof, warm=None, reuse=False):
@@ -185,6 +223,14 @@ def switch_cost(cfg, rates, current, target, prof, warm=None, reuse=False):
     if covered is not None:
         tokens = min(tokens, max(0.0, prof['prefix_tokens'] - covered))
     return tokens * extra / 1e6
+
+
+def measured_ok(cfg, setting):
+    """The tuning split's pass rate, with a uniform prior ((passed + 1) / (trials + 2)), of the strongest measured
+    setting that setting is at least as strong as; None when no measured setting is that weak."""
+    found = [(o['passed'] + 1) / (o['trials'] + 2) for key, o in cfg['calibration']['outcomes'].items()
+             if at_least(cfg, tuple(setting), tuple(key.split('/')))]
+    return max(found) if found else None
 
 
 def per_message(cfg, model):
@@ -240,12 +286,21 @@ def _decide(cfg, rates, advice, current, prof, trigger):
     model_answer, effort_answer = advice.get('model') or {}, advice.get('effort') or {}
     out['jev'] = {'model': model_answer.get('choice'), 'model_confidence': model_answer.get('confidence'),
                   'effort': effort_answer.get('choice'), 'effort_confidence': effort_answer.get('confidence')}
+    cal = cfg['calibration']
+    calibrated = cal['enabled'] and trigger in cal['applies_at']
+    if calibrated:
+        out['calibration'] = {'jev_weight': cal['jev_weight']}
+
+    def jev_ok(setting):
+        return model_ok(setting[0]) * effort_ok(setting[1])
 
     def p_ok(setting):
-        return model_ok(setting[0]) * effort_ok(setting[1])
-    if trigger == 'stuck_evidence':
+        measured = measured_ok(cfg, setting) if calibrated else None
+        jev = jev_ok(setting)
+        return jev if measured is None else (1 - cal['jev_weight']) * measured + cal['jev_weight'] * jev
+    if trigger == 'stuck_evidence':  # never calibrated (see load): the measured rates can't say what rescues a task
         stronger = [c for c in runnable if c != current and at_least(cfg, c, current)]
-        failed = p_ok(current)
+        failed = jev_ok(current)
         if not stronger or failed >= 1:
             return dict(out, action='stop', reason='no_stronger_setting')
 
@@ -253,7 +308,7 @@ def _decide(cfg, rates, advice, current, prof, trigger):
             lower_model = min(setting[0], current[0], key=lambda m: _rank(cfg, m))
             lower_effort = min(setting[1], current[1], key=lambda e: _effort_index(cfg, e))
             both = model_ok(lower_model) * effort_ok(lower_effort)
-            return max(0.0, p_ok(setting) - both) / (1 - failed)
+            return max(0.0, jev_ok(setting) - both) / (1 - failed)
         candidates = [current] + stronger
     else:
         probability = p_ok
@@ -272,28 +327,50 @@ def _decide(cfg, rates, advice, current, prof, trigger):
     pick = moves[0] if moves[0] in runnable else None
     if trigger in ('turn_start', 'step'):
         candidates += [c for c in dict.fromkeys(moves) if c in runnable and c != current]
-    strongest = max(runnable, key=lambda c: (_rank(cfg, c[0]), _effort_index(cfg, c[1])))
 
     wasted = cfg['recovery']['wasted_fraction']
+    every = settings(cfg)
 
-    def recovery(setting):  # where a failed setting's work is redone
-        return pick if pick and pick != setting and at_least(cfg, pick, setting) else strongest
+    def reachable(setting):  # where a failure, found inside the turn, can be redone: the turn's effort holds there
+        if 'stuck_evidence' in cfg['effort_changes_at']:
+            return every
+        return [c for c in every if c[1] == setting[1]] or [setting]
 
-    def from_scratch(setting):  # the work done on setting alone, redone on the strongest if it fails too
-        run = run_cost(cfg, rates, setting, prof)
-        if setting == strongest:
+    def strength(c):
+        return _rank(cfg, c[0]), _effort_index(cfg, c[1])
+    overall = max(every, key=strength)
+
+    def redo(setting):  # where a failure of setting is redone: a stronger model inside the turn, else a new turn
+        inside = max(reachable(setting), key=strength)
+        if inside != setting:
+            return inside
+        if setting == overall:
+            return None
+        return pick if pick and pick != setting and at_least(cfg, pick, setting) else overall  # the effort can change
+
+    def recovery(setting):  # where a failed setting's work is redone first
+        if pick and pick != setting and at_least(cfg, pick, setting) and pick in reachable(setting):
+            return pick
+        return redo(setting) or setting
+
+    def from_scratch(setting):  # the work done on setting alone, redone further up while it fails
+        run, nxt = run_cost(cfg, rates, setting, prof), redo(setting)
+        if nxt is None:
             return run
         p = probability(setting)
-        return p * run + (1 - p) * (wasted * run + switch_cost(cfg, rates, setting, strongest, prof, warm=True) +
-                                    run_cost(cfg, rates, strongest, prof))
+        return p * run + (1 - p) * (wasted * run + switch_cost(cfg, rates, setting, nxt, prof, warm=True) +
+                                    from_scratch(nxt))
     rows = []
     for c in candidates:
         run = run_cost(cfg, rates, c, prof)
         r = recovery(c)
         recover = wasted * run + switch_cost(cfg, rates, c, r, prof, warm=True) + from_scratch(r)
         p, switch = probability(c), switch_cost(cfg, rates, current, c, prof, reuse=True)
-        rows.append({'setting': _label(c), 'p_ok': p, 'switch_usd': switch, 'run_usd': run, 'recover_usd': recover,
-                     'expected_usd': switch + p * run + (1 - p) * recover, '_setting': c})
+        row = {'setting': _label(c), 'p_ok': p, 'switch_usd': switch, 'run_usd': run, 'recover_usd': recover,
+               'expected_usd': switch + p * run + (1 - p) * recover, '_setting': c}
+        if calibrated:
+            row.update(p_jev=jev_ok(c), p_measured=measured_ok(cfg, c))
+        rows.append(row)
     out['candidates'] = [{k: v for k, v in r.items() if k != '_setting'} for r in rows]
     stay = rows[0]
     best = min(rows, key=lambda r: r['expected_usd'])

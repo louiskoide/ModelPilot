@@ -43,12 +43,17 @@ def parameters(model, effort, config=None):
             'settings': ['/'.join(str(x) for x in s) for s in switch_policy.settings(cfg)],
             'switch_rule': 'jump directly to the setting with the lowest expected total cost (switch + P_ok x run + '
                            '(1 - P_ok) x recovery) when it beats staying by the hysteresis (downgrades: plus a multiple '
-                           'of their rewrite, and enough confidence); never climbs',
+                           'of their rewrite, and enough confidence); never climbs. P_ok blends Jev with measured '
+                           'pass rates when calibration is on; a failure is redone at the turn\'s effort',
             'stop_on': 'stuck with no stronger setting', 'stuck': 'm2 heuristic-v1 (score >= 3, window 6)',
             'config_sha256': hashlib.sha256(switch_policy.CONFIG.read_bytes()).hexdigest(),
             'admission': 'measured spend below the per-task limit; a move also needs the limit to cover its full '
                          'rebuild (request bytes/3 tokens at the dearest write rate), not its output allowance',
             'per_message_effort': {k: cfg['per_message_effort'][k] for k in ('enabled', 'placement', 'beta')},
+            'calibration': dict({k: cfg['calibration'][k] for k in ('enabled', 'jev_weight', 'applies_at')},
+                                outcomes=cfg['calibration']['outcomes']),
+            'cost_model': {k: cfg[k] for k in ('defaults', 'effort_output_factor', 'effort_request_factor',
+                                               'bytes_per_token')},
             'not_implemented': (['per-message effort'] if not cfg['per_message_effort']['enabled'] else [])
                                + ['Haiku targets', 'worker drafts (lever 3)']}
 

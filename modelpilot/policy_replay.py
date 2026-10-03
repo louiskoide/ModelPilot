@@ -1,0 +1,125 @@
+"""Replay recorded ModelPilot decisions through the current switch policy ($0).
+
+Each ModelPilot trial journals its advisor decisions in its governor database: Jev's whole answer, the
+setting, the decision point and the conversation profile. This re-runs switch_policy.decide on them with
+today's config and rates, and reports where the decision changes beside each trial's recorded outcome.
+
+    python3 -m modelpilot.policy_replay runs/bench-<ts> [runs/bench-<ts2> ...] [--out FILE]
+
+The journal's token counts were estimated at the bytes_per_token of the recording (4 in every run so far);
+they are rescaled to the current value. A decision after one whose replay differs is marked path_diverged:
+the trial would not have reached it the same way. Databases are opened read-only; nothing is called.
+"""
+import argparse
+from collections import Counter
+import hashlib
+import json
+from pathlib import Path
+import sqlite3
+from . import switch_policy
+
+RECORDED_BYTES_PER_TOKEN = 4  # configs/modelpilot-policy.json at every recorded run before October 3
+
+
+def recorded_decisions(db_path):
+    """The advisor decisions journaled in one trial's governor database, in order."""
+    db = sqlite3.connect(f'file:{Path(db_path).resolve()}?immutable=1', uri=True)
+    try:
+        return [json.loads(p) for (p,) in db.execute(
+            "select payload from gov_decisions where kind = 'advisor_decision' order by seq")]
+    finally:
+        db.close()
+
+
+def replay(payload, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_TOKEN):
+    """switch_policy.decide on one journaled decision; None when the journal lacks what it needs."""
+    profile = payload.get('profile')
+    if not profile or not payload.get('current') or payload.get('trigger') not in switch_policy.TRIGGERS:
+        return None
+    scale = recorded_bytes_per_token / cfg['bytes_per_token']
+    prof = dict(cfg['defaults'], prefix_tokens=profile['prefix_tokens'] * scale,
+                messages_tokens=profile['messages_tokens'] * scale, warm=profile['warm'],
+                warm_entries={k: v * scale for k, v in (profile.get('warm_entries') or {}).items()})
+    advice = payload.get('advice')
+    usable = advice if advice and not advice.get('error') else None  # as active_policy.decide
+    return switch_policy.decide(cfg, rates, usable, payload['current'], prof, payload['trigger'])
+
+
+def _setting(decision):
+    return '/'.join(str(x) for x in decision['target'])
+
+
+def _p_current(decision):
+    return (decision.get('candidates') or [{}])[0].get('p_ok')
+
+
+def replay_run(run_dir, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_TOKEN):
+    """One row per journaled decision of every ModelPilot trial in a run."""
+    from .bench_report import cold_cost, load_run
+    _, records = load_run(run_dir, rates)
+    outcome = {(r['task'], r['arm'], r.get('trial', 0)): r for r in records}
+    rows = []
+    for db_path in sorted(Path(run_dir).glob('*/*/*/governor.sqlite3')):
+        trial_dir = db_path.parent
+        task, arm, trial = trial_dir.parts[-3], trial_dir.parts[-2], int(trial_dir.parts[-1])
+        record = outcome.get((task, arm, trial)) or {}
+        if (record.get('routing') or {}).get('kind') != 'modelpilot_policy':
+            continue
+        diverged = False
+        for payload in recorded_decisions(db_path):
+            new = replay(payload, cfg, rates, recorded_bytes_per_token)
+            row = {'run': Path(run_dir).name, 'task': task, 'arm': arm, 'trial': trial, 'point': payload.get('point'),
+                   'trigger': payload.get('trigger'), 'current': '/'.join(payload.get('current') or []),
+                   'recorded': {'action': payload.get('action'), 'target': _setting(payload),
+                                'p_ok_current': _p_current(payload)},
+                   'trial_passed': record.get('passed'), 'trial_cost_usd': cold_cost(record) if record else None}
+            if new is None:
+                row['replayed'] = None
+                row['status'] = 'not_replayable'
+            else:
+                row['replayed'] = {'action': new['action'], 'target': _setting(new), 'reason': new.get('reason'),
+                                   'p_ok_current': _p_current(new), 'forecast_usd': new['forecast_usd'],
+                                   'candidates': new.get('candidates')}
+                changed = (new['action'], _setting(new)) != (payload.get('action'), _setting(payload))
+                row['status'] = 'path_diverged' if diverged else 'changed' if changed else 'same'
+                diverged = diverged or changed
+            rows.append(row)
+    return rows
+
+
+def summarize(rows):
+    return {'decisions': len(rows), 'status': dict(Counter(r['status'] for r in rows)),
+            'by_trigger': {t: dict(Counter(r['status'] for r in rows if r['trigger'] == t))
+                           for t in sorted({r['trigger'] for r in rows if r['trigger']})},
+            'moves': dict(Counter(f"{r['recorded']['action']} {r['recorded']['target']} -> "
+                                  f"{r['replayed']['action']} {r['replayed']['target']}"
+                                  for r in rows if r['status'] == 'changed'))}
+
+
+def main():
+    from .bench import rates
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('runs', type=Path, nargs='+')
+    parser.add_argument('--recorded-bytes-per-token', type=float, default=RECORDED_BYTES_PER_TOKEN)
+    parser.add_argument('--out', type=Path, help='Write the rows and summary here (must not exist)')
+    args = parser.parse_args()
+    cfg, table = switch_policy.load(), rates()
+    rows = [row for run in args.runs for row in replay_run(run, cfg, table, args.recorded_bytes_per_token)]
+    result = {'config_sha256': hashlib.sha256(switch_policy.CONFIG.read_bytes()).hexdigest(),
+              'recorded_bytes_per_token': args.recorded_bytes_per_token, 'summary': summarize(rows), 'rows': rows}
+    for r in rows:
+        new = r['replayed'] or {}
+        print(f"{r['run'][6:]} {r['task']:30s} {r['trigger']:14s} {r['recorded']['action']:4s} {r['recorded']['target']:24s} "
+              f"-> {new.get('action', '-'):4s} {new.get('target', '-'):24s} {r['status']:13s} "
+              f"p(current) {r['recorded']['p_ok_current'] or 0:.2f} -> {new.get('p_ok_current') or 0:.2f}  "
+              f"passed {r['trial_passed']}")
+    print(json.dumps(result['summary'], indent=2))
+    if args.out:
+        with args.out.open('x') as f:  # never overwrite evidence
+            json.dump(result, f, indent=2)
+            f.write('\n')
+        print('replay:', args.out)
+
+
+if __name__ == '__main__':
+    main()
