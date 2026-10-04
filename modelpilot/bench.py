@@ -57,6 +57,10 @@ ARMS = {
     # A fixed arm with an effort passes it as --effort; without one the client picks (medium for both 5.5 models,
     # on the wire). Sonnet 5.5 low: a cheaper setting a router could move tasks to if it passes (October 3).
     'sonnet-5.5-low': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low'},
+    # A fixed arm with append_system_prompt passes that file (relative to the repository) as
+    # --append-system-prompt-file. Sonnet 5.5 concise: medium Sonnet told to keep its fix, tests, tool output
+    # and prose small, since everything it adds is written to the cache and re-read every step (October 3).
+    'sonnet-5.5-concise': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'append_system_prompt': 'bench/prompts/concise.md'},
     'haiku-4.5': {'kind': 'fixed', 'model': 'claude-haiku-4-5-20251001'},
     # Jev picks the served model per turn; the client only sends the sentinel.
     'jev-stock': {'kind': 'jev', 'variant': 'stock', 'model': 'jev-router', 'checkout': 'work/jev-router-baseline',
@@ -229,10 +233,11 @@ def budget_text(usd):
     return ('%.10f' % usd).rstrip('0').rstrip('.')
 
 
-def client_command(cli, prompt, model, max_turns, budget_usd, session, extra=(), effort=None):
+def client_command(cli, prompt, model, max_turns, budget_usd, session, extra=(), effort=None, append_prompt=None):
     # The stop threshold applies per invocation: a resumed session gets its own. No model
     # (Jev arms) leaves the client on the sentinel the router's environment sets.
     return [str(cli), '-p', prompt, *(['--model', model] if model else []), *(['--effort', effort] if effort else []),
+            *(['--append-system-prompt-file', str(append_prompt)] if append_prompt else []),
             '--output-format', 'stream-json', '--verbose',
             '--max-turns', str(max_turns), '--max-budget-usd', budget_text(budget_usd), '--setting-sources', '',
             '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--tools', TOOLS, '--allowedTools', TOOLS,
@@ -246,6 +251,24 @@ def effort_check(rows, effort):
                    if r.get('kind') == 'messages' and r.get('tool_count'))
     return {'requested': effort, 'sent': {str(k): n for k, n in sorted(sent.items(), key=str)},
             'applied': set(sent) == {effort} if sent else None}
+
+
+def appended_prompt(arm):
+    """A fixed arm's appended system prompt: its file, text and hash; None without one."""
+    if arm.get('kind') != 'fixed' or not arm.get('append_system_prompt'):
+        return None
+    path = ROOT/arm['append_system_prompt']
+    data = path.read_bytes()
+    return {'path': arm['append_system_prompt'], 'file': path, 'text': data.decode().strip(),
+            'sha256': hashlib.sha256(data).hexdigest()}
+
+
+def prompt_check(rows, sha256):
+    """Whether every main-loop request carried the arm's appended system prompt (the proxy's system_marker).
+    None without any such request: the session's stop reason, not this check, says what happened."""
+    seen = Counter(r.get('system_marker') for r in rows if r.get('kind') == 'messages' and r.get('tool_count'))
+    return {'requested_sha256': sha256, 'present': seen[True], 'missing': sum(n for k, n in seen.items() if k is not True),
+            'applied': set(seen) == {True} if seen else None}
 
 
 def client_version(cli):
@@ -430,7 +453,9 @@ class Trial:
         self.proxy = self.proxy_thread = self.route = None
         self.router = (router or bench_jev.JevRouter(arm)) if arm['kind'] == 'jev' else None
         self.jev_key, self.jev_stub = jev_key, jev_stub
+        self.appended = appended_prompt(arm)
         self.record = {'task': task['id'], 'arm': arm_id, 'trial': trial, 'model': arm['model'], 'effort': arm.get('effort'),
+                       'append_system_prompt': {k: self.appended[k] for k in ('path', 'sha256')} if self.appended else None,
                        'spec_sha256': bench_tasks.spec_hash(task), 'shape': shape,
                        'gap_requested_seconds': gap if shape == 'followup' else None,
                        'expected_hidden_passed': expected_hidden_passed, 'limits': self.limits,
@@ -499,6 +524,8 @@ class Trial:
         options = self.adapter.proxy_options() if self.adapter and hasattr(self.adapter, 'proxy_options') else {}
         if self.arm.get('models'):
             options['catalog'] = self.arm['models']
+        if self.appended:
+            options['system_marker'] = self.appended['text']
         self.proxy = ProxyServer(('127.0.0.1', 0), self.upstream, self.log, self.rates, **options)
         self.proxy_thread = threading.Thread(target=self.proxy.serve_forever, daemon=True)
         self.proxy_thread.start()
@@ -525,7 +552,8 @@ class Trial:
         model, extra = (None, ['--add-dir', self.route['add_dir']]) if self.router else (self.arm['model'], [])
         fixed_effort = self.arm.get('effort') if self.arm['kind'] == 'fixed' else None  # the adapter sets its own
         command = client_command(self.cli, self.prompts[index], model, self.limits['max_turns'],
-                                 self.limits['budget_usd'], session, extra, effort=fixed_effort)
+                                 self.limits['budget_usd'], session, extra, effort=fixed_effort,
+                                 append_prompt=self.appended['file'] if self.appended else None)
         env = self.env
         if self.adapter:
             command = self.adapter.command(command, env['ANTHROPIC_BASE_URL'])
@@ -588,9 +616,12 @@ class Trial:
             accounting(rows, self.final, jev=bool(self.router)),
             cache=bench_report.cache_attribution(bench_report.priced_rows(self.record, rows, self.rates), self.rates),
             path=bench_report.setting_path(rows),
-            cost_components=bench_report.cost_components(bench_report.priced_rows(self.record, rows, self.rates), self.rates))
+            cost_components=bench_report.cost_components(bench_report.priced_rows(self.record, rows, self.rates), self.rates),
+            write_sources=bench_report.write_sources(bench_report.priced_rows(self.record, rows, self.rates), self.rates))
         if self.arm['kind'] == 'fixed' and self.arm.get('effort'):
             self.record['effort_check'] = effort_check(rows, self.arm['effort'])
+        if self.appended:
+            self.record['prompt_check'] = prompt_check(rows, self.appended['sha256'])
         if self.auth == 'subscription':
             self.record['as_sent'] = {'cache': bench_report.cache_attribution(rows, self.rates),
                                       'cost_components': bench_report.cost_components(rows, self.rates)}
@@ -775,6 +806,8 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
                 'client_version': client_version, 'code': code_revision(),
                 'python': python_version(limits.get('python') or bench_tasks.interpreter()), 'limits': limits,
                 'preamble': PREAMBLE, 'tools': TOOLS, 'shape': shape, 'gap_seconds': gap,
+                'appended_prompts': {a: {'path': ARMS[a]['append_system_prompt'], 'text': p['text'], 'sha256': p['sha256']}
+                                     for a in arms for p in [appended_prompt(ARMS[a])] if p} or None,
                 'follow_up_prompt': FOLLOW_UP if shape == 'followup' else None, 'run_budget_usd': run_budget,
                 'reference_preflight': expected, 'cost_basis': 'cold-equivalent; measured alongside',
                 'jev': jev_manifest(arms),

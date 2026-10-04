@@ -160,6 +160,15 @@ def effective_effort(request):
     return request_effort(request)
 
 
+def system_text(request):
+    """The request's system prompt as one string (a string, or text blocks joined), for marker checks."""
+    system = request.get('system')
+    if isinstance(system, str):
+        return system
+    return '\n'.join(b['text'] for b in system if isinstance(b, dict) and isinstance(b.get('text'), str)) \
+        if isinstance(system, list) else ''
+
+
 def request_effort(request):
     """Requested effort, logged because cache entries are separate per model and effort."""
     config = request.get('output_config')
@@ -238,8 +247,12 @@ class ProxyServer(ThreadingHTTPServer):
     # server_close must join request handlers before closing their shared accounting log.
     # Client and upstream socket operations already have 120-second timeouts.
     daemon_threads = False
-    def __init__(self, address, upstream, log_path, rates, governor=None, policy=None, catalog=None):
-        """catalog: model ids a model-constrained arm may discover; the model catalog is filtered to them."""
+    def __init__(self, address, upstream, log_path, rates, governor=None, policy=None, catalog=None, system_marker=None):
+        """catalog: model ids a model-constrained arm may discover; the model catalog is filtered to them.
+        system_marker: text an arm adds to the system prompt; each Messages row records whether it was there."""
+        if system_marker is not None and (not isinstance(system_marker, str) or not system_marker.strip()):
+            raise ValueError('system_marker must be non-empty text')
+        self.system_marker = system_marker
         if catalog is not None and (isinstance(catalog, str) or not catalog or
                                     not all(isinstance(m, str) and m for m in catalog)):
             raise ValueError('catalog must be a non-empty collection of model ids')
@@ -534,6 +547,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                'model': request.get('model') if request.get('model') in self.server.rates else 'unknown',
                'effort': request_effort(request), 'stream': bool(request.get('stream')), 'http_status': None,
                'status': 'transport_error', 'cost_usd': None}
+        if self.server.system_marker is not None:
+            row['system_marker'] = self.server.system_marker in system_text(request)
         effective = effective_effort(request)
         if effective != row['effort'] and (effective is None or isinstance(effective, str) and len(effective) <= 16):
             row['effective_effort'] = effective  # set by an effort-only system message (per-message effort)
