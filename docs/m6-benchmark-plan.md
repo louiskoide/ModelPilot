@@ -229,7 +229,39 @@ Paired by task (23 tasks, task-level bootstrap 95% intervals): low − medium �
 
 **Sonnet 5.5 low concise arm (October 3, $0; user request).** The two levers cut different things, so the next arm asks whether they add up: `sonnet-5.5-low-concise` (`claude-sonnet-5-5`, effort low, `bench/prompts/concise.md` appended). It needs no new code: the effort and the appended prompt are passed and checked independently (`effort_check` and `prompt_check`; a miss in either excludes the trial). Checked at $0 with pinned 2.1.284 against the owned fixture, with an API key and with a subscription token: every main-loop request carried effort low and ended its system prompt with the text. 540 offline tests pass on Python 3.12, none skipped (`runs/low-concise-arm-regression-py312.log`).
 
-**Proposed run (needs the user's go):** the 23 tuning tasks × `sonnet-5.5-low-concise` × 1 trial, seed 0, same limits, on the subscription (`--subscription-arms sonnet-5.5-low-concise`): $0 API, about $1.7–1.9 as sent, about 25 min with grading. It pairs with the three arms above through `bench_report` over the three runs, then the $0 re-grade (`regrade <run> --arms sonnet-5.5-low-concise`). Reading: if it costs clearly less than either lever alone at the same edge-test passes, the levers stack; if not, one of them was doing the other's work.
+**Run (user's go October 3; ran October 3–4, results below):** the 23 tuning tasks × `sonnet-5.5-low-concise` × 1 trial, seed 0, same limits, on the subscription (`--subscription-arms sonnet-5.5-low-concise`): $0 API, about $1.7–1.9 as sent, about 25 min with grading. It pairs with the three arms above through `bench_report` over the three runs, then the $0 re-grade (`regrade <run> --arms sonnet-5.5-low-concise`). Reading: if it costs clearly less than either lever alone at the same edge-test passes, the levers stack; if not, one of them was doing the other's work.
+
+**Results: the levers stack (October 3–4).** Low effort plus the concise prompt is the cheapest setting measured on the tuning split, about 21% below medium at equal quality. Two runs on code `2fcfb80`, pinned 2.1.284, subscription, $0 API, together 23 trials:
+- `bench-20261003-210450` stopped on a subscription 429 after 21 trials ($1.51 as sent). That was the account's usage limit, reached after this and the two earlier runs that day. Following the harness rule, the run stopped and the cut-off trial (`cachetools-setitem-evict`) was left incomplete and excluded; two tasks never started.
+- `bench-20261004-081527` ran those three tasks the next morning ($0.25 as sent).
+
+`runs/merge-low-concise-20261004.py` combines them into one arm with `bench_report`'s own `load_run` and `summarize`, dropping only the rate-limited trial. The output is `runs/paired-low-concise-23-20261004.json`; `bench_report` alone labels one arm from two runs as two arms (`arm@run`). `effort_check` and `prompt_check` applied on every trial, with no unknown cost and no rejected requests. Re-grades `regrade-bench-20261003-210450-20261003-215241` (the 21 trials; the rate-limited trial's fix passed too) and `regrade-bench-20261004-081527-20261004-081825` found every fix reproducing its verdict.
+
+| | `sonnet-5.5` (medium) | `sonnet-5.5-low` | `sonnet-5.5-concise` | `sonnet-5.5-low-concise` |
+| --- | ---: | ---: | ---: | ---: |
+| Hidden tests passed | 23/23 | 23/23 | 23/23 | 23/23 |
+| Edge-case tests passed (suites fully passed) | 106/108 (21/23) | 107/108 (22/23) | 106/108 (21/23) | 106/108 (21/23) |
+| Cost per task | $0.0869 | $0.0760 | $0.0762 | $0.0689 |
+| Measured: cache writes / reads / output per trial | $0.0280 / $0.0139 / $0.0362 | $0.0246 / $0.0123 / $0.0298 | $0.0243 / $0.0127 / $0.0303 | $0.0235 / $0.0116 / $0.0253 |
+| Wall time per task | 37.9 s | 32.1 s | 29.3 s | 28.5 s |
+| Main-loop requests per trial | 6.7 | 6.3 | 6.7 | 6.3 |
+| Output tokens per trial | 3,616 | 2,979 | 3,034 | 2,534 |
+| Tool results per trial (transcript bytes) | 10.6 KB | 9.3 KB | 7.7 KB | 7.7 KB |
+| Cache-written tokens per trial (growth share) | 11,186 (72%) | 9,858 (70%) | 9,705 (65%) | 9,385 (62%) |
+| Changed source lines, mean (median) | 41.4 (13) | 38.5 (12) | 38.0 (13) | 31.9 (12) |
+| Test lines added, mean (median) | 36.7 (25) | 27.8 (24) | 26.9 (20) | 22.5 (18) |
+
+Paired by task over all 23 (task-level bootstrap 95% intervals):
+
+| Comparison | Cost per task | Wall time |
+| --- | --- | --- |
+| medium − low concise | $0.0180 [$0.0087, $0.0295] | 9.4 s [4.2, 15.2] |
+| low − low concise | $0.0071 [$0.0013, $0.0135] | 3.6 s [0.8, 6.4] |
+| concise − low concise | $0.0073 [$0.0021, $0.0127] | 0.8 s [−2.9, 4.2] |
+
+Every cost interval excludes 0, so the combination beats each lever alone. It keeps concise's smaller tool output, adds low's lower output (the lowest of any arm), and wrote the smallest fixes and fewest test lines. On the 20 tasks the first run completed, the medium difference was $0.0195 [$0.0091, $0.0323], so the three added tasks didn't change the reading. Edge-test misses were the same two as medium and concise.
+
+Uncertainty: one trial per task; the four arms come from four runs over about a day, so every pair here is across runs (low and medium shared one), and drift between today's runs is unmeasured. Every arm passed every task, so this is a cheaper default for every route, not something a router chooses per task. Finding a task where the cheapest passing setting differs still needs tasks where Sonnet 5.5 medium fails.
 
 **Proposed next run (approved September 30; ran September 30, October 1 and October 3, above):** the 7 harder tasks × `sonnet-5.5`, `opus-5.5`, `modelpilot` × 1 trial, seed 0, same limits as 4a (30 turns, $1 per session), `--run-budget 15`, with `--subscription-arms sonnet-5.5,opus-5.5` (user request), so only the ModelPilot arm spends API dollars (about $1–2 plus unpriced TypeSafe). Forecast $4.5–9 plus unpriced TypeSafe, assuming these tasks cost 2–4× 4a's per trial ($0.069 Sonnet, $0.170 Opus, $0.068 ModelPilot, cold-equivalent). It shows whether Sonnet 5.5 at medium fails where Opus passes, gives the mid-task step decisions their first live run, and feeds the re-grader (`python3 -m modelpilot.regrade`) for the priced-quality term. Adding `jev-compat-o55` costs about another $1–2.
 
