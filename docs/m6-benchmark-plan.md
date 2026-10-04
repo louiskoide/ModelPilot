@@ -263,6 +263,26 @@ Every cost interval excludes 0, so the combination beats each lever alone. It ke
 
 Uncertainty: one trial per task; the four arms come from four runs over about a day, so every pair here is across runs (low and medium shared one), and drift between today's runs is unmeasured. Every arm passed every task, so this is a cheaper default for every route, not something a router chooses per task. Finding a task where the cheapest passing setting differs still needs tasks where Sonnet 5.5 medium fails.
 
+**Where Sonnet 5.5 already falls short: strict passes across every re-grade (October 4, $0).** `runs/strict-pass-matrix-20261004.py` reads the eight re-grades above and counts a trial as a strict pass when its saved fix passes the hidden grader and every edge test (`runs/strict-pass-matrix-20261004.json`). Opus 5.5 is 23/23 strict (one trial per task). Every Sonnet 5.5 setting is 21–22/23, and all 11 hidden-only results are Sonnet 5.5 fixes (ModelPilot's three ran Sonnet 5.5 medium) on two tasks:
+- `tomli-decode-error-attrs`, 7 of 7 Sonnet trials, at low, medium, concise and low concise: `test_line_starts_and_keywords` fails. Every Sonnet fix takes `*args` only, so `TOMLDecodeError(msg='m', doc='ab', pos=0)` falls into the deprecated path and warns. The one Opus fix uses named parameters, as `json.JSONDecodeError` does, and passes. The instruction names the parameters (`TOMLDecodeError(msg, doc, pos)`) but never says keywords must work, so this is an inferred convention, the kind of detail Sonnet misses and Opus got. It is the only task where the cheapest strictly passing setting differs, and it rests on one Opus trial.
+- `parse-decimal-grouping`, 4 of 7 Sonnet trials: `parse('{:,d}', '-7')` rejected. Sonnet at low and at medium in 4a passed, as did Haiku, so this is run-to-run variation, not a setting difference.
+
+Pass/fail on the hidden tests alone still separates nothing. A router can only use the tomli gap if edge tests count toward passing (a user decision, see below), and one task is too thin to price.
+
+**No large tasks left in the tuning repositories (October 4, $0).** `bench_tasks.candidates` with a 2,000-line cap over the five tuning repositories: tomli and parse have no unused change over 60 source lines, toolz's are from 2015–2016, and more-itertools' biggest unused 2026 feature (`random_ordered_range`) nets 44 lines. The one large 2026 change, cachetools' `@cachedmethod` rework (descriptors plus `cache_info()`, 365 source lines over two commits), can't be a fair task: its 1,000 test lines pin exact deprecation behaviour on separate paths for Python before and after 3.13, and the reference's `__get__` reads an attribute it never sets (`self.__deprecated`). The September 29 batch of 100–200-line features in these repositories already passed at every Sonnet setting.
+
+A $0 survey of two repositories outside the corpus (shallow clones in ignored `work/bench/survey/`, the benchmark interpreter `work/bench/py312`, nothing installed):
+
+| | sqlglot (MIT) | networkx (BSD-3) |
+| --- | --- | --- |
+| What a task looks like | SQL parser/transpiler fixes in an 82K-line package: dialect parsing, generation, optimizer scopes | Graph algorithms in a 121K-line package (tests excluded): new functions and fixes |
+| Fix commits with tests in 2026 | 628 since March (57 of 60–149 source lines, 9 over 150; 39 touch 3+ source files at 60–400 lines) | 86 since January (a dozen over 150 lines) |
+| Suite with the benchmark interpreter | 1,023 tests in 24 s, leaving out 4 files: 2 need `pytz`, 2 need `duckdb`/`pandas` (1 failure at today's head, unexamined) | 8,064 passed, 355 skipped (numpy/scipy absent) in 55 s |
+| Environment change | `pytz` (pure Python) in the locked venv to keep the 2 files; never `duckdb`/`pandas` | none |
+| Catch | Ships its own `CLAUDE.md` and `AGENTS.md`; whether the client reads them under `--setting-sources ''` is unchecked. Some 2026 commits are tagged `[CLAUDE]`/`[CODEX]` (written with agents) | 55 s is at the 60 s limit; a task's suite should be its subpackage |
+
+Either would add a tuning repository; the final split and its lock stay unchanged. Neither is built: the repository list was a user decision (September 26), so the choice is the user's.
+
 **Proposed next run (approved September 30; ran September 30, October 1 and October 3, above):** the 7 harder tasks × `sonnet-5.5`, `opus-5.5`, `modelpilot` × 1 trial, seed 0, same limits as 4a (30 turns, $1 per session), `--run-budget 15`, with `--subscription-arms sonnet-5.5,opus-5.5` (user request), so only the ModelPilot arm spends API dollars (about $1–2 plus unpriced TypeSafe). Forecast $4.5–9 plus unpriced TypeSafe, assuming these tasks cost 2–4× 4a's per trial ($0.069 Sonnet, $0.170 Opus, $0.068 ModelPilot, cold-equivalent). It shows whether Sonnet 5.5 at medium fails where Opus passes, gives the mid-task step decisions their first live run, and feeds the re-grader (`python3 -m modelpilot.regrade`) for the priced-quality term. Adding `jev-compat-o55` costs about another $1–2.
 
 ## Question
