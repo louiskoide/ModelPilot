@@ -54,6 +54,9 @@ ARMS = {
     'opus-5.5': {'kind': 'fixed', 'model': 'claude-opus-5-5'},  # the policy's top rung since September 26
     'sonnet-5': {'kind': 'fixed', 'model': 'claude-sonnet-5'},
     'sonnet-5.5': {'kind': 'fixed', 'model': 'claude-sonnet-5-5'},  # the policy's middle tier since September 28
+    # A fixed arm with an effort passes it as --effort; without one the client picks (medium for both 5.5 models,
+    # on the wire). Sonnet 5.5 low: a cheaper setting a router could move tasks to if it passes (October 3).
+    'sonnet-5.5-low': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low'},
     'haiku-4.5': {'kind': 'fixed', 'model': 'claude-haiku-4-5-20251001'},
     # Jev picks the served model per turn; the client only sends the sentinel.
     'jev-stock': {'kind': 'jev', 'variant': 'stock', 'model': 'jev-router', 'checkout': 'work/jev-router-baseline',
@@ -226,13 +229,23 @@ def budget_text(usd):
     return ('%.10f' % usd).rstrip('0').rstrip('.')
 
 
-def client_command(cli, prompt, model, max_turns, budget_usd, session, extra=()):
+def client_command(cli, prompt, model, max_turns, budget_usd, session, extra=(), effort=None):
     # The stop threshold applies per invocation: a resumed session gets its own. No model
     # (Jev arms) leaves the client on the sentinel the router's environment sets.
-    return [str(cli), '-p', prompt, *(['--model', model] if model else []), '--output-format', 'stream-json', '--verbose',
+    return [str(cli), '-p', prompt, *(['--model', model] if model else []), *(['--effort', effort] if effort else []),
+            '--output-format', 'stream-json', '--verbose',
             '--max-turns', str(max_turns), '--max-budget-usd', budget_text(budget_usd), '--setting-sources', '',
             '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--tools', TOOLS, '--allowedTools', TOOLS,
             *session, *extra]
+
+
+def effort_check(rows, effort):
+    """Whether a fixed arm's main-loop requests ran at the effort it asked for (a client could ignore --effort).
+    None without any such request: the session's stop reason, not this check, says what happened."""
+    sent = Counter(r.get('effective_effort') or r.get('effort') for r in rows
+                   if r.get('kind') == 'messages' and r.get('tool_count'))
+    return {'requested': effort, 'sent': {str(k): n for k, n in sorted(sent.items(), key=str)},
+            'applied': set(sent) == {effort} if sent else None}
 
 
 def client_version(cli):
@@ -417,7 +430,7 @@ class Trial:
         self.proxy = self.proxy_thread = self.route = None
         self.router = (router or bench_jev.JevRouter(arm)) if arm['kind'] == 'jev' else None
         self.jev_key, self.jev_stub = jev_key, jev_stub
-        self.record = {'task': task['id'], 'arm': arm_id, 'trial': trial, 'model': arm['model'],
+        self.record = {'task': task['id'], 'arm': arm_id, 'trial': trial, 'model': arm['model'], 'effort': arm.get('effort'),
                        'spec_sha256': bench_tasks.spec_hash(task), 'shape': shape,
                        'gap_requested_seconds': gap if shape == 'followup' else None,
                        'expected_hidden_passed': expected_hidden_passed, 'limits': self.limits,
@@ -510,8 +523,9 @@ class Trial:
         # Sessions persist only in the trial's own config dir, so the follow-up can resume them.
         session = ['--session-id', self.session_id] if index == 0 else ['--resume', self.session_id]
         model, extra = (None, ['--add-dir', self.route['add_dir']]) if self.router else (self.arm['model'], [])
+        fixed_effort = self.arm.get('effort') if self.arm['kind'] == 'fixed' else None  # the adapter sets its own
         command = client_command(self.cli, self.prompts[index], model, self.limits['max_turns'],
-                                 self.limits['budget_usd'], session, extra)
+                                 self.limits['budget_usd'], session, extra, effort=fixed_effort)
         env = self.env
         if self.adapter:
             command = self.adapter.command(command, env['ANTHROPIC_BASE_URL'])
@@ -575,6 +589,8 @@ class Trial:
             cache=bench_report.cache_attribution(bench_report.priced_rows(self.record, rows, self.rates), self.rates),
             path=bench_report.setting_path(rows),
             cost_components=bench_report.cost_components(bench_report.priced_rows(self.record, rows, self.rates), self.rates))
+        if self.arm['kind'] == 'fixed' and self.arm.get('effort'):
+            self.record['effort_check'] = effort_check(rows, self.arm['effort'])
         if self.auth == 'subscription':
             self.record['as_sent'] = {'cache': bench_report.cache_attribution(rows, self.rates),
                                       'cost_components': bench_report.cost_components(rows, self.rates)}
