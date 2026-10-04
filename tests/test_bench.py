@@ -78,6 +78,7 @@ class ScheduleTests(unittest.TestCase):
         from modelpilot.policy_actions import MODELS
         self.assertEqual(bench.ARMS['opus-5.5'], {'kind': 'fixed', 'model': 'claude-opus-5-5'})
         self.assertEqual(bench.ARMS['sonnet-5.5'], {'kind': 'fixed', 'model': 'claude-sonnet-5-5'})
+        self.assertEqual(bench.ARMS['sonnet-5.5-low'], {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low'})
         fixed = {arm['model'] for arm in bench.ARMS.values() if arm['kind'] == 'fixed'}
         self.assertTrue(set(MODELS) <= fixed)
 
@@ -171,6 +172,25 @@ class ScheduleTests(unittest.TestCase):
         self.assertNotIn('--model', command)
         self.assertEqual(command[-2:], ['--add-dir', '/jev'])
         self.assertEqual(command[command.index('--tools') + 1], bench.TOOLS)
+
+    def test_a_fixed_arm_passes_its_effort_and_the_others_leave_it_to_the_client(self):
+        command = bench.client_command('/c', 'do it', 'claude-sonnet-5-5', 30, 1.0, ['--session-id', 'x'], effort='low')
+        self.assertEqual(command[command.index('--effort') + 1], 'low')
+        self.assertNotIn('--effort', bench.client_command('/c', 'do it', 'claude-sonnet-5-5', 30, 1.0, ['--session-id', 'x']))
+
+    def test_the_effort_check_reads_main_loop_requests_only(self):
+        rows = [{'kind': 'messages', 'tool_count': 6, 'effort': 'low'},
+                {'kind': 'messages', 'tool_count': 0, 'effort': None},  # a side call
+                {'kind': 'count_tokens', 'tool_count': 6}]
+        self.assertEqual(bench.effort_check(rows, 'low'), {'requested': 'low', 'sent': {'low': 1}, 'applied': True})
+        ignored = rows + [{'kind': 'messages', 'tool_count': 6, 'effort': 'medium'}]
+        self.assertEqual(bench.effort_check(ignored, 'low'),
+                         {'requested': 'low', 'sent': {'low': 1, 'medium': 1}, 'applied': False})
+        # A per-message effort would be what the model ran at.
+        self.assertFalse(bench.effort_check([{'kind': 'messages', 'tool_count': 6, 'effort': 'low',
+                                              'effective_effort': 'high'}], 'low')['applied'])
+        # Nothing sent is unknown, not a mismatch: the trial keeps its own stop reason and isn't excluded for effort.
+        self.assertIsNone(bench.effort_check([], 'low')['applied'])
 
     def test_budget_threshold_is_passed_exactly(self):
         for budget, text in ((1.0, '1'), (.004, '0.004'), (.000001, '0.000001'), (2.5, '2.5')):
@@ -569,12 +589,12 @@ class OfflineTrialTests(unittest.TestCase):
         self.thread.join()
         self.repo_case.tearDown()
 
-    def trial(self, name, script, **options):
+    def trial(self, name, script, arm='sonnet-5', **options):
         work = self.out/name/'workspace'
         self.upstream.script = [dict(step, input={k: (str(work/v) if k == 'file_path' else v) for k, v in step['input'].items()})
                                 if 'tool' in step else step for step in script]
         options = dict(dict(python=sys.executable, max_turns=8, client_version=self.version), **options)
-        return bench.run_trial(self.task, 'sonnet-5', self.out/name, self.cli, 'sk-ant-offline-not-a-key',
+        return bench.run_trial(self.task, arm, self.out/name, self.cli, 'sk-ant-offline-not-a-key',
                                f'http://127.0.0.1:{self.upstream.server_port}', RATES, **options)
 
     FIX = [{'tool': 'Read', 'input': {'file_path': 'pkg/__init__.py'}},
@@ -631,6 +651,20 @@ class OfflineTrialTests(unittest.TestCase):
         # The client's own budget stop still applies when it is logged in with a subscription.
         stopped = self.trial('subscription-budget', self.FIX, auth='subscription', oauth_token=token, budget_usd=0.0001)
         self.assertEqual(stopped['sessions'][0]['stop'], 'budget_stop')
+
+    def test_a_low_effort_arm_sends_low_effort_with_an_api_key_and_on_a_subscription(self):
+        token = 'sk-ant-oat01-offline-fixture-not-a-token-1234'
+        for name, options in (('low', {}), ('low-subscription', dict(auth='subscription', oauth_token=token))):
+            record = self.trial(name, self.FIX, arm='sonnet-5.5-low', **options)
+            self.assertTrue(record['passed'], record['grade'])
+            self.assertEqual((record['model'], record['effort']), ('claude-sonnet-5-5', 'low'))
+            self.assertEqual(record['effort_check'], {'requested': 'low', 'sent': {'low': 4}, 'applied': True}, name)
+            self.assertEqual([s['setting'] for s in record['path']['steps']], [['claude-sonnet-5-5', 'low']])
+            self.assertTrue(record['accounting']['tokens_match'], record['accounting'])
+        # The arm without an effort leaves it to the client, which asks for medium.
+        default = self.trial('default', self.FIX, arm='sonnet-5.5')
+        self.assertNotIn('effort_check', default)
+        self.assertEqual([s['setting'] for s in default['path']['steps']], [['claude-sonnet-5-5', 'medium']])
 
     def test_follow_up_resumes_the_session_with_an_unchanged_prefix(self):
         self.upstream.keep_bodies = True

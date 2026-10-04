@@ -450,6 +450,17 @@ def pair_summary(a, b, cells_a, cells_b, rng, resamples, scopes=('complete', 'co
             'differences': differences}
 
 
+def ineligible_reason(record):
+    """Why a trial is excluded from comparisons, or None: its router or adapter says so, or a fixed arm's
+    requested effort didn't reach the wire."""
+    routing = record.get('routing') or {}
+    if routing.get('benchmark_eligible') is False:
+        return routing.get('ineligible_reason', 'adapter_not_benchmark_eligible')
+    if (record.get('effort_check') or {}).get('applied') is False:
+        return 'effort_not_applied'
+    return None
+
+
 def summarize(records, arms, seed=0, resamples=10000):
     """Per-arm results and paired differences with task-level bootstrap 95% intervals.
 
@@ -457,8 +468,8 @@ def summarize(records, arms, seed=0, resamples=10000):
     Arms are paired on the tasks both ran. An interval covering 0, or fewer than MIN_TASKS
     paired tasks, shows no difference.
     """
-    excluded = [r for r in records if (r.get('routing') or {}).get('benchmark_eligible') is False]
-    records = [r for r in records if (r.get('routing') or {}).get('benchmark_eligible') is not False]
+    excluded = [r for r in records if ineligible_reason(r)]
+    records = [r for r in records if not ineligible_reason(r)]
     rng = random.Random(seed)
     complete = {arm: [r for r in records if r['arm'] == arm and r.get('complete', True)] for arm in arms}
     incomplete = {arm: [r for r in records if r['arm'] == arm and not r.get('complete', True)] for arm in arms}
@@ -467,7 +478,7 @@ def summarize(records, arms, seed=0, resamples=10000):
     scope = {s['arm']: s['cost_scope'] for s in summaries}
     policy_arms = [a for a in arms if any((r.get('routing') or {}).get('kind') == 'modelpilot_policy' for r in complete[a])]
     out = {'excluded_ineligible_trials': [{'task': r['task'], 'arm': r['arm'],
-                'reason': r['routing'].get('ineligible_reason', 'adapter_not_benchmark_eligible'),
+                'reason': ineligible_reason(r),
                 'cost_usd': (r.get('accounting') or {}).get('cost_usd')} for r in excluded],
             'arms': summaries,
             'paired': [pair_summary(a, b, by_arm[a], by_arm[b], rng, resamples, (scope[a], scope[b]))

@@ -282,10 +282,16 @@ class IneligibleTrialTests(unittest.TestCase):
         base = dict(task='x', complete=True, passed=True, wall_seconds=1, accounting={'cost_usd': .1},
                     cache={'cold_equivalent_cost_usd': .1})
         rows = [dict(base, arm='jev-compat-o55', routing={'benchmark_eligible': False, 'ineligible_reason': 'served_outside_model_set'}),
-                dict(base, arm='modelpilot', routing={'benchmark_eligible': False})]
-        result = summarize(rows, ['jev-compat-o55', 'modelpilot'], resamples=10)
+                dict(base, arm='modelpilot', routing={'benchmark_eligible': False}),
+                # A fixed arm whose --effort never reached the wire measured the client's default, not its label.
+                dict(base, arm='sonnet-5.5-low', effort_check={'requested': 'low', 'sent': {'medium': 5}, 'applied': False}),
+                dict(base, task='y', arm='sonnet-5.5-low', effort_check={'requested': 'low', 'sent': {'low': 5}, 'applied': True}),
+                dict(base, task='z', arm='sonnet-5.5-low', effort_check={'requested': 'low', 'sent': {}, 'applied': None})]
+        result = summarize(rows, ['jev-compat-o55', 'modelpilot', 'sonnet-5.5-low'], resamples=10)
         self.assertEqual([(t['arm'], t['reason']) for t in result['excluded_ineligible_trials']],
-                         [('jev-compat-o55', 'served_outside_model_set'), ('modelpilot', 'adapter_not_benchmark_eligible')])
+                         [('jev-compat-o55', 'served_outside_model_set'), ('modelpilot', 'adapter_not_benchmark_eligible'),
+                          ('sonnet-5.5-low', 'effort_not_applied')])
+        self.assertEqual(next(a for a in result['arms'] if a['arm'] == 'sonnet-5.5-low')['trials'], 2)
 
 
 class ModelPilotPolicySummaryTests(unittest.TestCase):
