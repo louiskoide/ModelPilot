@@ -61,6 +61,10 @@ ARMS = {
     # --append-system-prompt-file. Sonnet 5.5 concise: medium Sonnet told to keep its fix, tests, tool output
     # and prose small, since everything it adds is written to the cache and re-read every step (October 3).
     'sonnet-5.5-concise': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'append_system_prompt': 'bench/prompts/concise.md'},
+    # Both levers at once (October 3): low effort cut output, the concise prompt cut what each step adds; each saved
+    # about 12% at equal quality on the 23 tuning tasks, by different routes, so this asks whether they add up.
+    'sonnet-5.5-low-concise': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low',
+                               'append_system_prompt': 'bench/prompts/concise.md'},
     'haiku-4.5': {'kind': 'fixed', 'model': 'claude-haiku-4-5-20251001'},
     # Jev picks the served model per turn; the client only sends the sentinel.
     'jev-stock': {'kind': 'jev', 'variant': 'stock', 'model': 'jev-router', 'checkout': 'work/jev-router-baseline',
