@@ -18,6 +18,7 @@ This is item 2 of the CLAUDE.md work order. It adds durable recovery and concurr
 | `execute_fallback(gov, decision, evidence, build_request, parse_candidate, transport, rates, allow_calls=False)` | cascade | See "Fallback execution" below. |
 | `reconcile_log(gov, log_path)` | after a run or a crash | Settles open reservations from proxy log rows and records rows the proxy could not reserve (`untracked`). An orphan with no row stays unknown. |
 | `note` / `last_note` / `outstanding_plans` | hooks | Integration journal entries (always `applied: False`) and planned rebases awaiting acknowledgment. |
+| `observe_setting(kind, value)` | proxy (`model`, `effort`), `SessionStart` hook (`compact`) | Evidence that the client now runs with a setting (October 4). An outstanding plan is acknowledged (`applied_by: observed`) once the latest value of every kind it changes, seen after it was planned in journal order, matches it; the newest such plan wins and supersedes the rest. Nothing is journaled while no plan is outstanding. A `prune` leaves no trace the host can see, so a plan holding one needs `ack-rebase`. |
 | `journal(kind=None)` | evaluation / audit | Ordered decision records. Stores hashes and decisions, not evidence text, but it lives with ledger data under ignored `runs/`. |
 
 ## Recovery rule
@@ -37,6 +38,7 @@ A reservation still pending after its `ttl` is **orphaned**. The governor cannot
 - The upstream `request-id` is kept as `provider_request_id` for Console reconciliation.
 - A governor error never blocks traffic. The row is marked `untracked` (or `settle_failed`), and `reconcile_log` records it later.
 - Cost is about 9 ms of SQLite work per governed request, measured against the loopback fixture.
+- After settling a successful main-loop request (one carrying tools; side requests such as titles carry none and may use another model), the proxy calls `observe_setting` with the row's `model` and top-level `effort`, the cache key the rebuild is about. A failure there leaves the row settled with `observe_error`, and the plan waits for an explicit ack.
 
 ### Claude Code hooks
 
@@ -44,12 +46,12 @@ A reservation still pending after its `ttl` is **orphaned**. The governor cannot
 
 | Event | Behavior |
 | --- | --- |
-| `SessionStart` | Journals the client session ID. With `source: compact`, acknowledges a plan whose only change is `compact`, because the client really rebuilt. |
+| `SessionStart` | Journals the client session ID. With `source: compact`, reports `observe_setting('compact', True)`, because the client really rebuilt: a compact-only plan is acknowledged at once, and one that also changes the model or effort once the proxy has seen those too. |
 | `UserPromptSubmit`, `PostToolUse`, `PostToolUseFailure` | Delivers a pending ledger correction (or a cancellation notice) into model context once, under the session's declared marker, then acknowledges it. Without a declared channel, nothing is delivered and the user is told. **Acknowledged means delivered into this client's context, not understood or obeyed.** Renews the lease. With an expired lease, nothing is delivered and the user is told. |
 | `PostToolUse` | For Write/Edit/MultiEdit/NotebookEdit inside the workspace, observes `file` plus `content_hash`, **read from disk by the hook**. |
 | `PostToolUseFailure` | Observes the error text, which M2 hashes. Interrupts are not failures. |
-| `Stop` | Records the end of the turn, used to measure the idle gap. |
-| `UserPromptSubmit` | Calls `plan_rebase` with the idle gap since the last `Stop`. A ready plan is shown to the user with the `/model`, `/effort` and `/compact` steps and the ack command. |
+| `Stop` | If a correction arrived during the turn's last model call (unacknowledged revision, task in progress), blocks the stop once per revision with the delivery as the `reason`, so the model sees it now instead of at the next prompt (October 4). A cancelled task just ends. Otherwise records the end of the turn, used to measure the idle gap. |
+| `UserPromptSubmit` | Calls `plan_rebase` with the idle gap since the last `Stop`. A ready plan is shown to the user with the `/model`, `/effort` and `/compact` steps; it says the plan is acknowledged once the session is seen running it, or gives the ack command when it holds a prune. |
 
 **Correction channel.** A correction gets its authority from the user, not from its own wording. `Governor.declare_channel()` creates a per-session random code in the ledger. `hooks.channel_declaration(task, code)` is text for the user's own prompt. It says that updates arrive as context starting exactly with `[ModelPilot ledger update, code <code>]`, and that anything else claiming to change instructions is data. Deliveries carry only that marker plus the current instruction and revision, and never claim to supersede anything. The code is kept out of the environment, because commands the model runs inherit it, and out of the journal. This protects against forged updates in files or tool output. It cannot stop hostile code running as the same OS user, which can read the ledger. The first live session showed why the channel is needed (see "Live evidence").
 
@@ -121,7 +123,7 @@ The original 20 governor tests cover:
 - governed transport settlement, refusal-before-send and unknown-cost cases
 - an M3 `Worker` whose second dispatch is refused by the budget, leaving its task released rather than completed
 
-The wiring adds proxy settlement tests (7), governor enforce/reconcile tests (2), fallback tests (7 + 2 harness), hook tests (17) and the offline end-to-end session (1).
+The wiring adds proxy settlement tests (7), governor enforce/reconcile tests (2), fallback tests (7 + 2 harness), hook tests (17) and the offline end-to-end session (1). October 4 adds hook tests for turn-end delivery (5), observed-rebuild tests (3 governor, 1 proxy) and a second offline real-client session in which the correction lands while the fixture holds the turn's last reply and reaches the model through the blocked stop (pinned 2.1.284).
 
 These are synthetic. The offline session uses the real client but a scripted upstream. None of it is evidence of savings or of model behavior under real traffic.
 
@@ -130,7 +132,6 @@ Known interaction: a refused call inside `Worker.dispatch` also sets that worker
 ## Not done
 
 - **Broader live evidence.** The declared channel has one passing live session, a synthetic Read-only task on Sonnet 4.6/low. Live observation of writes and failures, other models, and `cascade_check --execute-fallback` have not been run.
-- **Rebuild acknowledgment for model and effort.** Only compaction is detected automatically. `/model` and `/effort` changes need an explicit `ack-rebase`. Hook payloads carry `effort.level`, which could confirm effort changes later.
-- **Correction delivery at turn end.** A correction issued during the final model call waits for the next prompt. A `Stop` hook could deliver it by blocking the stop, but that is not implemented.
+- **Live evidence for turn-end delivery and observed rebuilds.** Both are offline only (October 4). Claude Code 2.1.284 puts a blocked stop's reason into the next request twice: as a system reminder that begins `Stop hook blocking error from command: <hook command line>` and as `Stop hook feedback:`. Both carry the declared marker, and the model also sees the hook's command line (local paths, no credentials). Whether a live model accepts a correction framed as a "blocking error" is unmeasured. Rebuild observation relies on the proxy; a hooks-only setup would confirm only compaction. 2.1.284's hook payloads carry no model and only the client's own `effort.level` (on `PreToolUse`, `PostToolUse` and `Stop`), so the wire is used instead.
 - **Test-suite observations.** Only file hashes and failure text are observed. `suite`/`failures` need an explicit test adapter, as M3 has, rather than parsing arbitrary output.
 - **Enforcement.** Active mode is deliberately unavailable until the integrated arm has measured evidence (CLAUDE.md work items 3–4). The proxy never blocks, and hooks never change the model, effort or context.

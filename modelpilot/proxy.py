@@ -322,9 +322,18 @@ class ProxyServer(ThreadingHTTPServer):
         gov = self.open_governor()
         try:
             gov.settle(row['governor_request_id'], row['cost_usd'])
+            row['governor_status'] = 'settled'
+            if row['status'] == 'ok' and row['tool_count']:
+                # Wire evidence for an outstanding rebuild plan: the client's main loop ran at this setting.
+                # Side requests (titles, summaries) carry no tools and may use another model.
+                try:
+                    for kind in ('model', 'effort'):
+                        if row[kind] not in (None, 'unknown'):
+                            gov.observe_setting(kind, row[kind])
+                except Exception as e:
+                    row['observe_error'] = type(e).__name__  # settlement stands; the plan waits for an explicit ack
         finally:
             gov.close()
-        row['governor_status'] = 'settled'
 
     def plan_policy(self, request):
         gov = self.open_governor()

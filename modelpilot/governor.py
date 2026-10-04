@@ -15,6 +15,9 @@ from .m2 import State
 from .m4 import cascade, nonnegative, sha
 
 KINDS = ('model', 'effort', 'prune', 'compact')
+# Settings the host can see the client use: model and effort on the wire, compaction from a hook. A prune
+# leaves no such trace, so a plan holding one always needs an explicit acknowledgment.
+OBSERVABLE = ('model', 'effort', 'compact')
 
 
 class BudgetRefused(ValueError):
@@ -284,10 +287,11 @@ class Governor:
             self._journal('plan_rebase', result, revision=revision)
         return result
 
-    def acknowledge_rebase(self, plan_id):
+    def acknowledge_rebase(self, plan_id, applied_by='caller'):
         """Caller reports it performed the rebuild; drains only the planned change versions.
 
-        A newer value queued after planning stays pending for the next boundary.
+        A newer value queued after planning stays pending for the next boundary. applied_by is 'observed'
+        when observe_setting saw the client run every planned change.
         """
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
@@ -302,7 +306,7 @@ class Governor:
                 self.db.execute("UPDATE gov_plans SET status='acknowledged',acknowledged=? WHERE id=?", (self.clock(), plan_id))
                 # Other outstanding plans referenced now-drained versions; they cannot be acknowledged.
                 self.db.execute("UPDATE gov_plans SET status='superseded' WHERE session=? AND status='planned'", (self.session,))
-                self._journal('acknowledge_rebase', {'plan_id': plan_id, 'drained': drained, 'applied_by': 'caller'},
+                self._journal('acknowledge_rebase', {'plan_id': plan_id, 'drained': drained, 'applied_by': applied_by},
                               revision=row['revision'])
             elif row['status'] == 'superseded':
                 raise ValueError('Rebase plan was superseded; plan again')
@@ -325,6 +329,42 @@ class Governor:
     def channel_code(self):
         row = self.db.execute('SELECT code FROM gov_channels WHERE session=?', (self.session,)).fetchone()
         return row['code'] if row else None
+
+    def observe_setting(self, kind, value):
+        """Evidence that the client now runs with this setting; returns the plan it acknowledged, if any.
+
+        A plan is acknowledged, as if by its caller, once the latest value of every kind it changes, seen
+        after it was planned (journal order, so hooks and the proxy can report from separate processes),
+        matches the plan. Nothing is recorded while no plan is outstanding.
+        """
+        if kind not in OBSERVABLE:
+            raise ValueError('Unobservable setting')
+        confirmed = []
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            plans = self.db.execute("SELECT id,changes FROM gov_plans WHERE session=? AND status='planned' ORDER BY created",
+                                    (self.session,)).fetchall()
+            if not plans:
+                return []
+            self._journal('observe_setting', {'kind': kind, 'value': value, 'applied': False})
+            for plan in plans:
+                start = self.db.execute("SELECT MIN(seq) FROM gov_decisions WHERE session=? AND kind='plan_rebase' AND payload LIKE ?",
+                                        (self.session, f'%"{plan["id"]}"%')).fetchone()[0]
+                seen = {}
+                for row in self.db.execute("SELECT payload FROM gov_decisions WHERE session=? AND kind='observe_setting' AND seq>? "
+                                           'ORDER BY seq', (self.session, start or 0)):
+                    observed = json.loads(row['payload'])
+                    seen[observed['kind']] = observed['value']
+                if all(c['kind'] in seen and seen[c['kind']] == c['value'] for c in json.loads(plan['changes'])):
+                    confirmed.append(plan['id'])
+        if not confirmed:
+            return []
+        try:
+            # The newest confirmed plan holds the current change versions; acknowledging it supersedes the rest.
+            self.acknowledge_rebase(confirmed[-1], applied_by='observed')
+        except ValueError:
+            return []  # another process acknowledged or superseded it first
+        return confirmed[-1:]
 
     def outstanding_plans(self):
         rows = self.db.execute("SELECT id,revision,changes FROM gov_plans WHERE session=? AND status='planned' ORDER BY created",

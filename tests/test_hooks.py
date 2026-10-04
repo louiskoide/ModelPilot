@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from modelpilot.governor import Governor
 from modelpilot.hooks import channel_declaration, handle
 
@@ -165,6 +166,7 @@ class HookTests(unittest.TestCase):
         self.assertEqual((plan['action'], plan['trigger']), ('would_rebase', 'idle'))
         self.assertIn(plan['plan_id'], output['systemMessage'])
         self.assertIn('/model claude-opus-4-6', output['systemMessage'])
+        self.assertIn('acknowledged once this session is seen running it', output['systemMessage'])
         self.assertIsNone(self.context(output))
         self.assertEqual(len(self.gov.pending_changes()), 1)  # suggested, not applied
 
@@ -173,7 +175,7 @@ class HookTests(unittest.TestCase):
         self.gov.queue_change('model', 'claude-opus-4-6', self.rev)
         self.gov.plan_rebase(self.rev, explicit_boundary=True)
         self.run_hook('SessionStart', source='compact')
-        self.assertEqual(len(self.gov.pending_changes()), 2)  # the model change needs an explicit ack
+        self.assertEqual(len(self.gov.pending_changes()), 2)  # the model change was never seen on the wire
         self.gov.acknowledge_rebase(self.gov.plan_rebase(self.rev, explicit_boundary=True)['plan_id'])
         self.gov.queue_change('compact', True, self.rev)
         self.gov.plan_rebase(self.rev, explicit_boundary=True)
@@ -181,6 +183,52 @@ class HookTests(unittest.TestCase):
         self.assertEqual(len(self.gov.pending_changes()), 1)
         self.run_hook('SessionStart', source='compact')
         self.assertEqual(self.gov.pending_changes(), [])
+
+    def test_correction_issued_during_the_last_model_call_blocks_the_stop_once(self):
+        self.gov.state.correct(self.task, self.rev, 'Report the SECOND token instead')
+        output = self.run_hook('Stop')
+        self.assertEqual(output['decision'], 'block')
+        self.assertTrue(output['reason'].startswith(f'[ModelPilot ledger update, code {self.code}]'))
+        self.assertIn('Report the SECOND token instead', output['reason'])
+        self.assertNotIn('hookSpecificOutput', output)  # a Stop hook's additionalContext never reaches the model
+        self.assertEqual(self.gov.state.get(self.task)['ack_revision'], self.rev+1)
+        self.assertEqual([e['payload']['event'] for e in self.gov.journal('deliver_correction')], ['Stop'])
+        # The client continues; its next stop has nothing new and ends the turn.
+        self.assertNotIn('decision', self.run_hook('Stop', stop_hook_active=True))
+
+    def test_stop_with_nothing_pending_is_not_blocked(self):
+        self.assertEqual(self.run_hook('Stop'), {})
+        self.gov.state.correct(self.task, self.rev, 'x')
+        self.run_hook('PostToolUse-Read')  # delivered mid-turn already
+        self.assertEqual(self.run_hook('Stop'), {})
+
+    def test_stop_blocks_at_most_once_per_revision_even_if_acknowledgment_fails(self):
+        self.gov.state.correct(self.task, self.rev, 'Use the new plan')
+        with unittest.mock.patch.object(type(self.gov.state), 'acknowledge', side_effect=ValueError('stale')):
+            first = self.run_hook('Stop')
+            second = self.run_hook('Stop', stop_hook_active=True)
+        self.assertEqual(first['decision'], 'block')
+        self.assertNotIn('decision', second)  # never holds the client in a loop
+        self.assertEqual(len(self.gov.journal('stop_block')), 1)
+
+    def test_cancelled_task_ends_at_stop_without_another_model_call(self):
+        self.gov.state.cancel(self.task, self.rev)
+        output = self.run_hook('Stop')
+        self.assertNotIn('decision', output)
+        self.assertEqual(self.gov.journal('deliver_cancel'), [])
+
+    def test_undeclared_channel_never_blocks_the_stop(self):
+        other = Governor(self.db, 'undeclared', 1)
+        try:
+            task = other.state.create('t', 'x')['id']
+            rev = other.state.claim(task, 1, 'client', seconds=3600)['revision']
+            other.state.correct(task, rev, 'Unannounced change')
+            env = dict(self.env, MODELPILOT_SESSION='undeclared', MODELPILOT_TASK=task)
+            output = handle('Stop', payload('Stop', self.work), env, clock=lambda: self.now[0])
+            self.assertNotIn('decision', output)
+            self.assertIn('no declared correction channel', output['systemMessage'])
+        finally:
+            other.close()
 
     def test_hooks_never_record_applied_actions(self):
         self.gov.state.correct(self.task, self.rev, 'x')

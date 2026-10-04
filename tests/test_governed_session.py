@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import shutil
+import sqlite3
 import tempfile
 import threading
 import unittest
@@ -59,6 +60,40 @@ class OfflineGovernedSessionTests(unittest.TestCase):
         self.assertFalse(report['applied'])
         self.assertEqual(report['status'], 'passed', report)
         self.assertTrue((run/'summary.json').exists())
+
+    def test_correction_during_the_last_model_call_is_delivered_by_blocking_the_stop(self):
+        run = Path(self.tmp.name)/'run'
+        work = run/'workspace'
+        self.upstream.script = [{'tool': 'Read', 'input': {'file_path': str(work/'a.txt')}},
+                                {'text': 'DONE ALPHA'}, {'text': 'DONE BRAVO'}]
+        # Issued while the fixture holds the turn's last reply: after the last tool hook, before Stop.
+        last_call = lambda: any(b'"tool_result"' in body for body in self.upstream.bodies)
+        report = run_session(run, shutil.which('claude'), 'sk-ant-offline-fixture-not-a-key',
+                             f'http://127.0.0.1:{self.upstream.server_port}', RATES,
+                             prompt='Read a.txt and report its token.', instruction='Report the first token.',
+                             correction='CORRECTION_MARKER: report the second token instead.',
+                             files={'a.txt': 'ALPHA\n'}, tools='Read', limit_usd=5, correct_when=last_call)
+        code = report['correction']['channel_code']
+        bodies = self.upstream.bodies
+        answered = next(i for i, b in enumerate(bodies) if b'"tool_result"' in b)
+        carrying = [i for i, b in enumerate(bodies) if b'CORRECTION_MARKER' in b]
+        self.assertTrue(carrying, 'the correction never reached a model request')
+        self.assertGreater(carrying[0], answered)  # not delivered by a tool hook: it arrived after the last one
+        self.assertIn(f'[ModelPilot ledger update, code {code}]'.encode(), bodies[carrying[0]])
+        self.assertEqual(report['hook_events'].count('Stop'), 2)  # blocked once, then the turn ended
+        db = sqlite3.connect(run/'ledger.sqlite3')
+        try:
+            kinds = [(kind, json.loads(payload).get('event')) for kind, payload in
+                     db.execute("SELECT kind,payload FROM gov_decisions WHERE kind IN ('deliver_correction','stop_block') ORDER BY seq")]
+        finally:
+            db.close()
+        self.assertEqual(kinds, [('deliver_correction', 'Stop'), ('stop_block', None)])
+        self.assertTrue(report['correction']['delivered'])
+        self.assertTrue(report['correction']['acknowledged'])
+        self.assertEqual(report['proxy']['unsettled'], 0)
+        self.assertTrue(report['accounting_matches'], report)
+        self.assertFalse(report['applied'])
+        self.assertEqual(report['status'], 'passed', report)
 
 
 if __name__ == '__main__': unittest.main()

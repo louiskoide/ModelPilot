@@ -407,6 +407,34 @@ class GovernedProxyTests(unittest.TestCase):
         finally:
             gov.close()
 
+    def send(self, model, effort, tools):
+        request = {'model': model, 'stream': False, 'max_tokens': 32, 'output_config': {'effort': effort},
+                   'messages': [{'role': 'user', 'content': 'x'}]}
+        if tools:
+            request['tools'] = [{'name': 'Read', 'input_schema': {'type': 'object'}}]
+        conn = http.client.HTTPConnection('127.0.0.1', self.proxy.server_port, timeout=5)
+        conn.request('POST', '/v1/messages', json.dumps(request).encode(), {'Content-Type': 'application/json'})
+        conn.getresponse().read()
+        conn.close()
+        self.proxy.wait_idle()
+
+    def test_a_main_loop_request_at_the_planned_setting_acknowledges_the_rebuild(self):
+        gov = self.govern()
+        try:
+            gov.queue_change('model', 'claude-sonnet-4-6', 0)
+            gov.queue_change('effort', 'high', 0)
+            plan = gov.plan_rebase(0, explicit_boundary=True)
+            self.send('claude-sonnet-4-6', 'high', tools=False)  # a side request is not the client's main loop
+            self.send('claude-sonnet-4-6', 'medium', tools=True)
+            self.assertEqual(len(gov.outstanding_plans()), 1)
+            self.send('claude-sonnet-4-6', 'high', tools=True)
+            self.assertEqual((gov.outstanding_plans(), gov.pending_changes()), ([], []))
+            ack = gov.journal('acknowledge_rebase')[-1]['payload']
+            self.assertEqual((ack['plan_id'], ack['applied_by']), (plan['plan_id'], 'observed'))
+            self.assertTrue(all(r['governor_status'] == 'settled' for r in self.rows(3)))
+        finally:
+            gov.close()
+
     def test_governor_failure_never_blocks_traffic_and_log_reconciles(self):
         gov = self.govern()
         try:

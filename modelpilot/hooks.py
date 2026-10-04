@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 import sys
 import time
-from .governor import Governor, KINDS
+from .governor import Governor, KINDS, OBSERVABLE
 
 EVENTS = ('SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop')
 # Events whose hookSpecificOutput.additionalContext reaches the model (verified on Claude Code 2.1.280).
@@ -124,6 +124,26 @@ def deliver(gov, task, owner, event):
     return text, None
 
 
+def stop_delivery(gov, task, owner, payload):
+    """Return (block reason, user notice) for a correction that arrived during the turn's last model call.
+
+    A Stop hook's additionalContext never reaches the model, but a block's reason does, and the client
+    continues the turn with it. Only an unacknowledged revision of a task still in progress blocks, and
+    at most once per revision, so the client is never held in a loop. A cancelled task just ends.
+    """
+    row = gov.state.get(task)
+    if row['status'] != 'in_progress' or row['ack_revision'] == row['revision']:
+        return None, None
+    last = gov.last_note('stop_block')
+    if last and last['revision'] == row['revision']:
+        return None, None
+    text, notice = deliver(gov, task, owner, 'Stop')
+    if text:
+        gov.note('stop_block', {'revision': row['revision'], 'stop_hook_active': payload.get('stop_hook_active') is True},
+                 task, row['revision'])
+    return text, notice
+
+
 def renew(gov, task, owner):
     row = gov.state.get(task)
     try:
@@ -147,21 +167,23 @@ def rebase_notice(plan):
     hints = {'model': lambda v: f'/model {v}', 'effort': lambda v: f'/effort {v}',
              'compact': lambda v: '/compact', 'prune': lambda v: f'prune {json.dumps(v)}'}
     steps = ', '.join(hints[c['kind']](c['value']) for c in plan['changes'])
-    return (f"ModelPilot (dry-run) suggests one rebuild now ({plan['trigger']}): {steps}. Nothing was changed. "
-            f"After applying it, run: python -m modelpilot.hooks ack-rebase {plan['plan_id']}")
+    ack = f"python -m modelpilot.hooks ack-rebase {plan['plan_id']}"
+    if all(c['kind'] in OBSERVABLE for c in plan['changes']):
+        ack = f'It is acknowledged once this session is seen running it (or run: {ack})'
+    else:
+        ack = f'After applying it, run: {ack}'  # a prune leaves nothing the host can see
+    return f"ModelPilot (dry-run) suggests one rebuild now ({plan['trigger']}): {steps}. Nothing was changed. {ack}"
 
 
 def handle(event, payload, env, clock=time.time):
     db, session, limit, task, owner = binding(env)
     gov = Governor(db, session, limit, clock=clock)
-    context, notices = [], []
+    context, notices, block = [], [], None
     try:
         gov.note('hook_event', {'event': event, 'tool_name': payload.get('tool_name'),
                                 'client_session_id': payload.get('session_id')}, task)
         if event == 'SessionStart' and payload.get('source') == 'compact':
-            for plan in gov.outstanding_plans():
-                if plan['kinds'] == ['compact']:
-                    gov.acknowledge_rebase(plan['plan_id'])  # the client really rebuilt its context
+            gov.observe_setting('compact', True)  # the client really rebuilt its context
         if event in CONTEXT_EVENTS:
             text, notice = deliver(gov, task, owner, event)
             context += [text] if text else []
@@ -184,10 +206,13 @@ def handle(event, payload, env, clock=time.time):
             if plan['action'] == 'would_rebase':
                 notices.append(rebase_notice(plan))
         if event == 'Stop':
-            gov.note('client_stop', {}, task)
+            block, notice = stop_delivery(gov, task, owner, payload)
+            notices += [notice] if notice else []
+            if not block:
+                gov.note('client_stop', {}, task)  # the turn really ends: an idle gap starts here
     finally:
         gov.close()
-    output = {}
+    output = {'decision': 'block', 'reason': block} if block else {}
     if context:
         output['hookSpecificOutput'] = {'hookEventName': event, 'additionalContext': '\n\n'.join(context)}
     if notices:
