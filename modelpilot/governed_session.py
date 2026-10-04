@@ -50,16 +50,18 @@ def client_env(base, key, dirs, cli, binding):
     return env
 
 
-def correct_after_first_tool(db, session, limit, task, correction, done, record):
-    """Coordinator: correct the task once the first tool result has been observed by a hook."""
+def correct_after_first_tool(db, session, limit, task, correction, done, record, when=None):
+    """Coordinator: correct the task once the first tool result has been observed by a hook, or once
+    when() is true (e.g. while the upstream holds the turn's last reply)."""
     gov = Governor(db, session, limit)
     try:
         while not done.is_set():
             events = [e for e in gov.journal('hook_event') if e['payload']['event'] == 'PostToolUse']
-            if events:
+            if when() if when else events:
                 row = gov.state.get(task)
                 corrected = gov.state.correct(task, row['revision'], correction)
-                record.update(issued=True, revision=corrected['revision'], after_hook_seq=events[0]['seq'])
+                record.update(issued=True, revision=corrected['revision'],
+                              after_hook_seq=(events[-1] if when else events[0])['seq'] if events else None)
                 return
             done.wait(.02)
     finally:
@@ -68,8 +70,9 @@ def correct_after_first_tool(db, session, limit, task, correction, done, record)
 
 def run_session(run, cli, key, upstream, rates, *, prompt, instruction, correction=None, files=None,
                 model='claude-sonnet-4-6', effort='low', tools='Read', limit_usd=5, budget_usd=.5,
-                max_turns=6, expect=(), forbid=(), timeout=300, policy_upstream=None):
-    """policy_upstream: the owned fixtures.FixtureServer, to apply ladder escalations offline."""
+                max_turns=6, expect=(), forbid=(), timeout=300, policy_upstream=None, correct_when=None):
+    """policy_upstream: the owned fixtures.FixtureServer, to apply ladder escalations offline.
+    correct_when: a callable; the correction is issued once it returns true instead of after the first tool."""
     run = Path(run)
     run.mkdir(mode=0o700, parents=True)
     dirs = {name: run/name for name in ('workspace', 'home', 'tmp', 'config')}
@@ -101,7 +104,7 @@ def run_session(run, cli, key, upstream, rates, *, prompt, instruction, correcti
     coordinator = None
     if correction:
         coordinator = threading.Thread(target=correct_after_first_tool, daemon=True,
-                                       args=(db, session, limit_usd, task, correction, done, correction_record))
+                                       args=(db, session, limit_usd, task, correction, done, correction_record, correct_when))
         coordinator.start()
     # The prompt is the user's: it declares the correction channel before any update can arrive.
     user_prompt = f'{channel_declaration(task, code)}\n\nTask instruction: {instruction}\n\n{prompt}'

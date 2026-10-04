@@ -202,6 +202,51 @@ class GovernorTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.gov.acknowledge_rebase(first['plan_id'])
         self.assertEqual(self.gov.pending_changes(), [])
 
+    def test_observed_settings_acknowledge_a_plan_once_every_change_is_seen_after_planning(self):
+        self.assertEqual(self.gov.observe_setting('model', 'target'), [])  # nothing outstanding: not even recorded
+        self.assertEqual(self.gov.journal('observe_setting'), [])
+        self.gov.queue_change('model', 'target', 1)
+        self.gov.queue_change('effort', 'high', 1)
+        self.gov.queue_change('compact', True, 1)
+        plan = self.gov.plan_rebase(1, explicit_boundary=True)
+        self.gov.observe_setting('model', 'target')
+        self.gov.observe_setting('effort', 'high')
+        self.assertEqual(len(self.gov.outstanding_plans()), 1)  # the compaction hasn't been seen
+        self.reopen()  # evidence is durable: hooks and the proxy are separate processes
+        self.assertEqual(self.gov.observe_setting('compact', True), [plan['plan_id']])
+        self.assertEqual((self.gov.outstanding_plans(), self.gov.pending_changes()), ([], []))
+        ack = self.gov.journal('acknowledge_rebase')[-1]['payload']
+        self.assertEqual((ack['plan_id'], ack['applied_by']), (plan['plan_id'], 'observed'))
+        self.assertTrue(all(e['payload'].get('applied') is False for e in self.gov.journal('observe_setting')))
+
+    def test_only_the_latest_value_seen_since_planning_counts(self):
+        self.gov.queue_change('model', 'target', 1)
+        self.gov.queue_change('effort', 'low', 1)
+        plan = self.gov.plan_rebase(1, explicit_boundary=True)
+        self.gov.observe_setting('model', 'target')
+        self.gov.observe_setting('model', 'other')  # switched away again before the effort was seen
+        self.gov.observe_setting('effort', 'low')
+        self.assertEqual(len(self.gov.outstanding_plans()), 1)
+        self.gov.queue_change('effort', 'high', 1)
+        newer = self.gov.plan_rebase(1, explicit_boundary=True)
+        self.gov.observe_setting('effort', 'high')
+        self.assertEqual(len(self.gov.outstanding_plans()), 2)  # 'target' was seen only before the newer plan
+        self.gov.observe_setting('model', 'target')
+        self.assertEqual(self.gov.outstanding_plans(), [])
+        self.assertEqual(self.gov.journal('acknowledge_rebase')[-1]['payload']['plan_id'], newer['plan_id'])
+        self.assertNotEqual(newer['plan_id'], plan['plan_id'])
+
+    def test_a_prune_is_never_observed_and_needs_an_explicit_ack(self):
+        self.gov.queue_change('prune', ['old'], 1)
+        self.gov.queue_change('model', 'target', 1)
+        plan = self.gov.plan_rebase(1, explicit_boundary=True)
+        self.gov.observe_setting('model', 'target')
+        self.assertEqual(len(self.gov.outstanding_plans()), 1)
+        with self.assertRaises(ValueError): self.gov.observe_setting('prune', ['old'])
+        with self.assertRaises(ValueError): self.gov.observe_setting('temperature', 1)
+        self.gov.acknowledge_rebase(plan['plan_id'])
+        self.assertEqual(self.gov.journal('acknowledge_rebase')[-1]['payload']['applied_by'], 'caller')
+
     def test_journal_never_records_applied_actions(self):
         self.gov.admit('a', .1, self.task, self.rev)
         self.gov.settle('a', .1)
