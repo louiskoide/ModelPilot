@@ -82,6 +82,8 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(bench.ARMS['sonnet-5.5-low'], {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low'})
         self.assertEqual(bench.ARMS['sonnet-5.5-concise'], {'kind': 'fixed', 'model': 'claude-sonnet-5-5',
                                                             'append_system_prompt': 'bench/prompts/concise.md'})
+        self.assertEqual(bench.ARMS['sonnet-5.5-low-concise'], {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low',
+                                                                'append_system_prompt': 'bench/prompts/concise.md'})
         fixed = {arm['model'] for arm in bench.ARMS.values() if arm['kind'] == 'fixed'}
         self.assertTrue(set(MODELS) <= fixed)
 
@@ -717,6 +719,23 @@ class OfflineTrialTests(unittest.TestCase):
         default = self.trial('default-prompt', self.FIX, arm='sonnet-5.5')
         self.assertNotIn('prompt_check', default)
         self.assertIsNone(default['append_system_prompt'])
+
+    def test_a_low_concise_arm_sends_low_effort_and_its_prompt_and_checks_both(self):
+        token = 'sk-ant-oat01-offline-fixture-not-a-token-1234'
+        text = (bench.ROOT/'bench/prompts/concise.md').read_text().strip()
+        self.upstream.keep_bodies = True
+        for name, options in (('low-concise', {}), ('low-concise-subscription', dict(auth='subscription', oauth_token=token))):
+            before = len(self.upstream.bodies)
+            record = self.trial(name, self.FIX, arm='sonnet-5.5-low-concise', **options)
+            self.assertTrue(record['passed'], record['grade'])
+            self.assertEqual((record['model'], record['effort']), ('claude-sonnet-5-5', 'low'))
+            self.assertEqual(record['effort_check'], {'requested': 'low', 'sent': {'low': 4}, 'applied': True}, name)
+            self.assertTrue(record['prompt_check']['applied'], name)
+            self.assertEqual(record['prompt_check']['missing'], 0)
+            self.assertEqual([s['setting'] for s in record['path']['steps']], [['claude-sonnet-5-5', 'low']])
+            main = [b for b in (json.loads(x) for x in self.upstream.bodies[before:]) if b.get('tools')]
+            self.assertTrue(main and all(b['output_config']['effort'] == 'low' and
+                                         b['system'][-1]['text'].rstrip().endswith(text) for b in main), name)
 
     def test_follow_up_resumes_the_session_with_an_unchanged_prefix(self):
         self.upstream.keep_bodies = True
