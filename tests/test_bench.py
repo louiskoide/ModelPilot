@@ -1,4 +1,5 @@
 import http.client
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -79,6 +80,8 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(bench.ARMS['opus-5.5'], {'kind': 'fixed', 'model': 'claude-opus-5-5'})
         self.assertEqual(bench.ARMS['sonnet-5.5'], {'kind': 'fixed', 'model': 'claude-sonnet-5-5'})
         self.assertEqual(bench.ARMS['sonnet-5.5-low'], {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low'})
+        self.assertEqual(bench.ARMS['sonnet-5.5-concise'], {'kind': 'fixed', 'model': 'claude-sonnet-5-5',
+                                                            'append_system_prompt': 'bench/prompts/concise.md'})
         fixed = {arm['model'] for arm in bench.ARMS.values() if arm['kind'] == 'fixed'}
         self.assertTrue(set(MODELS) <= fixed)
 
@@ -177,6 +180,30 @@ class ScheduleTests(unittest.TestCase):
         command = bench.client_command('/c', 'do it', 'claude-sonnet-5-5', 30, 1.0, ['--session-id', 'x'], effort='low')
         self.assertEqual(command[command.index('--effort') + 1], 'low')
         self.assertNotIn('--effort', bench.client_command('/c', 'do it', 'claude-sonnet-5-5', 30, 1.0, ['--session-id', 'x']))
+
+    def test_a_fixed_arm_appends_its_prompt_file_and_the_others_do_not(self):
+        appended = bench.appended_prompt(bench.ARMS['sonnet-5.5-concise'])
+        data = (bench.ROOT/'bench/prompts/concise.md').read_bytes()
+        self.assertEqual((appended['file'], appended['sha256']), (bench.ROOT/'bench/prompts/concise.md', hashlib.sha256(data).hexdigest()))
+        self.assertEqual(appended['text'], data.decode().strip())
+        self.assertTrue(all(len(line) < 400 for line in appended['text'].splitlines()))
+        self.assertLess(len(data), 1500)  # written once per session and re-read every step: keep it short
+        for arm in ('sonnet-5.5', 'sonnet-5.5-low', 'modelpilot', 'jev-compat-o55'):
+            self.assertIsNone(bench.appended_prompt(bench.ARMS[arm]), arm)
+        command = bench.client_command('/c', 'do it', 'claude-sonnet-5-5', 30, 1.0, ['--session-id', 'x'],
+                                       append_prompt=appended['file'])
+        self.assertEqual(command[command.index('--append-system-prompt-file') + 1], str(appended['file']))
+        self.assertNotIn('--append-system-prompt-file',
+                         bench.client_command('/c', 'do it', 'claude-sonnet-5-5', 30, 1.0, ['--session-id', 'x']))
+
+    def test_the_prompt_check_reads_main_loop_requests_only(self):
+        rows = [{'kind': 'messages', 'tool_count': 6, 'system_marker': True},
+                {'kind': 'messages', 'tool_count': 0, 'system_marker': False},  # a side call has its own system prompt
+                {'kind': 'count_tokens', 'tool_count': 6}]
+        self.assertEqual(bench.prompt_check(rows, 'abc'), {'requested_sha256': 'abc', 'present': 1, 'missing': 0, 'applied': True})
+        missing = rows + [{'kind': 'messages', 'tool_count': 6, 'system_marker': False}, {'kind': 'messages', 'tool_count': 6}]
+        self.assertEqual(bench.prompt_check(missing, 'abc'), {'requested_sha256': 'abc', 'present': 1, 'missing': 2, 'applied': False})
+        self.assertIsNone(bench.prompt_check([], 'abc')['applied'])
 
     def test_the_effort_check_reads_main_loop_requests_only(self):
         rows = [{'kind': 'messages', 'tool_count': 6, 'effort': 'low'},
@@ -665,6 +692,31 @@ class OfflineTrialTests(unittest.TestCase):
         default = self.trial('default', self.FIX, arm='sonnet-5.5')
         self.assertNotIn('effort_check', default)
         self.assertEqual([s['setting'] for s in default['path']['steps']], [['claude-sonnet-5-5', 'medium']])
+
+    def test_a_concise_arm_sends_its_prompt_with_an_api_key_and_on_a_subscription(self):
+        token = 'sk-ant-oat01-offline-fixture-not-a-token-1234'
+        text = (bench.ROOT/'bench/prompts/concise.md').read_text().strip()
+        self.upstream.keep_bodies = True
+        for name, options in (('concise', {}), ('concise-subscription', dict(auth='subscription', oauth_token=token))):
+            before = len(self.upstream.bodies)
+            record = self.trial(name, self.FIX, arm='sonnet-5.5-concise', **options)
+            self.assertTrue(record['passed'], record['grade'])
+            self.assertEqual((record['model'], record['effort']), ('claude-sonnet-5-5', None))
+            self.assertEqual(record['append_system_prompt']['path'], 'bench/prompts/concise.md')
+            self.assertEqual(record['prompt_check'], {'requested_sha256': record['append_system_prompt']['sha256'],
+                                                      'present': 4, 'missing': 0, 'applied': True}, name)
+            self.assertEqual([s['setting'] for s in record['path']['steps']], [['claude-sonnet-5-5', 'medium']])
+            sent = [json.loads(b) for b in self.upstream.bodies[before:]]
+            main = [b for b in sent if b.get('tools')]
+            self.assertTrue(main and all(b['system'][-1]['text'].rstrip().endswith(text) for b in main), name)
+            self.assertNotIn(text[:40], (self.out/name/'observations.jsonl').read_text())  # the log keeps only the flag
+            self.assertEqual(sum(record['write_sources']['tokens'].values()),
+                             sum(json.loads(l).get('usage', {}).get('cache_creation_input_tokens', 0)
+                                 for l in (self.out/name/'observations.jsonl').read_text().splitlines()
+                                 if json.loads(l).get('kind') == 'messages'))
+        default = self.trial('default-prompt', self.FIX, arm='sonnet-5.5')
+        self.assertNotIn('prompt_check', default)
+        self.assertIsNone(default['append_system_prompt'])
 
     def test_follow_up_resumes_the_session_with_an_unchanged_prefix(self):
         self.upstream.keep_bodies = True

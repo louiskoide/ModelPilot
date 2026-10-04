@@ -286,12 +286,69 @@ class IneligibleTrialTests(unittest.TestCase):
                 # A fixed arm whose --effort never reached the wire measured the client's default, not its label.
                 dict(base, arm='sonnet-5.5-low', effort_check={'requested': 'low', 'sent': {'medium': 5}, 'applied': False}),
                 dict(base, task='y', arm='sonnet-5.5-low', effort_check={'requested': 'low', 'sent': {'low': 5}, 'applied': True}),
-                dict(base, task='z', arm='sonnet-5.5-low', effort_check={'requested': 'low', 'sent': {}, 'applied': None})]
-        result = summarize(rows, ['jev-compat-o55', 'modelpilot', 'sonnet-5.5-low'], resamples=10)
+                dict(base, task='z', arm='sonnet-5.5-low', effort_check={'requested': 'low', 'sent': {}, 'applied': None}),
+                # Nor does a concise arm whose appended prompt went missing on any main-loop request.
+                dict(base, arm='sonnet-5.5-concise', prompt_check={'requested_sha256': 'a', 'present': 3, 'missing': 1, 'applied': False}),
+                dict(base, task='y', arm='sonnet-5.5-concise', prompt_check={'requested_sha256': 'a', 'present': 4, 'missing': 0, 'applied': True})]
+        result = summarize(rows, ['jev-compat-o55', 'modelpilot', 'sonnet-5.5-low', 'sonnet-5.5-concise'], resamples=10)
         self.assertEqual([(t['arm'], t['reason']) for t in result['excluded_ineligible_trials']],
                          [('jev-compat-o55', 'served_outside_model_set'), ('modelpilot', 'adapter_not_benchmark_eligible'),
-                          ('sonnet-5.5-low', 'effort_not_applied')])
+                          ('sonnet-5.5-low', 'effort_not_applied'), ('sonnet-5.5-concise', 'prompt_not_applied')])
         self.assertEqual(next(a for a in result['arms'] if a['arm'] == 'sonnet-5.5-low')['trials'], 2)
+        self.assertEqual(next(a for a in result['arms'] if a['arm'] == 'sonnet-5.5-concise')['trials'], 1)
+
+
+class WriteSourceTests(unittest.TestCase):
+    def side(self, started, read, write):
+        return dict(row(started, read, write), tool_count=0)
+
+    def main(self, *args, **kw):
+        return dict(row(*args, **kw), tool_count=6)
+
+    def test_a_steady_trial_writes_its_start_then_only_growth(self):
+        rows = [self.main(0.0, 7000, 4000), self.side(1.0, 0, 300), self.main(5.0, 11000, 600), self.main(9.0, 11600, 900)]
+        result = bench_report.write_sources(rows, RATES)
+        self.assertEqual(result['tokens'], {'cold_start': 4000, 'switch': 0, 'growth': 1500, 'rebuild_expired': 0,
+                                            'rebuild_changed': 0, 'side': 300})
+        self.assertAlmostEqual(result['usd']['growth'], 1500 * 2.5 / 1e6)
+        self.assertAlmostEqual(sum(result['usd'].values()), sum(r['usage']['cache_creation_input_tokens'] for r in rows) * 2.5 / 1e6)
+
+    def test_a_shortfall_is_a_rebuild_expired_past_the_ttl_else_changed(self):
+        rows = [self.main(0.0, 0, 10000), self.main(10.0, 8000, 2500),  # 2,000 of the prefix written again
+                self.main(400.0, 0, 13000)]                              # 10,500 lost after 390 s: expired
+        tokens = bench_report.write_sources(rows, RATES)['tokens']
+        self.assertEqual((tokens['rebuild_changed'], tokens['rebuild_expired']), (2000, 10500))
+        self.assertEqual(tokens['growth'], 500 + 2500)
+        # A 1h entry is still alive at 390 s, so the same shortfall means its content changed.
+        hour = [self.main(0.0, 0, 10000, ttl='1h'), self.main(390.0, 0, 10600, ttl='1h')]
+        self.assertEqual(bench_report.write_sources(hour, RATES)['tokens']['rebuild_changed'], 10000)
+        # A subscription trial repriced to 5m keeps the TTL it was sent with.
+        repriced = bench_report.api_key_equivalent(hour, RATES)
+        self.assertEqual(bench_report.write_sources(repriced, RATES)['tokens']['rebuild_changed'], 10000)
+
+    def test_a_new_setting_is_a_switch_and_a_return_reads_its_entry(self):
+        rows = [self.main(0.0, 0, 9000), self.main(5.0, 0, 9800, model='claude-opus-5'),
+                self.main(9.0, 9000, 1500)]  # back to Sonnet: its 9,000 still read, the rest is growth
+        result = bench_report.write_sources(rows, RATES)
+        self.assertEqual({k: v for k, v in result['tokens'].items() if v},
+                         {'cold_start': 9000, 'switch': 9800, 'growth': 1500})
+        self.assertAlmostEqual(result['usd']['switch'], 9800 * 6.25 / 1e6)
+
+    def test_unknown_write_rates_leave_dollars_unknown_but_count_tokens(self):
+        rows = [self.main(0.0, 0, 9000, split=False), self.main(5.0, 9000, 0, split=False)]
+        result = bench_report.write_sources(rows, RATES)
+        self.assertEqual(result['tokens']['cold_start'], 9000)
+        self.assertIsNone(result['usd']['cold_start'])
+        self.assertEqual(result['usd']['growth'], 0.0)  # nothing written there
+
+    def test_an_arm_totals_its_trials_with_shares(self):
+        one = bench_report.write_sources([self.main(0.0, 0, 3000), self.main(5.0, 3000, 1000)], RATES)
+        two = bench_report.write_sources([self.main(0.0, 0, 1000, split=False)], RATES)
+        totals = bench_report.write_source_totals([{'write_sources': one}, {'write_sources': two}, {}])
+        self.assertEqual((totals['trials'], totals['priced_trials'], totals['tokens_per_trial']), (2, 1, 2500))
+        self.assertEqual((totals['tokens']['cold_start'], totals['share']['growth']), (4000, .2))
+        self.assertAlmostEqual(totals['usd']['cold_start'], 3000 * 2.5 / 1e6)
+        self.assertIsNone(bench_report.write_source_totals([{}]))
 
 
 class ModelPilotPolicySummaryTests(unittest.TestCase):

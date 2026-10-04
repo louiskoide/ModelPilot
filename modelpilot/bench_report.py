@@ -170,6 +170,50 @@ def cost_components(rows, rates):
     return out
 
 
+WRITE_SOURCES = ('cold_start', 'switch', 'growth', 'rebuild_expired', 'rebuild_changed', 'side')
+
+
+def write_sources(rows, rates):
+    """Where one trial's cache writes came from, in tokens and dollars.
+
+    Per model and top-level effort (one cache entry each), a main-loop request is expected to read the whole
+    prefix the previous request there built (its read + write). Its write is then growth: content added since,
+    the earlier output and tool results included. Any shortfall was written again: rebuild_expired when that
+    prefix was older than its TTL, else rebuild_changed (earlier content changed). The trial's first main-loop
+    request is cold_start; the first at any later setting is switch. Requests without tools are Claude Code's
+    own side calls. Dollars are None when a writing row has no write breakdown or no rates."""
+    messages = sorted((r for r in rows if r.get('kind') == 'messages' and r.get('http_status') == 200
+                       and 'cache_read_input_tokens' in (r.get('usage') or {})), key=lambda r: r.get('started_unix', 0))
+    tokens, dollars, last = dict.fromkeys(WRITE_SOURCES, 0), dict.fromkeys(WRITE_SOURCES, 0.0), {}
+    for r in messages:
+        usage = r['usage']
+        read, write = usage['cache_read_input_tokens'], usage.get('cache_creation_input_tokens') or 0
+        split, rate = usage.get('cache_creation'), rates.get(r.get('model'))
+        if not write:
+            per_token = 0.0
+        elif split and rate:
+            per_token = (split['ephemeral_5m_input_tokens'] * rate['write_5m'] +
+                         split['ephemeral_1h_input_tokens'] * rate['write_1h']) / 1e6 / write
+        else:
+            per_token = None
+        key, now = (r.get('model'), r.get('effort')), r.get('started_unix', 0)
+        if not r.get('tool_count'):
+            parts = {'side': write}
+        elif key not in last:
+            parts = {'switch' if last else 'cold_start': write}
+        else:
+            built, started, life = last[key]
+            lost = min(write, max(0, built - read))
+            parts = {'rebuild_expired' if now - started > life else 'rebuild_changed': lost, 'growth': write - lost}
+        if r.get('tool_count'):
+            hour = bool(split and split['ephemeral_1h_input_tokens'] or r.get('repriced_1h_write_tokens'))  # as sent
+            last[key] = (read + write, now, TTL_SECONDS['1h' if hour else '5m'])
+        for source, n in parts.items():
+            tokens[source] += n
+            dollars[source] = None if dollars[source] is None or (n and per_token is None) else dollars[source] + n * (per_token or 0)
+    return {'tokens': tokens, 'usd': dollars}
+
+
 def cold_cost(record):
     if (record.get('accounting') or {}).get('cost_complete') is False:
         return None  # an adapter reported its total incomplete: cache repricing cannot complete it
@@ -389,6 +433,20 @@ def start_point_ceiling(by_arm, candidates):
             'note': 'Upper bound: chosen after the outcome; a negative saving means the extra passes cost more.'}
 
 
+def write_source_totals(records):
+    """An arm's cache writes by source over its trials (measured, not cold-equivalent: inherited reads are not
+    writes), with each source's share of the written tokens. Dollars cover the trials that could all be priced."""
+    found = [r['write_sources'] for r in records if r.get('write_sources')]
+    if not found:
+        return None
+    tokens = {k: sum(w['tokens'][k] for w in found) for k in WRITE_SOURCES}
+    priced = [w['usd'] for w in found if None not in w['usd'].values()]
+    total = sum(tokens.values())
+    return {'trials': len(found), 'tokens': tokens, 'share': {k: n / total for k, n in tokens.items()} if total else None,
+            'tokens_per_trial': total / len(found), 'usd': {k: sum(u[k] for u in priced) for k in WRITE_SOURCES},
+            'priced_trials': len(priced)}
+
+
 def arm_summary(arm, complete, incomplete, arm_cells, rng, resamples):
     point = metrics(list(arm_cells.values()))
     if_free = metrics(list(cells(complete, cold_cost_if_rejected_free).values()))
@@ -414,6 +472,7 @@ def arm_summary(arm, complete, incomplete, arm_cells, rng, resamples):
            'stops': dict(Counter(s.get('stop') for r in complete for s in r.get('sessions') or [])),
            'grade_reasons': dict(Counter((r.get('grade') or {}).get('reason') for r in complete)),
            'test_config_changed': sum(bool(r.get('test_config_changed')) for r in complete),
+           'write_sources': write_source_totals(complete),
            'ci95': {name: d['ci95'] for name, d in drawn.items()}}
     routing = routing_summary(complete)
     if routing:
@@ -452,12 +511,14 @@ def pair_summary(a, b, cells_a, cells_b, rng, resamples, scopes=('complete', 'co
 
 def ineligible_reason(record):
     """Why a trial is excluded from comparisons, or None: its router or adapter says so, or a fixed arm's
-    requested effort didn't reach the wire."""
+    requested effort or appended system prompt didn't reach the wire."""
     routing = record.get('routing') or {}
     if routing.get('benchmark_eligible') is False:
         return routing.get('ineligible_reason', 'adapter_not_benchmark_eligible')
     if (record.get('effort_check') or {}).get('applied') is False:
         return 'effort_not_applied'
+    if (record.get('prompt_check') or {}).get('applied') is False:
+        return 'prompt_not_applied'
     return None
 
 
@@ -506,7 +567,7 @@ def load_run(run_dir, rates):
         if log.exists():
             rows = priced_rows(record, [json.loads(line) for line in log.read_text().splitlines() if line.strip()], rates)
             record.update(cache=cache_attribution(rows, rates), path=setting_path(rows),
-                          cost_components=cost_components(rows, rates))
+                          cost_components=cost_components(rows, rates), write_sources=write_sources(rows, rates))
         records.append(record)
     return manifest, records
 

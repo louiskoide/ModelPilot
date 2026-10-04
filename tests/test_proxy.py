@@ -10,7 +10,7 @@ from unittest import mock
 from modelpilot import fixtures
 from modelpilot.cache_probe import cost
 from modelpilot.governor import Governor, reconcile_log
-from modelpilot.proxy import ProxyServer, UsageObserver, forecast, logged_usage, measured_cost, request_effort
+from modelpilot.proxy import ProxyServer, UsageObserver, forecast, logged_usage, measured_cost, request_effort, system_text
 from modelpilot.fixtures import CATALOG, fixture_server, response_for, USAGE
 
 RATES = {'claude-opus-4-6': dict(input=5, output=25, read=.5, write_5m=6.25, write_1h=10),
@@ -86,6 +86,12 @@ class LoggedFieldTests(unittest.TestCase):
         self.assertAlmostEqual(cost(logged_usage(usage), RATES['claude-opus-4-6'], '1h'),
                                cost(usage, RATES['claude-opus-4-6'], '1h'))  # the split wins over the fallback TTL
 
+    def test_system_text_joins_text_blocks(self):
+        self.assertEqual(system_text({'system': [{'type': 'text', 'text': 'a'}, {'type': 'image'}, {'type': 'text', 'text': 'b'}]}), 'a\nb')
+        self.assertEqual(system_text({'system': 'plain'}), 'plain')
+        self.assertEqual(system_text({}), '')
+        self.assertEqual(system_text({'system': 3}), '')
+
     def test_effort_is_logged_only_as_a_short_string(self):
         self.assertEqual(request_effort({'output_config': {'effort': 'high'}}), 'high')
         for request in ({}, {'output_config': 'high'}, {'output_config': {'effort': 3}},
@@ -149,6 +155,31 @@ class ProxyTests(unittest.TestCase):
         self.assertAlmostEqual(row['cost_usd'], .007525)
         self.assertFalse(row['decision']['applied'])
         self.assertIsNone(row['effort'])
+
+    def test_a_system_marker_is_recorded_per_request_without_logging_the_prompt(self):
+        self.assertNotIn('system_marker', json.loads(self.post_row({'system': 'Work economically.'})))
+        self.proxy.system_marker = 'Work economically.\n- Be brief.'
+        for system, found in (([{'type': 'text', 'text': 'You are X.'},
+                                {'type': 'text', 'text': 'Rules.\n\nWork economically.\n- Be brief.'}], True),
+                              ('Work economically.\n- Be brief.', True), ([{'type': 'text', 'text': 'Work economically.'}], False),
+                              (None, False)):
+            row = json.loads(self.post_row({'system': system} if system is not None else {}))
+            self.assertIs(row['system_marker'], found, system)
+            self.assertNotIn('economically', json.dumps(row))
+        with self.assertRaises(ValueError):
+            ProxyServer(('127.0.0.1', 0), 'http://127.0.0.1:1', self.log, RATES, system_marker='  ')
+
+    def post_row(self, extra):
+        """Send one Messages request with extra fields and return its log row."""
+        before = len(self.log.read_text().splitlines()) if self.log.exists() else 0
+        request = dict({'model': 'claude-opus-4-6', 'max_tokens': 8, 'messages': [{'role': 'user', 'content': 'hi'}]}, **extra)
+        self.post('/v1/messages', request)
+        for _ in range(200):
+            lines = self.log.read_text().splitlines() if self.log.exists() else []
+            if len(lines) > before:
+                return lines[before]
+            time.sleep(.005)
+        self.fail('no log row')
 
     def test_sse_bytes_forwarded_before_completion(self):
         request, _, _, data, elapsed = self.call(True, slow=True)
