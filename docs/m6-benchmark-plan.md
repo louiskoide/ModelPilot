@@ -332,6 +332,23 @@ python3 -m modelpilot.bench --tasks nx-connectivity-digraph-cuts,nx-classes-weak
 
 $0 API. About $4–8 of subscription use as sent, assuming these tasks cost 1.5–2.5× the harder tasks' trials ($0.12 Sonnet, $0.33 Opus). About 40–60 minutes with grading. It shows whether Sonnet 5.5 medium fails a task Opus passes, now under strict passes, and whether the cheapest default (low concise) fails where medium passes. Either result gives the router a task whose cheapest passing setting differs.
 
+**Results: networkx screening run (October 4): `bench-20261004-191238`.** User's go; code `0043586` (committed), pinned 2.1.284, subscription for all three arms, the first run graded under the strict pass rule (edge suites run in each trial). 18/18 trials complete, $0 API, $4.09 as sent, no unknown cost. Summary `runs/bench-20261004-191238/summary.strict.json`.
+
+| | `sonnet-5.5` (medium) | `opus-5.5` | `sonnet-5.5-low-concise` |
+| --- | ---: | ---: | ---: |
+| Strict passes (hidden passes) | 5/6 (5/6) | 6/6 (6/6) | 6/6 (6/6) |
+| Edge tests passed | 33/33 on its 6 fixes | 32/32 | 32/32 |
+| Cost per task (API-key equivalent, cold) | $0.140 | $0.349 | $0.107 |
+| Cost per passed task | $0.168 | $0.349 | $0.107 |
+| Wall time per task | 75 s | 117 s | 46 s |
+
+- **The first hidden-test failure at Sonnet 5.5 medium**, on `nx-ismags-monomorphism`. Its monomorphism search passes 1,286 of the hidden tests and all 6 edge tests. It fails 10 that mix graph classes: it rejects a MultiGraph subgraph without parallel edges (a path) inside a simple Graph, which VF2 and the instruction's rule ("k parallel edges need at least k") accept. The edge suite didn't cover mixed classes. Opus 5.5 ($0.68) and Sonnet 5.5 low concise ($0.16) both passed the task; Sonnet medium's failed trial cost $0.22.
+- **So no task here needs Opus.** The cheapest strictly passing setting is low concise on all six tasks, including the one medium failed. With one trial each, the medium failure looks like sampling variation within Sonnet, not a setting difference.
+- **networkx tasks cost more than the earlier tuning tasks:** 1.6× for Sonnet medium ($0.140 against $0.087 on the 23), 2.1× for Opus ($0.349 against $0.170). The edge suites separated nothing: every fix that passed its hidden tests passed every edge test.
+- Low concise is again cheapest (paired with medium −$0.033 a task, with Opus −$0.242). With 6 tasks, below the report's 10-task minimum, these are no claim.
+
+Next question for the router: is Sonnet medium's ISMAGS failure repeatable, and does low concise pass it reliably? A repeat of that one task × the three settings × 3 trials would cost about $3 as sent.
+
 **Proposed next run (approved September 30; ran September 30, October 1 and October 3, above):** the 7 harder tasks × `sonnet-5.5`, `opus-5.5`, `modelpilot` × 1 trial, seed 0, same limits as 4a (30 turns, $1 per session), `--run-budget 15`, with `--subscription-arms sonnet-5.5,opus-5.5` (user request), so only the ModelPilot arm spends API dollars (about $1–2 plus unpriced TypeSafe). Forecast $4.5–9 plus unpriced TypeSafe, assuming these tasks cost 2–4× 4a's per trial ($0.069 Sonnet, $0.170 Opus, $0.068 ModelPilot, cold-equivalent). It shows whether Sonnet 5.5 at medium fails where Opus passes, gives the mid-task step decisions their first live run, and feeds the re-grader (`python3 -m modelpilot.regrade`) for the priced-quality term. Adding `jev-compat-o55` costs about another $1–2.
 
 ## Question
