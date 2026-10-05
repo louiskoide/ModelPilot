@@ -7,8 +7,8 @@ today's config and rates, and reports where the decision changes beside each tri
     python3 -m modelpilot.policy_replay runs/bench-<ts> [runs/bench-<ts2> ...] [--arm ARM] [--out FILE]
 
 --arm replays through that arm's overrides of the config (bench.ARMS 'policy_overrides', e.g. modelpilot-delegate).
-Only recorded decision points replay: a point a newer config would add (a forced review when the suite first passes)
-was never journaled, so it can't appear here.
+Only recorded decision points replay: a point a newer config would add (a forced review at the agent's finish or
+when the suite first passes) was never journaled, so it can't appear here.
 
 The journal's token counts were estimated at the bytes_per_token of the recording (4 in every run so far);
 they are rescaled to the current value. A decision after one whose replay differs is marked path_diverged:

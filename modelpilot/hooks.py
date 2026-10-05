@@ -3,7 +3,9 @@
 `python -m modelpilot.hooks <Event>` reads the hook JSON on stdin. It delivers ledger
 corrections into model context, observes tool results with host evidence, and shows stuck
 recommendations and rebase plans to the user only. It never changes a model, effort or
-context itself, and always exits 0 so a governor fault cannot stop the client.
+context itself, and always exits 0 so a governor fault cannot stop the client. With
+MODELPILOT_REVIEW_AT_STOP=1 (the ModelPilot arm's review at the finish) Stop also holds the
+agent's finish once per turn, so the proxy's policy can deliver a review on the request that follows.
 
 Coordinator commands (same MODELPILOT_* environment, or flags): queue-change, ack-rebase, status.
 """
@@ -24,6 +26,8 @@ MAX_STDIN = 16 * 1024 * 1024
 MAX_HASHED_FILE = 64 * 1024 * 1024
 LEASE_SECONDS = 3600
 BINDING = ('MODELPILOT_DB', 'MODELPILOT_SESSION', 'MODELPILOT_LIMIT_USD', 'MODELPILOT_TASK', 'MODELPILOT_OWNER')
+# Set by the ModelPilot arm when its policy reviews the work at the agent's finish (consult.force 'agent_finish').
+REVIEW_AT_STOP = 'MODELPILOT_REVIEW_AT_STOP'
 
 
 def binding(env):
@@ -144,6 +148,33 @@ def stop_delivery(gov, task, owner, payload):
     return text, notice
 
 
+def review_block(gov, task, owner, payload):
+    """The block reason that holds the agent's finish once per turn for a review, or None.
+
+    The review itself is the policy's: the proxy sees the request that continues the turn, consults a stronger
+    setting on a brief of host facts, and delivers its advice beside this reason (active_policy.finish_review).
+    Only a task still in progress at an acknowledged revision, not stopped by the policy, with a declared channel
+    and measured spend below the limit (otherwise the continuation would be refused), holds its finish.
+    """
+    row = gov.state.get(task)
+    code = gov.channel_code()
+    if row['owner'] != owner or row['status'] != 'in_progress' or row['ack_revision'] != row['revision'] or code is None:
+        return None
+    if any(e['task'] == task and e['revision'] == row['revision'] for e in gov.journal('policy_stop')):
+        return None  # the policy ended the task: the continuation would be refused
+    ended, blocked = gov.journal('client_stop'), gov.journal('review_block')
+    if blocked and (not ended or blocked[-1]['seq'] > ended[-1]['seq']):
+        return None  # held once already in this turn
+    policy = gov.policy()
+    if not policy['cost_complete'] or policy['spent_usd'] >= gov.limit:
+        return None
+    gov.note('review_block', {'revision': row['revision'], 'stop_hook_active': payload.get('stop_hook_active') is True},
+             task, row['revision'])
+    return (f'{marker(code)} Task {task} is unchanged. Before it ends, ModelPilot has your work reviewed once; the '
+            'review follows this message under the same marker. Check it against the repository, act on what holds '
+            'up, then finish. If no review follows, finish as you were.')
+
+
 def renew(gov, task, owner):
     row = gov.state.get(task)
     try:
@@ -208,6 +239,8 @@ def handle(event, payload, env, clock=time.time):
         if event == 'Stop':
             block, notice = stop_delivery(gov, task, owner, payload)
             notices += [notice] if notice else []
+            if not block and env.get(REVIEW_AT_STOP) == '1':
+                block = review_block(gov, task, owner, payload)
             if not block:
                 gov.note('client_stop', {}, task)  # the turn really ends: an idle gap starts here
     finally:

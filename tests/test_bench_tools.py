@@ -257,32 +257,40 @@ class ToolTrialTests(unittest.TestCase):
                                                     'cost_usd': record['path']['steps'][0]['cost_usd']}])
         self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
 
-    def test_the_delegate_arm_reviews_a_passing_fix_through_the_real_client(self):
-        """modelpilot-delegate: when the host-run suite first passes, Opus 5.5 reviews a brief of host facts and its
-        advice joins Claude Code's own trailing system note, kept there on every later request."""
+    def test_the_delegate_arm_reviews_at_the_finish_through_the_real_client(self):
+        """modelpilot-delegate: when the agent ends its turn, the Stop hook holds the finish once and Opus 5.5 reviews a
+        brief of host facts; its advice joins Claude Code's trailing system note on the request that continues the turn,
+        and stays there. The agent never runs the host test tool, as in 17 of 18 networkx trials."""
         script = [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
                   {'tool': 'mcp__modelpilot__search', 'input': {'query': 'def '}},
-                  {'tool': 'mcp__modelpilot__run_tests', 'input': {}},
+                  {'text': 'Done.'},
                   {'tool': 'mcp__modelpilot__search', 'input': {'query': 'return'}},
-                  {'text': 'Done.'}]
+                  {'text': 'Checked the review. Done.'}]
         record = self.advised_trial('delegate', script, 'claude-sonnet-5-5', 'medium', arm='modelpilot-delegate',
                                     rates=self.OPUS_RATES)
         self.assertTrue(record['passed'], record['grade'])
+        self.assertEqual(record['sessions'][0]['stop'], 'success', record['sessions'])
         bodies = [json.loads(b) for b in self.upstream.bodies]
         consult, = [b for b in bodies if not b.get('stream') and not b.get('tools') and b['model'] == 'claude-opus-5-5']
         brief = consult['messages'][0]['content']
         self.assertIn('## Task', brief)
-        self.assertIn('passed', brief)  # the host-run suite
+        self.assertIn('ended its turn', brief)
+        self.assertIn('has not run the host test tool', brief)
         self.assertIn('pkg/__init__.py', brief)  # the diff against the trial's base commit
         main = [b for b in bodies if b.get('stream') and b.get('tools')]
         self.assertEqual({b['model'] for b in main}, {'claude-sonnet-5-5'})  # the conversation never moved
         holding = [i for i, b in enumerate(main) if 'synthetic output' in json.dumps(b['messages'])]
         self.assertEqual(holding, list(range(holding[0], len(main))))  # from delivery on, every request carries it
+        self.assertEqual(len(main) - holding[0], 2)  # the continuation and the agent's one more step
         first = main[holding[0]]['messages']
-        where = next(i for i, m in enumerate(first) if 'synthetic output' in json.dumps(m))
-        self.assertEqual((first[where]['role'], where), ('system', len(first) - 1))  # Claude Code's trailing note
-        texts = [b['text'] for b in first[where]['content']]
+        # The request that continues the turn: the agent's finish, the block's reason, then Claude Code's trailing note.
+        self.assertEqual([m['role'] for m in first[-3:]], ['assistant', 'user', 'system'])
+        self.assertIn('Stop hook feedback', json.dumps(first[-2]))
+        texts = [b['text'] for b in first[-1]['content']]
+        self.assertIn('the review follows this message under the same marker', texts[0])
         self.assertTrue(texts[-1].startswith('[ModelPilot ledger update, code '), texts)
+        self.assertIn('synthetic output', texts[-1])
+        where = len(first) - 1
         for later in main[holding[0] + 1:]:
             self.assertEqual([b['text'] for b in later['messages'][where]['content']], texts)
         accounting = record['accounting']
@@ -293,10 +301,15 @@ class ToolTrialTests(unittest.TestCase):
         self.assertGreater(accounting['side_cost_usd'], 0)
         routing = record['routing']
         self.assertTrue(routing['accounting_matches'], routing)
+        self.assertEqual(routing['tools']['calls'][-1]['tool'], 'search')  # no run_tests anywhere
+        self.assertNotIn('run_tests', [c['tool'] for c in routing['tools']['calls']])
+        self.assertEqual(routing['policy']['held_finishes'], 1)  # once: the second finish ends the session
         delegated, = routing['policy']['delegation']
-        self.assertEqual((delegated['kind'], delegated['reason'], delegated['setting'], delegated['delivered']),
-                         ('consult', 'forced', ['claude-opus-5-5', 'medium'], True))
-        self.assertEqual(routing['policy']['parameters']['overrides']['delegation']['consult']['force'], ['tests_pass'])
+        self.assertEqual((delegated['kind'], delegated['trigger'], delegated['reason'], delegated['setting'],
+                          delegated['delivered']), ('consult', 'step', 'forced', ['claude-opus-5-5', 'medium'], True))
+        self.assertEqual([(d['trigger'], d['action']) for d in routing['policy']['decisions']],
+                         [('turn_start', 'stay'), ('step', 'consult')])
+        self.assertEqual(routing['policy']['parameters']['overrides']['delegation']['consult']['force'], ['agent_finish'])
         self.assertEqual(record['path']['delegation'][0]['purpose'], 'consult')
 
     def test_a_handoff_note_through_the_real_client(self):
@@ -333,6 +346,21 @@ class ToolTrialTests(unittest.TestCase):
                          (1, {'insufficient_budget': 1}))
         self.assertEqual(self.main_loop(), [('claude-sonnet-5-5', 'medium')]*3)  # the refused one never left
         self.assertEqual(record['routing']['policy']['refusals'], ['insufficient_budget'])
+
+    def test_the_delegate_arm_never_holds_a_finish_the_policy_or_the_budget_ended(self):
+        """Defensive: Claude Code 2.1.284 doesn't run its Stop hook after a refused request (checked here, October 5)."""
+        stuck = self.STALLED + [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 9 + [{'text': 'Done.'}]
+        record = self.advised_trial('stuck-delegate', stuck, 'claude-opus-5-5', 'max', max_turns=20, rates=self.OPUS_RATES,
+                                    arm='modelpilot-delegate')
+        self.assertEqual(record['sessions'][0]['stop'], 'policy_stop', record['sessions'])
+        self.assertEqual(record['routing']['policy']['held_finishes'], 0)
+        spent = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}}] +
+                 [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 4 + [{'text': 'Done.'}])
+        record = self.advised_trial('budget-delegate', spent, 'claude-sonnet-5-5', 'medium', arm='modelpilot-delegate',
+                                    limit=2.5 * (100*2 + 4*10) / 1e6)
+        self.assertEqual(record['sessions'][0]['stop'], 'budget_stop', record['sessions'])
+        self.assertEqual(record['routing']['policy']['held_finishes'], 0)
+        self.assertFalse(record['accounting'].get('side_calls'))
 
     def test_a_stuck_task_with_nothing_stronger_is_stopped_unfinished(self):
         script = self.STALLED + [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 9 + [{'text': 'Done.'}]

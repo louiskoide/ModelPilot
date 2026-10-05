@@ -19,7 +19,9 @@ answered by the proxy with an API-style error and never reaches the provider. A 
 limit to cover its full rebuild. Delegation (config 'delegation', off in the modelpilot arm): the gate may
 consult a stronger setting on a brief of host facts instead of switching, and a mid-task model switch may carry
 a handoff note from the model being left; both are side requests the proxy sends (ProxyServer.side_call), and
-their text is delivered into the conversation and kept in place (delegation.py). Not implemented: Haiku targets
+their text is delivered into the conversation and kept in place (delegation.py). For measurement, consult.force can
+make a consult at the agent's finish: the Stop hook holds it once per turn and the request that continues the turn
+carries the review (finish_review). Not implemented: Haiku targets
 and worker drafts.
 """
 import hashlib
@@ -35,7 +37,14 @@ SIGNALS = {'repeated_error': 'the same error keeps repeating', 'edit_oscillation
            'stalled_tests': 'the test suite stopped improving', 'retry_language': 'the agent keeps retrying'}
 STEP_CAUSES = {'tests_now_pass': 'the test suite now passes', 'tests_now_fail': 'the test suite now fails',
                'spend_overrun': 'spending since the last decision has reached its forecast',
-               'tests_pass': 'the test suite passes'}
+               'tests_pass': 'the test suite passes', 'agent_finish': 'the agent ended its turn'}
+
+
+def reviews_at_finish(config):
+    """Whether the policy consults at the agent's finish whatever the price (consult.force 'agent_finish'), so the
+    Stop hook must hold the finish for it (hooks.REVIEW_AT_STOP)."""
+    consult = switch_policy.delegation(config, 'consult')
+    return bool(consult['enabled'] and 'agent_finish' in consult['force'] and 'step' in consult['at'])
 
 
 def parameters(model, effort, config=None, overrides=None):
@@ -146,6 +155,9 @@ class ActivePolicy(ProxyPolicy):
 
     def decision_point(self, gov, task, request, revision, proposal):
         """(trigger, key, step facts or None), or None. The key journals the decision once per point."""
+        review = self.finish_review(gov, task, revision)
+        if review:  # first: the request that continues a held finish looks like a new user turn
+            return review
         if proposal['action'] != 'hold':  # the stuck detector sees evidence the current setting isn't enough
             return 'stuck_evidence', f"{revision}/stuck/{proposal['level']}", None
         turns, starting = user_turns(request)
@@ -153,25 +165,46 @@ class ActivePolicy(ProxyPolicy):
             return 'turn_start', f'{revision}/turn/{turns}', None
         return self.step(gov, task, revision)
 
+    def since_last(self, gov, task, revision):
+        """This revision's decisions, the step facts since the last one (the agent's requests, their measured spend and
+        that decision's forecast) and whether any of that spend is unknown."""
+        decided = [e for e in gov.journal('advisor_decision') if e['task'] == task and e['revision'] == revision]
+        since = decided[-1]['created'] if decided else 0
+        spend = gov.spend(task, since)
+        # The policy's own consults and notes count as spend, not as the agent's requests.
+        spend['requests'] -= sum(e['payload'].get('request_id') is not None and e['payload'].get('status') != 'refused'
+                                 for e in gov.journal('delegation') if e['task'] == task and e['created'] >= since)
+        facts = {'requests': spend['requests'], 'spent_usd': spend['spent_usd'],
+                 'forecast_usd': decided[-1]['payload'].get('forecast_usd') if decided else None}
+        return decided, facts, spend['unknown']
+
+    def finish_review(self, gov, task, revision):
+        """The review at the agent's finish (consult.force 'agent_finish'), from host facts only: the Stop hook held the
+        agent's finish (hooks.review_block), and this is the first main-loop request since, the one that continues the
+        turn. A step whatever the spacing and number of earlier steps; the consult cap still holds."""
+        if not reviews_at_finish(self.config):
+            return None
+        held = [e for e in gov.journal('review_block') if e['task'] == task and e['revision'] == revision]
+        if not held or any(e['task'] == task and e['revision'] == revision for e in gov.journal('policy_stop')):
+            return None  # nothing held, or the task was stopped: its stop stands
+        key = f"{revision}/step/finish/{held[-1]['seq']}"
+        if any(e['payload'].get('point') == key for e in gov.journal('advisor_decision') if e['task'] == task):
+            return None
+        return 'step', key, dict(self.since_last(gov, task, revision)[1], cause='agent_finish')
+
     def step(self, gov, task, revision):
         """A mid-task decision point, from host facts only: the test suite flipped between failing and passing
         since the last decision, or the task's measured spend since then reached that decision's forecast."""
         cfg = self.config['step']
         if not cfg['enabled'] or 'step' not in self.config['decision_points']:
             return None
-        decided = [e for e in gov.journal('advisor_decision') if e['task'] == task and e['revision'] == revision]
+        decided, facts, unknown = self.since_last(gov, task, revision)
         if not decided:
             return None  # the turn start decides first
-        last = decided[-1]
-        spend = gov.spend(task, last['created'])
-        # The policy's own consults and notes count as spend, not as the agent's requests.
-        spend['requests'] -= sum(e['payload'].get('request_id') is not None and e['payload'].get('status') != 'refused'
-                                 for e in gov.journal('delegation') if e['task'] == task and e['created'] >= last['created'])
         if (sum(e['payload']['trigger'] == 'step' for e in decided) >= cfg['max_per_revision']
-                or spend['requests'] < cfg['min_requests_between']):
+                or facts['requests'] < cfg['min_requests_between']):
             return None
-        facts = {'requests': spend['requests'], 'spent_usd': spend['spent_usd'],
-                 'forecast_usd': last['payload'].get('forecast_usd')}
+        last = decided[-1]
         suite = gov.state.observations(task, revision, 'failures', 1000)
         new = bool(suite) and suite[0]['seq'] > last['payload'].get('suite_seq', 0)
         # The suite passes for the first time in this revision (a review point for a forced consult)
@@ -183,7 +216,7 @@ class ActivePolicy(ProxyPolicy):
         if first_pass and consult['enabled'] and 'tests_pass' in consult.get('force', ()):
             return 'step', f"{revision}/step/tests/{suite[0]['seq']}", dict(facts, cause='tests_pass', first_pass=True)
         forecast = facts['forecast_usd']
-        if not spend['unknown'] and forecast and spend['spent_usd'] >= cfg['overrun_factor'] * forecast:
+        if not unknown and forecast and facts['spent_usd'] >= cfg['overrun_factor'] * forecast:
             return 'step', f"{revision}/step/spend/{last['seq']}", dict(facts, cause='spend_overrun')
         return None
 

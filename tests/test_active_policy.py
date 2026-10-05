@@ -6,7 +6,7 @@ import threading
 import unittest
 from unittest import mock
 from modelpilot import policy_actions, switch_policy
-from modelpilot.active_policy import ActivePolicy
+from modelpilot.active_policy import ActivePolicy, reviews_at_finish
 from modelpilot.governed_session import OWNER
 from modelpilot.governor import Governor
 from modelpilot.proxy import ProxyServer
@@ -605,6 +605,91 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.review_run(jev_only())
         self.assertEqual([d['trigger'] for d in self.decisions()], ['turn_start'])
         self.assertEqual(self.side_bodies(), [])
+
+    # Claude Code 2.1.284 continues a turn whose Stop hook blocked with the reason as a user message, then its own
+    # trailing system note (captured offline against the fixture, October 5).
+    FINISHED = CONTINUE + [{'role': 'assistant', 'content': [{'type': 'text', 'text': 'Done.'}]}]
+    HELD = FINISHED + [{'role': 'user', 'content': 'Stop hook feedback:\n[ModelPilot] Task t is unchanged.'},
+                       {'role': 'system', 'content': [{'type': 'text', 'text': 'Stop hook blocking error from command: "x": '
+                                                       '[ModelPilot] Task t is unchanged.', 'cache_control': {'type': 'ephemeral'}}]}]
+
+    def hold_finish(self):
+        """What hooks.review_block journals when it holds the agent's finish."""
+        gov = self.gov()
+        try:
+            gov.note('review_block', {'revision': 1, 'stop_hook_active': False}, self.task, 1)
+        finally:
+            gov.close()
+
+    def test_a_held_finish_is_reviewed_on_the_request_that_continues_the_turn(self):
+        self.start(config=self.delegating(consult={'enabled': True, 'force': ['agent_finish']}))
+        self.advise(S, 'medium')
+        self.post(messages=self.TURN)
+        self.post(messages=self.CONTINUE)  # one request since the turn start: no ordinary step could be due
+        self.hold_finish()
+        status, _ = self.post(messages=self.HELD)
+        self.assertEqual(status, 200)
+        # A review step, not a turn start, though the request ends with a user message that isn't a tool result.
+        self.assertEqual([d['trigger'] for d in self.decisions()], ['turn_start', 'step'])
+        step = self.decisions()[-1]
+        self.assertEqual((step['step']['cause'], step['action'], step['reason'], step['consult']),
+                         ('agent_finish', 'consult', 'forced', [O, 'medium']))
+        self.assertEqual(step['step']['requests'], 2)  # the turn start's own request and the one after it
+        self.assertIn('the agent ended its turn', self.advisor.calls[1]['evidence'])
+        consult, = self.side_bodies()
+        brief = consult['messages'][0]['content']
+        self.assertIn('The agent has ended its turn and is about to finish.', brief)
+        self.assertIn('The agent has not run the host test tool yet.', brief)  # the review doesn't need run_tests
+        # The advice joins Claude Code's trailing note after the block's reason; the client's breakpoint moves onto it.
+        held = self.main_bodies()[-1]['messages']
+        self.assertEqual(len(held), len(self.HELD))
+        blocks = held[-1]['content']
+        self.assertEqual(blocks[0], {'type': 'text', 'text': self.HELD[-1]['content'][0]['text']})
+        self.assertIn('synthetic output', blocks[1]['text'])
+        self.assertEqual(blocks[1]['cache_control'], {'type': 'ephemeral'})
+        # The agent works on: the advice stays in place, and there is no second review in this turn.
+        later = self.HELD + [{'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 't9', 'name': 'Bash', 'input': {}}]},
+                             {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 't9', 'content': 'y'}]}]
+        self.post(messages=later)
+        self.assertEqual([b['text'] for b in self.main_bodies()[-1]['messages'][len(self.HELD) - 1]['content']],
+                         [b['text'] for b in blocks])
+        self.assertEqual(len(self.side_bodies()), 1)
+        entry, = self.delegated()
+        self.assertEqual((entry['trigger'], entry['delivered'], entry['point']), ('step', True, step['point']))
+        self.assertTrue(step['point'].startswith('1/step/finish/'))
+
+    def test_a_held_finish_never_restarts_a_stopped_task(self):
+        cfg = self.delegating(consult={'enabled': True, 'force': ['agent_finish']})
+        self.start(client=O, config=cfg)
+        self.advise(O, 'max')
+        self.post(model=O, output_config={'effort': 'max'}, messages=self.TURN)
+        self.stuck()
+        self.assertEqual(self.post(model=O, output_config={'effort': 'max'}, messages=self.CONTINUE)[0], 400)
+        self.hold_finish()  # in case the client runs its Stop hook after the refusal
+        status, body = self.post(model=O, output_config={'effort': 'max'}, messages=self.HELD)
+        self.assertEqual(status, 400)
+        self.assertIn(b'policy_stop:no_stronger_setting', body)
+        self.assertNotIn('step', [d['trigger'] for d in self.decisions()])
+        self.assertEqual(self.side_bodies(), [])
+
+    def test_without_the_finish_review_a_held_finish_is_a_turn_start(self):
+        self.start(config=self.delegating(consult={'enabled': True, 'force': ['tests_pass']}))
+        self.assertFalse(reviews_at_finish(self.proxy.policy.config))
+        self.advise(S, 'medium')
+        self.post(messages=self.TURN)
+        self.hold_finish()
+        self.post(messages=self.HELD)
+        self.assertEqual([d['trigger'] for d in self.decisions()], ['turn_start', 'turn_start'])
+        self.assertEqual(self.side_bodies(), [])
+
+    def test_the_delegate_arm_reviews_at_the_finish_and_the_modelpilot_arm_never_does(self):
+        from modelpilot.bench import ARMS
+        arm = lambda name: switch_policy.with_overrides(switch_policy.load(), ARMS[name].get('policy_overrides'))
+        self.assertTrue(reviews_at_finish(arm('modelpilot-delegate')))
+        self.assertFalse(reviews_at_finish(arm('modelpilot')))
+        self.assertFalse(reviews_at_finish(switch_policy.with_overrides(
+            switch_policy.load(), {'delegation': {'consult': {'enabled': True, 'force': ['agent_finish'],
+                                                              'at': ['stuck_evidence']}}})))
 
     def test_a_handoff_note_travels_with_a_mid_task_switch(self):
         self.start(config=self.delegating(note={'enabled': True}))

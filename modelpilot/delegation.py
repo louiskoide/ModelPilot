@@ -33,6 +33,8 @@ WHY = {'tests_now_pass': 'The test suite the host runs now passes. Review the ch
        'tests_pass': 'The test suite the host runs passes. Review the change against the task before the agent '
                      'finishes: every failure measured so far ended with the agent reporting success.',
        'tests_now_fail': 'The test suite the host runs passed before and now fails.',
+       'agent_finish': 'The agent has ended its turn and is about to finish. Review the change against the task before it '
+                       'does: every failure measured so far ended with the agent reporting success.',
        'spend_overrun': 'The work is taking longer than forecast.',
        'stuck_evidence': 'The host\'s progress check says the agent is stuck'}
 

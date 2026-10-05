@@ -89,13 +89,13 @@ ARMS = {
                    'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}),
                    'policy': 'docs/m6-modelpilot-policy.md'},
     # The same arm with delegation on (October 5; docs/m6-modelpilot-policy.md, "Delegation"): priced consults and
-    # handoff notes, plus a consult made whatever its price when the host-run suite first passes, to measure what a
-    # review by a stronger setting is worth. Reported as its own arm.
+    # handoff notes, plus a consult made whatever its price when the agent ends its turn (the Stop hook holds the
+    # finish once per turn), to measure what a review by a stronger setting is worth. Reported as its own arm.
     'modelpilot-delegate': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'medium', 'advisor': 'jev',
                             'checkout': 'work/jev-router-compat', 'models': POLICY_TIERS,
                             'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}),
                             'policy': 'docs/m6-modelpilot-policy.md',
-                            'policy_overrides': {'delegation': {'consult': {'enabled': True, 'force': ['tests_pass']},
+                            'policy_overrides': {'delegation': {'consult': {'enabled': True, 'force': ['agent_finish']},
                                                                 'handoff_note': {'enabled': True}}}},
 }
 RUNNABLE = ('fixed', 'jev')
