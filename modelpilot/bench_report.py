@@ -16,6 +16,11 @@ billed for the same tokens (api_key_equivalent); their as-sent price is kept alo
 rebuilds the summary from a run's trial records (for example after a crash). Given several
 runs, it pairs their arms by task; an arm in more than one run is labeled arm@<run>. Evidence
 is never overwritten.
+
+A trial passes on the hidden grader and, where its task has an edge suite, every edge test (user
+decision, October 4). Runs graded before then carry the hidden verdict only; their edge results
+come from the run's latest re-grade (runs/regrade-<run>-*/), and a trial with none is counted on
+its hidden tests and labeled edge_missing. Hidden-test passes are reported alongside.
 """
 import argparse
 from collections import Counter
@@ -23,9 +28,11 @@ import json
 from pathlib import Path
 import random
 import statistics
+from . import regrade
 from .cache_probe import cost
 
 TTL_SECONDS = {'5m': 300, '1h': 3600}
+EDGE_ROOT = regrade.EDGE
 MIN_TASKS = 10  # below this a percentile bootstrap interval is too narrow to support a claim
 ASSUMPTIONS = ('Cache entries are per model and effort. A request can use an earlier in-trial prefix '
                '(cache read + write) started within that entry\'s TTL (300 s, or 3600 s for 1h writes); '
@@ -453,10 +460,12 @@ def arm_summary(arm, complete, incomplete, arm_cells, rng, resamples):
     first_bytes = [s for r in complete for s in (r.get('accounting') or {}).get('first_byte_seconds') or [] if s is not None]
     measured = [r['accounting']['cost_usd'] for r in complete if (r.get('accounting') or {}).get('cost_usd') is not None]
     passes = sum(bool(r.get('passed')) for r in complete)
+    hidden_passes = sum(hidden_passed(r) for r in complete)
     unknown = [f"{r['task']}/{r.get('trial', 0)}" for r in complete if cold_cost(r) is None]
     tasks = sorted(arm_cells)
     drawn = bootstrap(tasks, lambda sample: metrics([arm_cells[t] for t in sample]), rng, resamples) if tasks else {}
     out = {'arm': arm, 'trials': len(complete), 'incomplete_trials': len(incomplete), 'passes': passes,
+           'hidden_passes': hidden_passes, 'pass_rules': dict(Counter(r.get('pass_rule', 'hidden') for r in complete)),
            'pass_rate': point['pass_rate'] if complete else None, 'cost_scope': cost_scope(complete),
            'mean_cost_usd': point['mean_cost_usd'], 'cost_per_pass_usd': point['cost_per_pass_usd'],
            # Sensitivity, not a headline: requests the API rejected with an error counted as free.
@@ -554,10 +563,37 @@ def summarize(records, arms, seed=0, resamples=10000):
     return out
 
 
+def hidden_passed(record):
+    return bool((record.get('grade') or {}).get('passed', record.get('passed')))
+
+
+def latest_regrade(run_dir):
+    found = sorted(Path(run_dir).parent.glob(f'regrade-{Path(run_dir).name}-*/results.json'))
+    return found[-1] if found else None
+
+
+def apply_pass_rule(record, edge=None):
+    """passed = the hidden grader and, where the task has an edge suite, all of it (see the module docstring)."""
+    hidden = hidden_passed(record)
+    record['grade'] = dict(record.get('grade') or {}, passed=hidden)  # older records kept it only as 'passed'
+    edge = record.get('edge') or edge
+    if not regrade.edge_files(record['task'], EDGE_ROOT):
+        record['pass_rule'] = 'hidden'
+    elif edge is None:
+        record.update(pass_rule='edge_missing', passed=hidden)
+    else:
+        record.update(pass_rule='hidden_and_edge', edge=edge, passed=hidden and regrade.edge_all_passed(edge))
+    return record
+
+
 def load_run(run_dir, rates):
     """A run's manifest and trial records; cache attribution is recomputed from the proxy log."""
     run_dir = Path(run_dir)
     manifest = json.loads((run_dir/'manifest.json').read_text())
+    regraded = latest_regrade(run_dir)
+    edges = {} if regraded is None else {(t['task'], t['arm'], t['trial']): t['edge']
+                                         for t in json.loads(regraded.read_text())['trials'] if t.get('edge')}
+    manifest['edge_from'] = str(regraded) if regraded else None
     records = []
     for path in sorted(run_dir.glob('*/*/*/trial.json')):
         record = json.loads(path.read_text())
@@ -568,7 +604,7 @@ def load_run(run_dir, rates):
             rows = priced_rows(record, [json.loads(line) for line in log.read_text().splitlines() if line.strip()], rates)
             record.update(cache=cache_attribution(rows, rates), path=setting_path(rows),
                           cost_components=cost_components(rows, rates), write_sources=write_sources(rows, rates))
-        records.append(record)
+        records.append(apply_pass_rule(record, edges.get((record['task'], record['arm'], record['trial']))))
     return manifest, records
 
 
@@ -587,14 +623,18 @@ def load_runs(run_dirs, rates):
         arms += label.values()
         records += [dict(r, arm=label[r['arm']]) for r in run_records if r['arm'] in label]
         runs.append({'run': str(path), 'arms': list(label.values()), 'code': manifest.get('code'),
-                     'client_version': manifest.get('client_version'), 'auth': manifest.get('auth')})
+                     'client_version': manifest.get('client_version'), 'auth': manifest.get('auth'),
+                     'edge_from': manifest.get('edge_from')})
     return loaded[0][1].get('seed', 0), arms, records, runs
 
 
 def summary_of(run_dirs, rates, resamples=10000):
     seed, arms, records, runs = load_runs(run_dirs, rates)
     summary = summarize(records, arms, seed=seed, resamples=resamples)
-    summary.update(trials=len(records), rebuilt_from=str(run_dirs[0]) if len(run_dirs) == 1 else [r['run'] for r in runs])
+    summary.update(trials=len(records), rebuilt_from=str(run_dirs[0]) if len(run_dirs) == 1 else [r['run'] for r in runs],
+                   pass_rule='hidden grader and, where the task has one, its whole edge suite (October 4); '
+                             'hidden_passes alongside',
+                   edge_from=[r['edge_from'] for r in runs])
     if len(run_dirs) > 1:
         summary.update(runs=runs, cross_run='Arms from different runs are paired by task; they ran at different '
                                             'times and possibly on different code, clients and auth (see runs).')

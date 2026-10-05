@@ -49,6 +49,10 @@ def run_edge(task, tree, python, scratch, root=EDGE):
                                    'output_tail')}
 
 
+def edge_all_passed(result):
+    return bool(result['exit_code'] == 0 and result['tests_run'] and result['tests_passed'] == result['tests_run'])
+
+
 def check_edge(task, repo, python, scratch, root=EDGE):
     """Run a task's edge suite on its reference fix and its base. usable: the reference passes all of it."""
     out = {}
@@ -56,9 +60,7 @@ def check_edge(task, repo, python, scratch, root=EDGE):
         tree = bench_tasks.task_tree(task, repo, task[name], Path(scratch)/name)
         out[name] = run_edge(task, tree, python, Path(scratch)/f'{name}-env', root)
     out['files'] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in edge_files(task['id'], root)}
-    reference = out['reference']
-    out['usable'] = bool(reference['exit_code'] == 0 and reference['tests_run'] and
-                         reference['tests_passed'] == reference['tests_run'])
+    out['usable'] = edge_all_passed(out['reference'])
     return out
 
 
@@ -113,6 +115,7 @@ def summarize(results, edge_suites, pair):
     for r in results:
         a = arms.setdefault(r['arm'], {'trials': 0, 'recorded_passes': 0, 'regraded_passes': 0, 'mismatches': [],
                                        'errors': [], 'edge_trials': 0, 'edge_all_passed': 0, 'edge_failed_tests': 0,
+                                       'strict_passes': 0,
                                        '_lines': [], 'trials_adding_tests': 0})
         a['trials'] += 1
         a['recorded_passes'] += bool(r['recorded_passed'])
@@ -127,7 +130,8 @@ def summarize(results, edge_suites, pair):
         if r.get('edge'):
             e = r['edge']
             a['edge_trials'] += 1
-            a['edge_all_passed'] += bool(e['exit_code'] == 0 and e['tests_run'] and e['tests_passed'] == e['tests_run'])
+            a['edge_all_passed'] += edge_all_passed(e)
+            a['strict_passes'] += bool(r['regraded_passed']) and edge_all_passed(e)  # the pass rule since October 4
             a['edge_failed_tests'] += e['tests_run'] - e['tests_passed']
     for a in arms.values():
         lines = a.pop('_lines')
@@ -196,7 +200,7 @@ def main():
         print(f"{arm}: regraded {a['regraded_passes']}/{a['trials']} (recorded {a['recorded_passes']}), "
               f"mismatches {a['mismatches'] or 'none'}, errors {a['errors'] or 'none'}, "
               f"median source lines {a['median_source_lines']}, trials adding tests {a['trials_adding_tests']}"
-              + (f", edge all-passed {a['edge_all_passed']}/{a['edge_trials']}" if a['edge_trials'] else ''))
+              + (f", edge all-passed {a['edge_all_passed']}/{a['edge_trials']}, strict passes {a['strict_passes']}" if a['edge_trials'] else ''))
     print(out/'results.json')
 
 

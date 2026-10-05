@@ -15,6 +15,7 @@ from modelpilot import bench, bench_tasks
 from modelpilot.fixtures import fixture_server, scripted_response
 from modelpilot.policy_actions import MODELS as POLICY_TIERS
 from tests import test_bench_tasks as synthetic
+from tests import test_regrade as regrade_tests
 
 # Sonnet 5 serves the harness tests' fixed arm; Sonnet 5.5 is the ModelPilot arm's start tier. Same rates.
 RATES = {m: dict(input=2, output=10, read=.2, write_5m=2.5, write_1h=4) for m in ('claude-sonnet-5', 'claude-sonnet-5-5')}
@@ -438,11 +439,13 @@ class TrialTests(unittest.TestCase):
         self.thread.join()
         self.repo_case.tearDown()
 
-    def stub(self, subtypes):
+    def stub(self, subtypes, fix=None):
         results = iter(subtypes)
 
         def run_client(command, env, cwd, timeout, **_):
             self.calls.append(command)
+            if fix is not None:  # what the agent leaves in its checkout
+                (Path(cwd)/'pkg'/'__init__.py').write_text(fix)
             host, port = env['ANTHROPIC_BASE_URL'].rsplit('/', 1)[1].split(':')
             conn = http.client.HTTPConnection(host, int(port), timeout=5)
             conn.request('POST', '/v1/messages', json.dumps({'model': 'claude-sonnet-5', 'max_tokens': 8, 'messages': []}),
@@ -532,6 +535,35 @@ class TrialTests(unittest.TestCase):
         saved = json.loads((self.repo_case.root/'trial'/'trial.json').read_text())
         self.assertEqual((saved['phase'], saved['accounting']['requests']), ('grading', 1))
 
+    def test_a_fix_passes_only_with_its_tasks_edge_suite(self):
+        edge = self.repo_case.root/'edge'
+        (edge/'synthetic').mkdir(parents=True)
+        (edge/'synthetic'/'test_edge.py').write_text(regrade_tests.EDGE)
+        records = {}
+        for name, fix in (('partial', regrade_tests.LISTS_ONLY), ('fixed', synthetic.FIXED)):
+            self.calls = []
+            trial = bench.Trial(self.task, 'sonnet-5', self.repo_case.root/name, '/fake/claude', 'k',
+                                f'http://127.0.0.1:{self.upstream.server_port}', RATES, python=sys.executable)
+            with self.stub(['success'], fix=fix), mock.patch.object(bench, 'EDGE_ROOT', edge):
+                self.assertFalse(trial.step())
+            records[name] = trial.record
+        partial, fixed = records['partial'], records['fixed']
+        self.assertTrue(partial['grade']['passed'])  # the hidden grader can't tell them apart
+        self.assertEqual((partial['edge']['tests_passed'], partial['edge']['tests_run']), (1, 2))
+        self.assertEqual(partial['grade']['edge_passed'], False)
+        self.assertFalse(partial['passed'])
+        self.assertEqual((fixed['grade']['edge_passed'], fixed['passed']), (True, True))
+        self.assertEqual({partial['pass_rule'], fixed['pass_rule']}, {'hidden_and_edge'})
+
+    def test_a_task_without_an_edge_suite_passes_on_its_hidden_tests(self):
+        trial = self.trial()
+        with self.stub(['success'], fix=synthetic.FIXED), mock.patch.object(bench, 'EDGE_ROOT', self.repo_case.root/'none'):
+            trial.step()
+        self.assertTrue(trial.record['passed'])
+        self.assertIsNone(trial.record['grade']['edge_passed'])
+        self.assertEqual(trial.record['pass_rule'], 'hidden')
+        self.assertNotIn('edge', trial.record)
+
     def test_a_changed_client_stops_the_trial_before_it_runs(self):
         trial = self.trial(client_version='2.1.281 (Claude Code)')
         with self.stub(['success']), mock.patch.object(bench, 'client_version', return_value='2.1.282 (Claude Code)'):
@@ -579,6 +611,21 @@ class PreflightTests(unittest.TestCase):
     def test_reference_passes_are_recorded(self):
         expected = bench.preflight([self.task], sys.executable, self.repo_case.root/'preflight')
         self.assertEqual(expected['synthetic']['hidden_passed'], 2)
+
+    def test_an_edge_suite_must_pass_on_the_reference_before_any_request(self):
+        edge = self.repo_case.root/'edge'
+        (edge/'synthetic').mkdir(parents=True)
+        (edge/'synthetic'/'test_edge.py').write_text(regrade_tests.EDGE)
+        with mock.patch.object(bench, 'EDGE_ROOT', edge):
+            expected = bench.preflight([self.task], sys.executable, self.repo_case.root/'preflight')
+            self.assertEqual(expected['synthetic']['edge_tests'], 2)
+            (edge/'synthetic'/'test_beyond.py').write_text(regrade_tests.BEYOND_REFERENCE)
+            with self.assertRaises(bench.PreflightError) as caught:
+                bench.preflight([self.task], sys.executable, self.repo_case.root/'preflight2')
+        self.assertIn('edge suite', str(caught.exception))
+        with mock.patch.object(bench, 'EDGE_ROOT', edge):
+            self.assertEqual(set(bench.edge_manifest([self.task])['synthetic']), {'test_edge.py', 'test_beyond.py'})
+        self.assertIsNone(bench.edge_manifest([dict(self.task, id='no-suite')]))
 
     def test_a_failing_reference_stops_the_run_before_any_request(self):
         broken = dict(self.task, hidden_command=['{python}', '-m', 'unittest', '-q', 'tests.test_missing'])

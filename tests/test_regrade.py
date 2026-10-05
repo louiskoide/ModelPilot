@@ -72,6 +72,7 @@ class RegradeTests(unittest.TestCase):
         self.assertEqual((fixed['edge']['tests_passed'], fixed['edge']['tests_run']), (2, 2))
         summary = regrade.summarize([partial, fixed], {'synthetic': suite}, ['partial', 'fixed'])
         self.assertEqual((summary['arms']['partial']['edge_all_passed'], summary['arms']['fixed']['edge_all_passed']), (0, 1))
+        self.assertEqual((summary['arms']['partial']['strict_passes'], summary['arms']['fixed']['strict_passes']), (0, 1))
         self.assertEqual(summary['paired']['tasks'][0]['partial']['edge'], '1/2')
         (self.edge/'synthetic'/'test_beyond.py').write_text(BEYOND_REFERENCE)
         beyond = regrade.check_edge(self.task, self.case.repo, sys.executable, self.root/'check2', self.edge)

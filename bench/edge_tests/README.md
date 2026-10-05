@@ -15,6 +15,12 @@ Rules (user decision, September 29, 2026):
 3. Tuning tasks only. Final-split task specs are hash-locked (`bench/splits.json`) and get no edge tests.
 4. Frozen once results against agent fixes exist: a change is a new suite, recorded with its reason, and every
    re-grade records each file's SHA-256.
+5. Since October 4, 2026 (user decision) edge tests count: a trial passes only if it passes the hidden grader
+   and every test of its task's edge suite. `bench` runs the suite on the graded tree after the hidden grader
+   (`grade.edge_passed`, `pass_rule`), its run-start check stops a run whose suite the reference doesn't pass in
+   full, and the manifest records each suite's SHA-256. `bench_report` takes the edge results of runs graded
+   before then from their latest re-grade (`edge_missing` when there is none) and reports hidden-test passes
+   alongside. Final tasks have no suites (rule 3), so they are still graded on their hidden tests alone.
 
 Layout: `bench/edge_tests/<task id>/test_*.py`, plain `unittest`, copied into the graded tree's `_edge/` and run
 as `python -m unittest discover -v -s _edge -t _edge` with the task's `pythonpath`, the grader's isolation (no
