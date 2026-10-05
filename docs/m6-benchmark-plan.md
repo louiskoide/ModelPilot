@@ -265,9 +265,24 @@ Uncertainty: one trial per task; the four arms come from four runs over about a 
 
 **Where Sonnet 5.5 already falls short: strict passes across every re-grade (October 4, $0).** `runs/strict-pass-matrix-20261004.py` reads the eight re-grades above and counts a trial as a strict pass when its saved fix passes the hidden grader and every edge test (`runs/strict-pass-matrix-20261004.json`). Opus 5.5 is 23/23 strict (one trial per task). Every Sonnet 5.5 setting is 21–22/23, and all 11 hidden-only results are Sonnet 5.5 fixes (ModelPilot's three ran Sonnet 5.5 medium) on two tasks:
 - `tomli-decode-error-attrs`, 7 of 7 Sonnet trials, at low, medium, concise and low concise: `test_line_starts_and_keywords` fails. Every Sonnet fix takes `*args` only, so `TOMLDecodeError(msg='m', doc='ab', pos=0)` falls into the deprecated path and warns. The one Opus fix uses named parameters, as `json.JSONDecodeError` does, and passes. The instruction names the parameters (`TOMLDecodeError(msg, doc, pos)`) but never says keywords must work, so this is an inferred convention, the kind of detail Sonnet misses and Opus got. It is the only task where the cheapest strictly passing setting differs, and it rests on one Opus trial.
-- `parse-decimal-grouping`, 4 of 7 Sonnet trials: `parse('{:,d}', '-7')` rejected. Sonnet at low and at medium in 4a passed, as did Haiku, so this is run-to-run variation, not a setting difference.
+- `parse-decimal-grouping`, 4 of 7 Sonnet trials: `parse('{:,d}', '-7')` rejected. Sonnet at low and at medium in 4a passed, as did Haiku. Read at the time as run-to-run variation; the repeat below shows a setting difference instead.
 
 Pass/fail on the hidden tests alone still separates nothing. A router can only use the tomli gap if edge tests count toward passing (a user decision, see below), and one task is too thin to price.
+
+**Repeat of the two gap tasks (October 4): `bench-20261004-135219`.** User's go: `tomli-decode-error-attrs` and `parse-decimal-grouping` × `sonnet-5.5`, `opus-5.5` × 3 trials, seed 2, both arms on the subscription, code `9c0d9e3` (committed), pinned 2.1.284, same limits as 4a. 12/12 hidden passes, $0 API, $1.93 as sent, no unknown cost. Re-grade `regrade-bench-20261004-135219-20261004-142832`: all 12 fixes reproduce their verdicts. Strict passes, with every earlier trial included (`runs/strict-pass-matrix-20261004.json`, now nine re-grades):
+
+| Task | Sonnet 5.5 medium | Every Sonnet 5.5 setting (incl. Jev's high) | Opus 5.5 medium | One-sided Fisher exact, Opus better |
+| --- | --- | --- | --- | --- |
+| `parse-decimal-grouping` (`'-7'` with `{:,d}`) | 1/6 (5 fixed, 1 ModelPilot) | 3/10 | 4/4 | p = 0.024 against medium, 0.035 against every setting |
+| `tomli-decode-error-attrs` (keyword construction) | 0/7 (5 fixed, 2 ModelPilot) | 0/10 | 2/4 | p = 0.11 against medium, 0.066 against every setting |
+
+Cost per trial on these two tasks (API-key equivalent, cold): Sonnet $0.081 and $0.090, Opus $0.159 and $0.239; wall time 25 s and 36 s against 39 s and 55 s.
+
+- **`parse-decimal-grouping` is a real setting difference**, not variation. Sonnet 5.5 medium misses the negative number without separators in 5 of 6 trials; Opus 5.5 got it 4 of 4. Sonnet passed it at low once, and Haiku once, so a weaker setting can get it, but medium rarely does.
+- **On `tomli-decode-error-attrs` Opus helps only half the time.** Its two misses are the same keyword case. Sonnet has never passed it in 10 trials.
+- **Under strict grading Opus 5.5 is cheaper per strict pass on both tasks**: $0.159/1.0 ≈ $0.16 against $0.081/(1/6) ≈ $0.49 on parse, and $0.239/0.5 ≈ $0.48 against no Sonnet strict pass on tomli. That divides mean cost by the strict pass rate, as if a failure were noticed and redone. In a real session the edge tests are hidden, so a miss goes unnoticed; a router has to choose Opus up front.
+- These are the first tuning tasks where the cheapest strictly passing setting differs, and they are 2 of 23. Both gaps are an implied convention that the instruction doesn't spell out (`format(-7, ',d')` is `'-7'`; `json.JSONDecodeError` takes keywords), which hidden tests from the upstream commit didn't check. Small samples: 4 Opus trials per task. Whether edge tests count toward passing is still the user's decision; if they do, these two tasks give the priced-quality term its first data.
+
 
 **No large tasks left in the tuning repositories (October 4, $0).** `bench_tasks.candidates` with a 2,000-line cap over the five tuning repositories: tomli and parse have no unused change over 60 source lines, toolz's are from 2015–2016, and more-itertools' biggest unused 2026 feature (`random_ordered_range`) nets 44 lines. The one large 2026 change, cachetools' `@cachedmethod` rework (descriptors plus `cache_info()`, 365 source lines over two commits), can't be a fair task: its 1,000 test lines pin exact deprecation behaviour on separate paths for Python before and after 3.13, and the reference's `__get__` reads an attribute it never sets (`self.__deprecated`). The September 29 batch of 100–200-line features in these repositories already passed at every Sonnet setting.
 
