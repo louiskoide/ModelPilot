@@ -29,11 +29,11 @@ class ScriptedAdvisor:
     live = False
 
     def __init__(self):
-        self.answer, self.calls = None, []
+        self.answer, self.calls, self.queue = None, [], []
 
     def ask(self, body, current, catalog, efforts, strip_prefix='', evidence=None, dry=False):
-        self.calls.append({'current': current, 'efforts': list(efforts), 'evidence': evidence})
-        return self.answer
+        self.calls.append({'current': current, 'efforts': list(efforts), 'evidence': evidence, 'body': body})
+        return self.queue.pop(0) if self.queue else self.answer
 
 
 class ActivePolicyTests(Upstream, unittest.TestCase):
@@ -499,6 +499,145 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
             self.assertEqual(reconcile_log(gov, self.log)['untracked_recorded'], 0)  # never sent, never reserved
         finally:
             gov.close()
+
+
+    # Delegation (docs/m6-modelpilot-policy.md, "Delegation"): consults and handoff notes the proxy sends itself.
+
+    def delegating(self, consult=None, note=None):
+        cfg = jev_only()
+        return switch_policy.with_overrides(cfg, {'delegation': {'consult': dict({'enabled': False}, **(consult or {})),
+                                                                 'handoff_note': dict({'enabled': False}, **(note or {}))}})
+
+    def side_bodies(self):
+        return [json.loads(b) for b in self.upstream.bodies if not json.loads(b).get('stream')]
+
+    def main_bodies(self):
+        return [json.loads(b) for b in self.upstream.bodies if json.loads(b).get('stream')]
+
+    def delegated(self):
+        gov = self.gov()
+        try:
+            return [e['payload'] for e in gov.journal('delegation')]
+        finally:
+            gov.close()
+
+    def review_run(self, cfg, limit=5):
+        """A turn start, two more requests, the host-run suite passing for the first time, then a request."""
+        self.start(limit=limit, config=cfg)
+        self.advise(S, 'medium')
+        self.post(messages=self.TURN)
+        for _ in range(2):
+            self.post(messages=self.CONTINUE)
+        self.suite(0)
+        return self.post(messages=self.CONTINUE)
+
+    def test_a_forced_review_consults_once_and_its_advice_stays_in_place(self):
+        status, _ = self.review_run(self.delegating(consult={'enabled': True, 'force': ['tests_pass']}))
+        self.assertEqual(status, 200)
+        # Jev says the current setting is enough, so the forced review goes to the strongest model at Jev's effort.
+        consult, = self.side_bodies()
+        self.assertEqual((consult['model'], consult['output_config'], consult['stream']), (O, {'effort': 'medium'}, False))
+        self.assertNotIn('tools', consult)
+        brief = consult['messages'][0]['content']
+        self.assertIn('## Task\nfix', brief)
+        self.assertIn('passes. Review the change', brief)
+        step = self.decisions()[-1]
+        self.assertEqual((step['trigger'], step['step']['cause'], step['action'], step['reason'], step['consult']),
+                         ('step', 'tests_pass', 'consult', 'forced', [O, 'medium']))
+        self.assertEqual(step['target'], [S, 'medium'])  # the main conversation stays where it is
+        entry, = self.delegated()
+        self.assertEqual((entry['kind'], entry['status'], entry['delivered'], entry['advice']),
+                         ('consult', 'ok', True, 'synthetic output'))
+        fourth = self.main_bodies()[-1]
+        self.assertEqual(fourth['messages'][3]['role'], 'system')
+        self.assertIn('synthetic output', fourth['messages'][3]['content'])
+        # Later requests carry it at the same place; the suite passing again is no new review.
+        self.suite(0)
+        later = self.CONTINUE + [{'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 't2', 'name': 'Bash', 'input': {}}]},
+                                 {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 't2', 'content': 'y'}]}]
+        for _ in range(3):
+            self.post(messages=later)
+        fifth = self.main_bodies()[-1]
+        self.assertEqual(fifth['messages'][:4], fourth['messages'])
+        self.assertEqual(len(self.side_bodies()), 1)
+        self.assertEqual([self.rows()[i]['policy'].get('deliveries') for i in (-1,)], [1])
+        # The consult is billed: a side_call row the governor admitted and settled, outside the client's own rows.
+        side, = [r for r in self.rows() if r['kind'] == 'side_call']
+        self.assertEqual((side['purpose'], side['model'], side['status'], side['governor_status']),
+                         ('consult', O, 'ok', 'settled'))
+        # Requests forwarded at the client's setting with the advice carried are admitted and settled too.
+        self.assertEqual({r['governor_status'] for r in self.rows() if r['kind'] == 'messages'}, {'settled'})
+        self.assertGreater(side['cost_usd'], 0)
+        gov = self.gov()
+        try:
+            main = sum(r['cost_usd'] for r in self.rows() if r['kind'] == 'messages')
+            self.assertAlmostEqual(gov.policy()['spent_usd'], main + side['cost_usd'])
+        finally:
+            gov.close()
+
+    def test_jev_chooses_who_answers_the_brief(self):
+        cfg = self.delegating(consult={'enabled': True, 'force': ['tests_pass']})
+        self.start(config=cfg)
+        self.advise(S, 'medium')
+        self.post(messages=self.TURN)
+        for _ in range(2):
+            self.post(messages=self.CONTINUE)
+        self.suite(0)
+        step = self.advisor.answer
+        self.advise(S, 'xhigh')  # the brief, read on its own, needs only Sonnet 5.5 at xhigh
+        self.advisor.queue = [step, self.advisor.answer]
+        self.post(messages=self.CONTINUE)
+        consult, = self.side_bodies()
+        self.assertEqual((consult['model'], consult['output_config']['effort']), (S, 'xhigh'))
+        self.assertIn('## Task', self.advisor.calls[-1]['body']['messages'][0]['content'])
+        entry, = self.delegated()
+        self.assertEqual((entry['gate_setting'], entry['setting']), ([O, 'medium'], [S, 'xhigh']))
+
+    def test_a_consult_past_the_limit_is_never_sent(self):
+        self.review_run(self.delegating(consult={'enabled': True, 'force': ['tests_pass']}), limit=3*ONE)
+        self.assertEqual(self.side_bodies(), [])
+        entry, = self.delegated()
+        self.assertEqual((entry['status'], entry['delivered'], entry['cost_usd']), ('refused', False, None))
+        side, = [r for r in self.rows() if r['kind'] == 'side_call']
+        self.assertEqual((side['status'], side['refusal'], side['cost_usd']), ('refused', 'insufficient_budget', 0.0))
+
+    def test_without_delegation_a_passing_suite_is_no_step(self):
+        self.review_run(jev_only())
+        self.assertEqual([d['trigger'] for d in self.decisions()], ['turn_start'])
+        self.assertEqual(self.side_bodies(), [])
+
+    def test_a_handoff_note_travels_with_a_mid_task_switch(self):
+        self.start(config=self.delegating(note={'enabled': True}))
+        self.advise(S, 'medium')
+        self.post(messages=self.TURN)
+        self.stuck()
+        self.advise(O, 'medium')
+        self.post(messages=self.CONTINUE)
+        note, = self.side_bodies()
+        # The model being left, on the request it would have sent: its cached prefix, the tools, and the instruction.
+        self.assertEqual((note['model'], note['output_config'], note['tools']), (S, {'effort': 'medium'}, self.main_bodies()[0]['tools']))
+        self.assertEqual(note['messages'][:3], self.CONTINUE)
+        self.assertIn('Do not call any tool', note['messages'][3]['content'])
+        self.assertEqual(self.sent()[-1], (O, 'medium'))
+        first = self.main_bodies()[-1]
+        self.assertIn('which wrote this handoff note', first['messages'][3]['content'])
+        self.assertIn('synthetic output', first['messages'][3]['content'])
+        later = self.CONTINUE + [{'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 't2', 'name': 'Bash', 'input': {}}]},
+                                 {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 't2', 'content': 'y'}]}]
+        self.post(messages=later)
+        self.assertEqual(self.main_bodies()[-1]['messages'][:4], first['messages'])
+        entry, = self.delegated()
+        self.assertEqual((entry['kind'], entry['source'], entry['target'], entry['delivered']),
+                         ('handoff_note', [S, 'medium'], [O, 'medium'], True))
+        side, = [r for r in self.rows() if r['kind'] == 'side_call']
+        self.assertEqual((side['purpose'], side['model'], side['tool_count']), ('handoff_note', S, 1))
+
+    def test_a_turn_start_jump_carries_no_note(self):
+        self.start(config=self.delegating(note={'enabled': True}))
+        self.advise(O, 'xhigh')
+        self.post(messages=self.TURN)  # nothing has been done yet: nothing to hand off
+        self.assertEqual(self.sent(), [(O, 'xhigh')])
+        self.assertEqual(self.side_bodies(), [])
 
 
 if __name__ == '__main__':

@@ -112,7 +112,12 @@ def cache_attribution(rows, rates):
         if ttl in TTL_SECONDS:
             last_ttl[key] = ttl
     priced = [r['cost_usd'] for r in messages if r.get('cost_usd') is not None]
-    measured = sum(priced) if messages and len(priced) == len(messages) else None
+    # The ModelPilot policy's consults and handoff notes, sent within the trial: counted as measured.
+    sides = [r.get('cost_usd') for r in rows if r.get('kind') == 'side_call' and r.get('status') != 'refused']
+    if None in sides:
+        unknown = unknown or 'unpriced_side_call'
+    priced += [c for c in sides if c is not None]
+    measured = sum(priced) if messages and len(priced) == len(messages) + len(sides) else None
     return {'cache_start': start, 'carried_read_tokens': carried_total, 'measured_cost_usd': measured,
             'cold_equivalent_cost_usd': measured + extra if measured is not None and unknown is None else None,
             'cold_equivalent_unknown': unknown or ('rejected_request' if rejected else None),
@@ -152,7 +157,12 @@ def setting_path(rows):
             bucket = side
         bucket['requests'] += 1
         bucket['cost_usd'] = _add(bucket['cost_usd'], r.get('cost_usd'))
-    return {'steps': steps, 'side': side, 'deferred_escalations': dict(deferred)}
+    out = {'steps': steps, 'side': side, 'deferred_escalations': dict(deferred)}
+    delegated = [{k: r.get(k) for k in ('purpose', 'model', 'effort', 'status', 'cost_usd')}
+                 for r in sorted(rows, key=lambda r: r.get('started_unix', 0)) if r.get('kind') == 'side_call']
+    if delegated:  # the ModelPilot policy's consults and handoff notes
+        out['delegation'] = delegated
+    return out
 
 
 def cost_components(rows, rates):
@@ -162,7 +172,7 @@ def cost_components(rows, rates):
     """
     out = {'input': 0.0, 'cache_write': 0.0, 'cache_read': 0.0, 'output': 0.0}
     for r in rows:
-        if r.get('kind') != 'messages' or r.get('cost_usd') is None:
+        if r.get('kind') not in ('messages', 'side_call') or r.get('cost_usd') is None:
             continue
         usage, rate = r.get('usage') or {}, rates.get(r.get('model'))
         split = usage.get('cache_creation') or ({'ephemeral_5m_input_tokens': 0, 'ephemeral_1h_input_tokens': 0}
@@ -189,7 +199,7 @@ def write_sources(rows, rates):
     prefix was older than its TTL, else rebuild_changed (earlier content changed). The trial's first main-loop
     request is cold_start; the first at any later setting is switch. Requests without tools are Claude Code's
     own side calls. Dollars are None when a writing row has no write breakdown or no rates."""
-    messages = sorted((r for r in rows if r.get('kind') == 'messages' and r.get('http_status') == 200
+    messages = sorted((r for r in rows if r.get('kind') in ('messages', 'side_call') and r.get('http_status') == 200
                        and 'cache_read_input_tokens' in (r.get('usage') or {})), key=lambda r: r.get('started_unix', 0))
     tokens, dollars, last = dict.fromkeys(WRITE_SOURCES, 0), dict.fromkeys(WRITE_SOURCES, 0.0), {}
     for r in messages:
@@ -204,7 +214,7 @@ def write_sources(rows, rates):
         else:
             per_token = None
         key, now = (r.get('model'), r.get('effort')), r.get('started_unix', 0)
-        if not r.get('tool_count'):
+        if not r.get('tool_count') or r['kind'] == 'side_call':  # the policy's consults and notes count as side
             parts = {'side': write}
         elif key not in last:
             parts = {'switch' if last else 'cold_start': write}

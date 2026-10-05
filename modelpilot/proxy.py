@@ -4,6 +4,8 @@ Two exceptions. A fixture_dispatch.ProxyPolicy applies ladder escalations and is
 when the upstream is the owned in-process fixture server (tests, never live). An
 active_policy.ActivePolicy, the ModelPilot benchmark arm only, applies escalations live and
 enforces admission: a refused request gets an API-style error from the proxy and is never sent.
+That policy may also have the proxy send requests of its own (side_call: consults and handoff
+notes), each admitted, settled and logged as kind side_call.
 """
 import argparse
 import hashlib
@@ -323,7 +325,7 @@ class ProxyServer(ThreadingHTTPServer):
         try:
             gov.settle(row['governor_request_id'], row['cost_usd'])
             row['governor_status'] = 'settled'
-            if row['status'] == 'ok' and row['tool_count']:
+            if row['status'] == 'ok' and row['tool_count'] and row.get('kind') == 'messages':
                 # Wire evidence for an outstanding rebuild plan: the client's main loop ran at this setting.
                 # Side requests (titles, summaries) carry no tools and may use another model.
                 try:
@@ -335,12 +337,79 @@ class ProxyServer(ThreadingHTTPServer):
         finally:
             gov.close()
 
-    def plan_policy(self, request):
+    def plan_policy(self, request, side=None):
         gov = self.open_governor()
         try:
-            return self.policy.plan(gov, self.rates, self.governor['task'], request)
+            if side is None:
+                return self.policy.plan(gov, self.rates, self.governor['task'], request)
+            return self.policy.plan(gov, self.rates, self.governor['task'], request, side=side)
         finally:
             gov.close()
+
+    def connection(self, timeout=120):
+        origin = self.upstream
+        if origin.scheme == 'https':
+            return http.client.HTTPSConnection(origin.hostname, context=tls_context(), timeout=timeout)
+        return http.client.HTTPConnection(origin.hostname, origin.port, timeout=timeout)
+
+    def side_call(self, headers, purpose, body, timeout):
+        """One request the active policy sends itself (a consult or a handoff note), never streamed, with the client's
+        own headers (its credentials and betas). Admitted on measured spend like the client's requests, settled with
+        its measured cost and logged as kind side_call, so the client-proxy token check sees only the client's rows.
+        Returns {'status', 'http_status', 'message' (the parsed reply, or None), 'cost_usd', 'request_id'}."""
+        raw = json.dumps(body).encode()
+        tools = body.get('tools')
+        row = {'started_unix': time.time(), 'kind': 'side_call', 'purpose': purpose, 'path': '/v1/messages',
+               'mode': 'active', 'applied': True, 'tool_count': len(tools) if isinstance(tools, list) else 0,
+               'request_sha256': hashlib.sha256(raw).hexdigest(),
+               'model': body.get('model') if body.get('model') in self.rates else 'unknown', 'effort': request_effort(body),
+               'stream': False, 'http_status': None, 'status': 'transport_error', 'cost_usd': None}
+        out = {'status': 'refused', 'http_status': None, 'message': None, 'cost_usd': None}
+        try:
+            self.admit(row, raw, body)
+        except Exception as e:
+            row.update(governor_status='untracked', governor_error=type(e).__name__)
+        out['request_id'] = row.get('governor_request_id')
+        if row.get('governor_status') != 'reserved':  # never sent: nothing is billed
+            row.update(status='refused', refusal=(row.get('governor') or {}).get('reason') or 'governor_error',
+                       cost_usd=0.0, wall_seconds=0.0)
+            self.record(row)
+            return out
+        sent = {k: v for k, v in headers.items() if k.lower() not in ('accept-encoding', 'content-length', 'content-type')}
+        sent.update({'Content-Length': str(len(raw)), 'Accept-Encoding': 'identity', 'Content-Type': 'application/json'})
+        start = time.monotonic()
+        conn = self.connection(timeout)
+        try:
+            conn.request('POST', '/v1/messages', body=raw, headers=sent)
+            response = conn.getresponse()
+            row['http_status'] = out['http_status'] = response.status
+            provider_id = response.headers.get('request-id', '')
+            if PROVIDER_ID.fullmatch(provider_id):
+                row['provider_request_id'] = provider_id
+            data = response.read(MAX_BODY + 1)
+            if len(data) > MAX_BODY:
+                raise ValueError('reply too large')
+            row['status'] = 'ok' if response.status == 200 else 'upstream_error'
+            message = json.loads(data) if response.headers.get('Content-Encoding', 'identity').lower() == 'identity' else None
+            if response.status == 200 and isinstance(message, dict):
+                usage = message.get('usage') if isinstance(message.get('usage'), dict) else {}
+                row.update(usage=logged_usage(usage), usage_complete=bool(usage), stop_reason=message.get('stop_reason'))
+                row['cost_usd'] = priced_usage(body, message.get('model'), usage, self.rates)
+                if row['cost_usd'] is None:
+                    row['usage_problem'] = 'unpriced_usage'
+                out['message'] = message
+        except Exception as e:
+            row['error_type'] = type(e).__name__
+        finally:
+            conn.close()
+            row['wall_seconds'] = time.monotonic() - start
+            try:
+                self.settle(row)  # unknown cost stays unknown, which halts admission
+            except Exception as e:
+                row.update(governor_status='settle_failed', governor_error=type(e).__name__)
+            self.record(row)
+        out.update(status=row['status'], cost_usd=row['cost_usd'])
+        return out
 
     def finish_policy(self, ticket, row, observer):
         gov = self.open_governor()
@@ -400,10 +469,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.connection.settimeout(120)
 
     def upstream_connection(self):
-        origin = self.server.upstream
-        if origin.scheme == 'https':
-            return http.client.HTTPSConnection(origin.hostname, context=tls_context(), timeout=120)
-        return http.client.HTTPConnection(origin.hostname, origin.port, timeout=120)
+        return self.server.connection()
 
     def do_GET(self):
         if self.path == '/health':
@@ -519,8 +585,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
         governed = self.server.governor is not None and path.path == '/v1/messages'  # count_tokens is free
         ticket, policy_row, client_sha = None, None, hashlib.sha256(raw).hexdigest()
         if governed and self.server.policy is not None:
+            client_headers = clean_headers(self.headers)
+            side = (lambda purpose, body, timeout: self.server.side_call(client_headers, purpose, body, timeout)) \
+                if self.server.active else None
             try:
-                outcome = self.server.plan_policy(request)
+                outcome = self.server.plan_policy(request, side)
             except Exception as e:
                 outcome = {'status': 'deferred', 'reason': 'policy_error:' + type(e).__name__}
             if outcome['status'] == 'admitted':
@@ -529,12 +598,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 policy_row = {'kind': ticket['kind'], 'status': 'reserved'}
                 if ticket.get('escalation_deferred'):
                     policy_row['escalation_deferred'] = ticket['escalation_deferred']
+                if ticket.get('deliveries'):
+                    policy_row['deliveries'] = ticket['deliveries']
             else:
                 policy_row = {k: outcome[k] for k in ('status', 'reason') if k in outcome}
                 if outcome.get('forward') is not None:  # the client's setting, with earlier effort messages kept
                     request = outcome['forward']
                     raw = json.dumps(request).encode()
                     policy_row['rewritten'] = 'effort_messages'
+                    if outcome.get('deliveries'):
+                        policy_row['deliveries'] = outcome['deliveries']
         headers = clean_headers(self.headers)
         extra_beta = (outcome.get('beta') if governed and self.server.policy is not None else None)
         if extra_beta:
@@ -566,9 +639,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if ticket is not None:
             row.update(client_request_sha256=client_sha, governor_request_id=ticket['request_id'],
                        governor_status='reserved')
-        elif policy_row and policy_row.get('rewritten'):
-            row['client_request_sha256'] = client_sha
         elif governed:
+            if policy_row and policy_row.get('rewritten'):
+                # The client's setting, with the policy's context carried: admitted and settled like any other request.
+                row['client_request_sha256'] = client_sha
             stop = self.server.active and outcome['status'] == 'stop'
             if not stop:
                 try:

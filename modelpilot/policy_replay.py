@@ -4,7 +4,11 @@ Each ModelPilot trial journals its advisor decisions in its governor database: J
 setting, the decision point and the conversation profile. This re-runs switch_policy.decide on them with
 today's config and rates, and reports where the decision changes beside each trial's recorded outcome.
 
-    python3 -m modelpilot.policy_replay runs/bench-<ts> [runs/bench-<ts2> ...] [--out FILE]
+    python3 -m modelpilot.policy_replay runs/bench-<ts> [runs/bench-<ts2> ...] [--arm ARM] [--out FILE]
+
+--arm replays through that arm's overrides of the config (bench.ARMS 'policy_overrides', e.g. modelpilot-delegate).
+Only recorded decision points replay: a point a newer config would add (a forced review when the suite first passes)
+was never journaled, so it can't appear here.
 
 The journal's token counts were estimated at the bytes_per_token of the recording (4 in every run so far);
 they are rescaled to the current value. A decision after one whose replay differs is marked path_diverged:
@@ -39,7 +43,12 @@ def replay(payload, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_TOKE
     scale = recorded_bytes_per_token / cfg['bytes_per_token']
     prof = dict(cfg['defaults'], prefix_tokens=profile['prefix_tokens'] * scale,
                 messages_tokens=profile['messages_tokens'] * scale, warm=profile['warm'],
-                warm_entries={k: v * scale for k, v in (profile.get('warm_entries') or {}).items()})
+                warm_entries={k: v * scale for k, v in (profile.get('warm_entries') or {}).items()},
+                # Earlier work in the conversation (for a handoff note's price): recorded since October 5, else
+                # assumed after a turn start.
+                history=profile.get('history', payload['trigger'] != 'turn_start'))
+    if 'brief_tokens' in profile:
+        prof['brief_tokens'] = profile['brief_tokens']
     advice = payload.get('advice')
     usable = advice if advice and not advice.get('error') else None  # as active_policy.decide
     return switch_policy.decide(cfg, rates, usable, payload['current'], prof, payload['trigger'])
@@ -101,11 +110,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('runs', type=Path, nargs='+')
     parser.add_argument('--recorded-bytes-per-token', type=float, default=RECORDED_BYTES_PER_TOKEN)
+    parser.add_argument('--arm', help="Replay through this arm's policy overrides (bench.ARMS)")
     parser.add_argument('--out', type=Path, help='Write the rows and summary here (must not exist)')
     args = parser.parse_args()
-    cfg, table = switch_policy.load(), rates()
+    from .bench import ARMS
+    overrides = ARMS[args.arm].get('policy_overrides') if args.arm else None
+    cfg, table = switch_policy.with_overrides(switch_policy.load(), overrides), rates()
     rows = [row for run in args.runs for row in replay_run(run, cfg, table, args.recorded_bytes_per_token)]
-    result = {'config_sha256': hashlib.sha256(switch_policy.CONFIG.read_bytes()).hexdigest(),
+    result = {'config_sha256': hashlib.sha256(switch_policy.CONFIG.read_bytes()).hexdigest(), 'arm': args.arm,
+              'overrides': overrides,
               'recorded_bytes_per_token': args.recorded_bytes_per_token, 'summary': summarize(rows), 'rows': rows}
     for r in rows:
         new = r['replayed'] or {}

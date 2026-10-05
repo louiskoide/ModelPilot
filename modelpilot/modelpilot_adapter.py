@@ -63,7 +63,7 @@ class ModelPilotAdapter:
     key=''
 
     def __init__(self,limit_usd=1.,mode='dry-run',tools=False,threshold=8192,fixture_policy=None,
-                 arm_id='modelpilot',model='claude-sonnet-5-5',effort='medium',advisor=None,models=None):
+                 arm_id='modelpilot',model='claude-sonnet-5-5',effort='medium',advisor=None,models=None,overrides=None):
         from .policy_actions import MODELS,setting
         setting(model,effort)
         if model==MODELS[0]:
@@ -77,10 +77,14 @@ class ModelPilotAdapter:
             raise ValueError('Positive finite budget required')
         if isinstance(threshold,bool) or not isinstance(threshold,int) or threshold<256:
             raise ValueError('Excerpt threshold must be an integer of at least 256 bytes')
-        self.policy,self.advisor,self.models,self.catalog=None,advisor,models,None
+        self.policy,self.advisor,self.models,self.catalog,self.overrides=None,advisor,models,None,overrides
         if mode=='active':
+            from . import switch_policy
             from .active_policy import ActivePolicy
-            self.policy=ActivePolicy(self.model,OWNER,advisor=advisor)
+            self.policy=ActivePolicy(self.model,OWNER,advisor=advisor,
+                                     config=switch_policy.with_overrides(switch_policy.load(),overrides))
+        elif overrides:
+            raise ValueError('Policy overrides apply to the active arm only')
         elif fixture_policy is not None:
             from .fixture_dispatch import ProxyPolicy
             self.policy=ProxyPolicy(fixture_policy,self.model,OWNER)  # refuses anything but the fixture
@@ -126,6 +130,8 @@ class ModelPilotAdapter:
                                                       self.threshold),indent=2)+'\n')
         if self.policy is not None and hasattr(self.policy,'prompt_prefix'):
             self.policy.prompt_prefix=self.prefix()
+        if self.policy is not None and hasattr(self.policy,'workspace'):  # consult briefs diff against the base commit
+            self.policy.workspace,self.policy.base=trial.work,getattr(trial,'base_commit',None)
         self.binding={'MODELPILOT_DB':str(self.db),'MODELPILOT_SESSION':self.session,
                       'MODELPILOT_LIMIT_USD':str(self.limit),'MODELPILOT_TASK':self.task,
                       'MODELPILOT_OWNER':OWNER,'MODELPILOT_HOOK_ERRORS':str(trial.dir/'hook-errors.jsonl')}
@@ -175,6 +181,9 @@ class ModelPilotAdapter:
                        for e in gov.journal('advisor_decision')]
             advice=[e['payload'].get('advice') or {} for e in gov.journal('advisor_decision')]
             kept=len(gov.journal(keep)) if keep else 0
+            delegated=[{k:e['payload'].get(k) for k in ('kind','trigger','reason','setting','source','target','status',
+                                                        'stop_reason','cost_usd','delivered','brief_bytes')}
+                       for e in gov.journal('delegation')]
             stops=[e['payload'] for e in gov.journal('policy_stop')]
             from .policy_actions import escalation_proposal
             try:
@@ -188,8 +197,10 @@ class ModelPilotAdapter:
         rows=[json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
         messages=[r for r in rows if r.get('kind')=='messages']
         refused=[r for r in rows if r.get('kind')=='refused']
-        settled=all(r.get('governor_status')=='settled' for r in messages)
-        known=sum(r.get('cost_usd') or 0 for r in messages)
+        # The policy's own consults and notes the governor admitted: their spend is in the governor's total too.
+        sides=[r for r in rows if r.get('kind')=='side_call' and r.get('status')!='refused']
+        settled=all(r.get('governor_status')=='settled' for r in messages+sides)
+        known=sum(r.get('cost_usd') or 0 for r in messages+sides)
         policy_file=Path(__file__).resolve().parents[1]/'docs/m6-modelpilot-policy.md'
         mode=self.policy.mode if self.policy else 'dry-run'
         active=mode=='active'
@@ -203,7 +214,7 @@ class ModelPilotAdapter:
              'tools':{'enabled':self.tools,'threshold_bytes':self.threshold,'calls':tool_calls},
              'fixture_policy':None if active else fixture,
              'policy':dict(fixture,stops=stops,refusals=[r.get('refusal') for r in refused],decisions=decisions,
-                           parameters=parameters(self.model,self.effort))
+                           delegation=delegated,parameters=parameters(self.model,self.effort,overrides=self.overrides))
                  if active else None,
              'advisor':{'live':live,'calls':sum(bool(a) for a in advice),'failures':sum(bool(a.get('error')) for a in advice),
                         'auth_failures':sum(bool(a.get('auth')) for a in advice),
@@ -212,7 +223,7 @@ class ModelPilotAdapter:
              'policy_sha256':hashlib.sha256(policy_file.read_bytes()).hexdigest(),
              'governor':policy,'escalation_proposal':proposal,'hook_events':len(hooks),'all_requests_settled':bool(messages) and settled,
              'accounting_matches':bool(messages) and settled and policy['cost_complete'] and
-                 all(r.get('cost_usd') is not None for r in messages) and abs(known-policy['spent_usd'])<1e-9,
+                 all(r.get('cost_usd') is not None for r in messages+sides) and abs(known-policy['spent_usd'])<1e-9,
              # Requests the governor would have refused; policy tickets carry their own admission.
              'would_refuse':sum('governor' in r and not r['governor']['admitted'] for r in messages)}
         if not active:

@@ -61,7 +61,9 @@ class ToolServer(Server):
         return dict(summary, output=shown, truncated=truncated, handle=stored['handle'], bytes=stored['bytes'])
 
     def note(self, name, result):
-        keep = ('exit_code', 'tests_run', 'tests_passed', 'failing_count', 'matches', 'bytes', 'truncated')
+        # run_tests: the stored output's handle and the failing IDs too, so a consult brief can quote the latest run.
+        keep = ('exit_code', 'tests_run', 'tests_passed', 'failing_count', 'matches', 'bytes', 'truncated') + (
+            ('handle', 'failing_tests') if name == 'run_tests' else ())
         self.gov.note('bench_tool', dict({k: result[k] for k in keep if k in result}, tool=name), self.task)
 
     def run_tests(self):

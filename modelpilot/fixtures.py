@@ -112,11 +112,12 @@ class FixtureHandler(BaseHTTPRequestHandler):
                 self.server.bodies.append(raw)
         request = json.loads(raw)
         script = self.server.script
-        # Only the tool-bearing conversation follows the script; side requests get plain text.
+        # Only the client's tool-bearing conversation (always streamed) follows the script; side requests, including
+        # the policy's own non-streamed consults and handoff notes, get plain text.
         if self.path.split('?', 1)[0] == '/v1/messages/count_tokens':
             # As the API answers it: a count and no usage (token counting is free).
             status, content_type, data = 200, 'application/json', json.dumps({'input_tokens': len(raw) // 4}).encode()
-        elif script and request.get('tools') and self.path.split('?', 1)[0] == '/v1/messages':
+        elif script and request.get('tools') and request.get('stream') and self.path.split('?', 1)[0] == '/v1/messages':
             time.sleep(self.server.delay)
             status, content_type, data = scripted_response(request, script)
             if request['model'] in self.server.truncate_models and request.get('stream'):
