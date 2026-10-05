@@ -347,7 +347,7 @@ $0 API. About $4–8 of subscription use as sent, assuming these tasks cost 1.5�
 - **networkx tasks cost more than the earlier tuning tasks:** 1.6× for Sonnet medium ($0.140 against $0.087 on the 23), 2.1× for Opus ($0.349 against $0.170). The edge suites separated nothing: every fix that passed its hidden tests passed every edge test.
 - Low concise is again cheapest (paired with medium −$0.033 a task, with Opus −$0.242). With 6 tasks, below the report's 10-task minimum, these are no claim.
 
-Next question for the router: is Sonnet medium's ISMAGS failure repeatable, and does low concise pass it reliably? A repeat of that one task × the three settings × 3 trials would cost about $3 as sent.
+Next question for the router: is Sonnet medium's ISMAGS failure repeatable, and does low concise pass it reliably? A repeat of that one task × the three settings × 3 trials would cost about $3.5–4 as sent (its trials cost $0.25, $0.79 and $0.18 as sent).
 
 **Proposed next run (approved September 30; ran September 30, October 1 and October 3, above):** the 7 harder tasks × `sonnet-5.5`, `opus-5.5`, `modelpilot` × 1 trial, seed 0, same limits as 4a (30 turns, $1 per session), `--run-budget 15`, with `--subscription-arms sonnet-5.5,opus-5.5` (user request), so only the ModelPilot arm spends API dollars (about $1–2 plus unpriced TypeSafe). Forecast $4.5–9 plus unpriced TypeSafe, assuming these tasks cost 2–4× 4a's per trial ($0.069 Sonnet, $0.170 Opus, $0.068 ModelPilot, cold-equivalent). It shows whether Sonnet 5.5 at medium fails where Opus passes, gives the mid-task step decisions their first live run, and feeds the re-grader (`python3 -m modelpilot.regrade`) for the priced-quality term. Adding `jev-compat-o55` costs about another $1–2.
 
