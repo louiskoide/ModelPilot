@@ -1,0 +1,39 @@
+{
+ "id": "nx-dag-antichain-width",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/algorithms/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/tests"
+ ],
+ "type": "feature",
+ "base": "474f73f1edac0730e95a1e876ff205c4521432c8",
+ "reference": "4d3dc2cd2b7fdd14a570f2394c10e83bdee3c791",
+ "hidden_tests": [
+  "networkx/algorithms/tests/test_dag.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/tests/test_dag.py"
+ ],
+ "instruction": "Add antichain_width(G) to networkx's DAG algorithms (networkx/algorithms/dag.py, available as networkx.dag.antichain_width): the width of the partial order a directed acyclic graph defines, i.e. the largest number of nodes none of which can reach another. An empty DiGraph has width 0, three nodes without edges 3, a directed path 1, DiGraph([(1, 2), (1, 3), (2, 4), (3, 4)]) 2 and DiGraph([(1, 3), (2, 3), (3, 4), (3, 5)]) 2. Parallel edges in a MultiDiGraph change nothing. An undirected graph raises NetworkXNotImplemented, and a graph with a cycle raises NetworkXUnfeasible with a message containing 'Graph contains a cycle'. Add tests.",
+ "source": "https://github.com/networkx/networkx/commit/4d3dc2cd2b7fdd14a570f2394c10e83bdee3c791",
+ "notes": "networkx tuning task (October 4, 2026; user decision to add networkx as a tuning repository to find tasks where Sonnet 5.5 medium fails). Python 3.12 with no numpy/scipy: tests that need them are skipped, and none of the hidden tests do. networkx is not pip-installed in the benchmark venv, so its conftest warns about a \"Mixed NetworkX configuration\" (the nx_loopback test backend); results are the same on base and reference. Tuning only.",
+ "instruction_source": "written from the fix commit message, its pull request discussion where linked, and the hidden tests; describes behavior, not the change"
+}

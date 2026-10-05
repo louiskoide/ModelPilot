@@ -10,6 +10,7 @@ party source lives in ignored work/bench/; only task metadata (bench/tasks/) is 
 Grading runs without provider credentials. Test execution is not an OS sandbox.
 """
 import argparse
+import fnmatch
 import hashlib
 import io
 import json
@@ -43,7 +44,13 @@ def git(repo, *args, text=True):
 
 
 def candidates(repo, source_prefix, test_prefix, max_source_lines=40, since='2019-01-01'):
-    """Non-merge commits that change a little source and some tests, and nothing else of substance."""
+    """Non-merge commits that change a little source and some tests, and nothing else of substance.
+
+    test_prefix is a path prefix (tests/), or a pattern with '*' for tests spread through the package
+    (networkx keeps them in */tests/ directories).
+    """
+    is_test = ((lambda p: fnmatch.fnmatchcase(p, test_prefix + '*')) if '*' in test_prefix
+               else (lambda p: p.startswith(test_prefix)))
     log = git(repo, 'log', '--no-merges', f'--since={since}', '--format=@%H%x09%P%x09%ad%x09%s', '--date=short', '--numstat')
     found, current = [], None
 
@@ -52,15 +59,15 @@ def candidates(repo, source_prefix, test_prefix, max_source_lines=40, since='201
             return
         files = commit['files']
         # Tests can live inside the package (toolz/tests/): they are never counted as source.
-        source = sum(a + d for p, a, d in files if p.startswith(source_prefix) and not p.startswith(test_prefix))
-        tests = sum(a + d for p, a, d in files if p.startswith(test_prefix))
-        other = [p for p, _, _ in files if not p.startswith((source_prefix, test_prefix))
+        source = sum(a + d for p, a, d in files if p.startswith(source_prefix) and not is_test(p))
+        tests = sum(a + d for p, a, d in files if is_test(p))
+        other = [p for p, _, _ in files if not (p.startswith(source_prefix) or is_test(p))
                  and not p.endswith(('.md', '.rst', '.txt'))]
         if commit['parent'] and 0 < source <= max_source_lines and tests > 0 and not other:
             found.append({'commit': commit['sha'], 'date': commit['date'], 'subject': commit['subject'],
                           'source_lines': source, 'test_lines': tests,
-                          'source_files': sorted(p for p, _, _ in files if p.startswith(source_prefix) and not p.startswith(test_prefix)),
-                          'test_files': sorted(p for p, _, _ in files if p.startswith(test_prefix))})
+                          'source_files': sorted(p for p, _, _ in files if p.startswith(source_prefix) and not is_test(p)),
+                          'test_files': sorted(p for p, _, _ in files if is_test(p))})
     for line in log.splitlines():
         if line.startswith('@'):
             flush(current)

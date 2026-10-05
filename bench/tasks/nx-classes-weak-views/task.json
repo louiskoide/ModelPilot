@@ -1,0 +1,41 @@
+{
+ "id": "nx-classes-weak-views",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/classes/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx"
+ ],
+ "type": "bug_fix",
+ "base": "8977f1cfbae61ed7f33a33d19a40fd2c3f16c05c",
+ "reference": "083e47255d7087340e97ec13d256e9241ec25e77",
+ "hidden_tests": [
+  "networkx/classes/tests/test_graph.py",
+  "networkx/classes/tests/test_reportviews.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/classes/tests/test_graph.py",
+  "networkx/classes/tests/test_reportviews.py"
+ ],
+ "instruction": "In networkx, reading a graph's cached views (G.edges and G.degree, and in_edges, out_edges, in_degree and out_degree on directed graphs) stores a view on the graph that refers back to the graph, so any graph whose views were read is part of a reference cycle and is freed only by the cyclic garbage collector. Make such a graph freed by reference counting alone: with gc disabled, a Graph, DiGraph, MultiGraph or MultiDiGraph with some edges, on which nodes, adj, edges, in_edges, out_edges, degree, in_degree and out_degree were read (where they exist) and number_of_edges() and str() were called, is gone as soon as its last reference is deleted (a weakref.ref to it returns None). Views must keep working when their graph was only a temporary, for all four graph classes: with edges = [(0, 1), (1, 2)] and G = Graph(edges), dict(Graph(edges).degree(weight='w')), dict(Graph(edges).degree([1])), Graph(edges).degree(1, weight='w'), list(Graph(edges).edges([1])) and list(Graph(edges).edges(data=True, nbunch=[1])) equal the same calls on G, and so do views of G.copy() and G.subgraph(...). After copy.deepcopy or a pickle round trip of a graph whose edges and degree views were already read, the copy's views belong to the copy (D.edges._graph is D and D.degree._graph is D) and follow later changes to it. An edges or degree view pickled on its own, including one taken from a temporary graph, unpickles into a view that still answers nbunch and weight calls (ev([1]), ev.data('w', nbunch=[1]), dv(weight='w'), dv(1)) and can be pickled again. While its graph is alive, a view's _graph is that graph. Graph.nbunch_iter keeps its behaviour and error messages. Add tests.",
+ "source": "https://github.com/networkx/networkx/commit/083e47255d7087340e97ec13d256e9241ec25e77",
+ "notes": "networkx tuning task (October 4, 2026; user decision to add networkx as a tuning repository to find tasks where Sonnet 5.5 medium fails). Python 3.12 with no numpy/scipy: tests that need them are skipped, and none of the hidden tests do. networkx is not pip-installed in the benchmark venv, so its conftest warns about a \"Mixed NetworkX configuration\" (the nx_loopback test backend); results are the same on base and reference. Tuning only. Its suite is the whole networkx package (about 55 s), since the change is in the core graph classes.",
+ "instruction_source": "written from the fix commit message, its pull request discussion where linked, and the hidden tests; describes behavior, not the change"
+}

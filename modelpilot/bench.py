@@ -36,7 +36,7 @@ import tempfile
 import threading
 import time
 import uuid
-from . import bench_jev, bench_report, bench_tasks, switch_policy
+from . import bench_jev, bench_report, bench_tasks, regrade, switch_policy
 from .governed_session import client_env
 from .cache_probe import ACCOUNT_MESSAGE
 from .jev_route_check import PATCH, TOKEN_FIELDS, check_anthropic_key, parse_events
@@ -44,6 +44,11 @@ from .policy_actions import MODELS as POLICY_TIERS
 from .proxy import ProxyServer
 
 ROOT = Path(__file__).resolve().parents[1]
+# A trial passes only if it also passes its task's edge suite, where it has one (user decision, October 4):
+# tuning tasks only; the locked final tasks have none, so they are graded on their hidden tests alone.
+EDGE_ROOT = regrade.EDGE
+PASS_RULE = ('the hidden grader, and every test of the task\'s edge suite where it has one (tuning tasks; '
+             'user decision, October 4); before October 4 runs recorded the hidden grader alone')
 TOOLS = 'Read,Edit,Write,Bash,Glob,Grep'
 PREAMBLE = ('You are working in a Python repository in the current directory. Complete the task below. '
             'Run the relevant tests with python3 before you finish.\n\nTask: ')
@@ -670,15 +675,21 @@ class Trial:
         self.record['test_config_changed'] = test_config_changes(changed, self.task['test_dir'])
         graded = bench_tasks.grade(self.task, self.work, self.repo, self.python, self.dir/'grade',
                                    expected_hidden_passed=self.expected)
-        self.record['grade'] = {'passed': graded['passed'], 'reason': graded['reason'],
+        edge_passed = None
+        if regrade.edge_files(self.task['id'], EDGE_ROOT):
+            edge = regrade.run_edge(self.task, self.dir/'grade'/'graded', self.python, self.dir/'edge-env', EDGE_ROOT)
+            self.record['edge'] = edge
+            edge_passed = regrade.edge_all_passed(edge)
+        self.record['grade'] = {'passed': graded['passed'], 'reason': graded['reason'], 'edge_passed': edge_passed,
                                 'failing_tests': sorted(set(graded['hidden']['failing_tests'] + graded['suite']['failing_tests'])),
                                 'hidden_exit': graded['hidden']['exit_code'], 'suite_exit': graded['suite']['exit_code'],
                                 'hidden_passed': graded['hidden']['tests_passed'],
                                 'hidden_skipped': graded['hidden']['tests_skipped']}
-        self.record['passed'] = graded['passed']
+        self.record['passed'] = graded['passed'] and edge_passed is not False
+        self.record['pass_rule'] = 'hidden' if edge_passed is None else 'hidden_and_edge'
         reap(self.dir)
         # Keep the diff and records; drop copies that only cost disk.
-        for name in ('workspace', 'grade', 'home', 'tmp'):
+        for name in ('workspace', 'grade', 'edge-env', 'home', 'tmp'):
             shutil.rmtree(self.dir/name, ignore_errors=True)
         # A trial the account couldn't pay for is not a model result: counted as incomplete, never as a failure.
         self.record['complete'] = stopped is None and not self.account_error and not self.rate_limited
@@ -747,7 +758,8 @@ def preflight(tasks, python, scratch):
     """Grade each task's reference once in this environment ($0) before any billable request.
 
     Returns each task's hidden tests passed, the bar every trial must meet. A reference that
-    fails (a changed environment, a flaky task) stops the run.
+    fails (a changed environment, a flaky task) stops the run, and so does an edge suite the
+    reference doesn't pass in full: trials are graded on it.
     """
     expected, failed = {}, []
     for task in tasks:
@@ -755,9 +767,14 @@ def preflight(tasks, python, scratch):
         repo = task_repo(task)
         tree = bench_tasks.task_tree(task, repo, task['reference'], base/'reference')
         graded = bench_tasks.grade(task, tree, repo, python, base/'grade')
+        edge = (regrade.run_edge(task, base/'grade'/'graded', python, base/'edge-env', EDGE_ROOT)
+                if regrade.edge_files(task['id'], EDGE_ROOT) else None)
         shutil.rmtree(base, ignore_errors=True)
-        if graded['passed']:
+        if edge is not None and not regrade.edge_all_passed(edge):
+            failed.append(f"{task['id']} (edge suite: the reference passes {edge['tests_passed']}/{edge['tests_run']})")
+        elif graded['passed']:
             expected[task['id']] = {'hidden_passed': graded['hidden']['tests_passed'],
+                                    'edge_tests': edge['tests_run'] if edge else None,
                                     'seconds': round(graded['hidden']['seconds'] + graded['suite']['seconds'], 3)}
         else:
             tests = sorted(set(graded['hidden']['failing_tests'] + graded['suite']['failing_tests']))
@@ -765,6 +782,12 @@ def preflight(tasks, python, scratch):
     if failed:
         raise PreflightError('Reference solutions fail their graders here: ' + '; '.join(failed) + '. No requests sent.')
     return expected
+
+
+def edge_manifest(tasks):
+    """Each graded edge suite's files and their SHA-256, for the manifest; None when no task has one."""
+    return {t['id']: {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in regrade.edge_files(t['id'], EDGE_ROOT)}
+            for t in tasks if regrade.edge_files(t['id'], EDGE_ROOT)} or None
 
 
 def jev_manifest(arms):
@@ -814,6 +837,7 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
                                      for a in arms for p in [appended_prompt(ARMS[a])] if p} or None,
                 'follow_up_prompt': FOLLOW_UP if shape == 'followup' else None, 'run_budget_usd': run_budget,
                 'reference_preflight': expected, 'cost_basis': 'cold-equivalent; measured alongside',
+                'pass_rule': PASS_RULE, 'edge_suites': edge_manifest(tasks),
                 'jev': jev_manifest(arms),
                 'auth': {a: 'subscription' if a in subscription_arms else 'api_key' for a in arms},
                 'subscription_note': ('Subscription arms log in with a claude setup-token token. The client asks for 1h cache '

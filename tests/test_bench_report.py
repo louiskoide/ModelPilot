@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 from modelpilot import bench_report
 from modelpilot.bench_report import cache_attribution, summarize
 from modelpilot.cache_probe import cost
@@ -245,6 +246,38 @@ class RebuildTests(unittest.TestCase):
             self.assertEqual(json.loads(out.read_text())['arms'][0]['warm_starts'], 1)
             with self.assertRaises(FileExistsError):
                 bench_report.write_summary(run, RATES, out, resamples=50)  # evidence is never overwritten
+
+    def test_older_runs_count_edge_tests_from_their_latest_regrade(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            edge = root/'edge'
+            (edge/'suite').mkdir(parents=True)
+            (edge/'suite'/'test_edge.py').write_text('')
+            run = root/'bench-old'
+            run.mkdir()
+            (run/'manifest.json').write_text(json.dumps({'seed': 0, 'arms': {'sonnet-5': {}, 'opus-5': {}}}))
+            for task in ('suite', 'plain'):
+                for arm in ('sonnet-5', 'opus-5'):
+                    trial = run/task/arm/'0'
+                    trial.mkdir(parents=True)
+                    (trial/'trial.json').write_text(json.dumps(record(task, arm)))  # graded on hidden tests alone
+            ran = lambda passed: {'exit_code': 0 if passed == 2 else 1, 'tests_run': 2, 'tests_passed': passed}
+            for stamp, sonnet in (('20261001-000000', 2), ('20261004-000000', 1)):  # the latest re-grade is used
+                (root/f'regrade-bench-old-{stamp}').mkdir()
+                (root/f'regrade-bench-old-{stamp}'/'results.json').write_text(json.dumps({'trials': [
+                    {'task': 'suite', 'arm': 'sonnet-5', 'trial': 0, 'edge': ran(sonnet)}]}))
+            with mock.patch.object(bench_report, 'EDGE_ROOT', edge):
+                _, records = bench_report.load_run(run, RATES)
+                summary = bench_report.summary_of([run], RATES, resamples=50)
+            by = {(r['task'], r['arm']): r for r in records}
+            self.assertEqual((by['suite', 'sonnet-5']['passed'], by['suite', 'sonnet-5']['pass_rule']), (False, 'hidden_and_edge'))
+            self.assertEqual((by['suite', 'opus-5']['passed'], by['suite', 'opus-5']['pass_rule']), (True, 'edge_missing'))
+            self.assertEqual((by['plain', 'sonnet-5']['passed'], by['plain', 'sonnet-5']['pass_rule']), (True, 'hidden'))
+            arms = {a['arm']: a for a in summary['arms']}
+            self.assertEqual((arms['sonnet-5']['passes'], arms['sonnet-5']['hidden_passes']), (1, 2))
+            self.assertEqual(arms['sonnet-5']['pass_rules'], {'hidden_and_edge': 1, 'hidden': 1})
+            self.assertEqual(arms['opus-5']['pass_rules'], {'edge_missing': 1, 'hidden': 1})
+            self.assertTrue(summary['edge_from'][0].endswith('regrade-bench-old-20261004-000000/results.json'))
 
     def test_several_runs_pair_by_task_and_an_arm_in_two_runs_is_labeled_by_run(self):
         with tempfile.TemporaryDirectory() as tmp:

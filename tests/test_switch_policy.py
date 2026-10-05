@@ -325,12 +325,14 @@ class CalibrationTests(unittest.TestCase):
     def decide(self, adv, current=(S, 'medium'), trigger='turn_start', cfg=None):
         return sp.decide(cfg or self.cfg, self.rates, adv, current, self.prof, trigger)
 
-    def test_the_shipped_config_is_calibrated_on_the_fixed_arms_tuning_results(self):
+    def test_the_shipped_config_is_calibrated_on_the_fixed_arms_strict_tuning_results(self):
         cal = self.cfg['calibration']
         self.assertTrue(cal['enabled'])
-        self.assertEqual(cal['outcomes'], {f'{S}/medium': {'passed': 23, 'trials': 23},
+        # Strict passes (hidden grader and edge suite, October 4) over full sets of the tuning tasks.
+        self.assertEqual(cal['outcomes'], {f'{S}/medium': {'passed': 43, 'trials': 46},
                                            f'{O}/medium': {'passed': 23, 'trials': 23}})
-        self.assertAlmostEqual(sp.measured_ok(self.cfg, (S, 'medium')), 24 / 25)
+        self.assertAlmostEqual(sp.measured_ok(self.cfg, (S, 'medium')), 44 / 48)
+        self.assertAlmostEqual(sp.measured_ok(self.cfg, (S, 'high')), 44 / 48)  # nothing stronger measured on Sonnet
         self.assertAlmostEqual(sp.measured_ok(self.cfg, (O, 'xhigh')), 24 / 25)  # at least as strong as a measured one
         self.assertIsNone(sp.measured_ok(self.cfg, (S, 'low')))  # nothing measured that weak: Jev's estimate alone
 

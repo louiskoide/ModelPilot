@@ -15,6 +15,12 @@ Rules (user decision, September 29, 2026):
 3. Tuning tasks only. Final-split task specs are hash-locked (`bench/splits.json`) and get no edge tests.
 4. Frozen once results against agent fixes exist: a change is a new suite, recorded with its reason, and every
    re-grade records each file's SHA-256.
+5. Since October 4, 2026 (user decision) edge tests count: a trial passes only if it passes the hidden grader
+   and every test of its task's edge suite. `bench` runs the suite on the graded tree after the hidden grader
+   (`grade.edge_passed`, `pass_rule`), its run-start check stops a run whose suite the reference doesn't pass in
+   full, and the manifest records each suite's SHA-256. `bench_report` takes the edge results of runs graded
+   before then from their latest re-grade (`edge_missing` when there is none) and reports hidden-test passes
+   alongside. Final tasks have no suites (rule 3), so they are still graded on their hidden tests alone.
 
 Layout: `bench/edge_tests/<task id>/test_*.py`, plain `unittest`, copied into the graded tree's `_edge/` and run
 as `python -m unittest discover -v -s _edge -t _edge` with the task's `pythonpath`, the grader's isolation (no
@@ -52,6 +58,23 @@ Harder tuning tasks (added September 29, before any trial ran on them; same rule
 | parse-strftime-directives | 6 | 0 |
 | tomli-decode-error-attrs | 4 | 0 |
 | toolz-compose-annotations | 6 | 0 |
+
+networkx tuning tasks (added October 4, before any trial ran on them; same rules). Where they can, they compare
+against brute force or VF2 on small random graphs:
+
+| Task | Tests | Base passes |
+| --- | --- | --- |
+| nx-connectivity-digraph-cuts | 6 | 1 |
+| nx-classes-weak-views | 6 | 5 |
+| nx-ismags-monomorphism | 6 | 0 |
+| nx-vf2-isolated-nodes | 4 | 2 |
+| nx-bipartite-butterflies | 5 | 1 |
+| nx-dag-antichain-width | 5 | 0 |
+
+One test was dropped before freezing, a test bug found by running it on the reference: it assumed ISMAGS's existing
+subgraph isomorphisms equal VF2's, which they don't on random graphs with self-loops, before or after the fix. The
+ISMAGS suite leaves out directed multigraphs: there the upstream fix itself accepts some mappings that put two
+parallel subgraph edges on one graph edge (9 of 40 random cases), which VF2 rejects.
 
 Two of these tests were corrected before freezing, both test bugs found by running them on the reference: the
 TLRU `popitem()` case expected the wrong item after an eviction, and a condition test paired a lock with a

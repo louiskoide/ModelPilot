@@ -62,6 +62,19 @@ class BenchTaskTests(unittest.TestCase):
         self.assertEqual([c['commit'] for c in found], [self.reference])
         self.assertEqual(found[0]['test_files'], ['tests/test_pkg.py'])
 
+    def test_test_directories_inside_the_package_can_be_matched_by_pattern(self):
+        (self.repo/'pkg'/'sub'/'tests').mkdir(parents=True)
+        (self.repo/'pkg'/'sub'/'__init__.py').write_text('X = 1\n')
+        (self.repo/'pkg'/'sub'/'tests'/'test_sub.py').write_text('import unittest\n')
+        self.git('add', '-A')
+        self.git('commit', '-q', '-m', 'sub')
+        nested = self.head()
+        found = candidates(self.repo, 'pkg/', '*/tests/', since='2000-01-01')
+        self.assertEqual([c['commit'] for c in found], [nested])  # a top-level tests/ is not */tests/
+        self.assertEqual((found[0]['source_files'], found[0]['test_files']),
+                         (['pkg/sub/__init__.py'], ['pkg/sub/tests/test_sub.py']))
+        self.assertEqual(found[0]['source_lines'], 1)  # a nested test file is never counted as source
+
     def test_valid_task_fails_on_base_and_passes_on_reference(self):
         result = validate(self.task, self.repo, sys.executable, self.root/'scratch', repeats=2)
         self.assertTrue(result['valid'], result)

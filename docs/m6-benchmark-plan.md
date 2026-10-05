@@ -284,6 +284,14 @@ Cost per trial on these two tasks (API-key equivalent, cold): Sonnet $0.081 and 
 - These are the first tuning tasks where the cheapest strictly passing setting differs, and they are 2 of 23. Both gaps are an implied convention that the instruction doesn't spell out (`format(-7, ',d')` is `'-7'`; `json.JSONDecodeError` takes keywords), which hidden tests from the upstream commit didn't check. Small samples: 4 Opus trials per task. Whether edge tests count toward passing is still the user's decision; if they do, these two tasks give the priced-quality term its first data.
 
 
+**Edge tests count (user decision, October 4; $0).** A trial now passes only if it passes the hidden grader and its task's whole edge suite. Since September 29 the edge tests had been a side column (see `bench/edge_tests/README.md`, rule 5). Built offline:
+- **Harness:** `bench` runs the suite after the hidden grader and records `edge`, `grade.edge_passed` and `pass_rule`. Its reference check stops a run whose suite the upstream fix doesn't pass in full, and the manifest records `pass_rule` and each suite's SHA-256.
+- **Reports:** `bench_report` reads the edge results of earlier runs from their latest re-grade, labels a trial without one `edge_missing`, and reports `hidden_passes` and `pass_rules` beside `passes`; `regrade` prints strict passes.
+- **Router:** the switch policy's calibration counts strict passes: Sonnet 5.5 medium 43/46 (0.917 with the uniform prior, from 0.96) and Opus 5.5 medium 23/23 (0.96). The repeat run is left out because it was chosen for the two misses. Replayed (`runs/policy-replay-strict-20261004.json`), all 30 recorded turn starts still stay at Sonnet 5.5 medium.
+- **Why nothing moves:** on the two gap tasks Jev advised staying, so the gate never weighed Opus, and Jev's estimates don't predict the misses. Its lowest-rated tasks passed, while the misses were at 0.56 and 0.80; refitted on strict outcomes, `jev_weight`'s posterior mean is 0.09 (95% bound 0.25, maximum likelihood 0). `jev_weight` stays 0.2.
+
+The final split has no edge suites (rule 3), so final trials are still graded on hidden tests alone.
+
 **No large tasks left in the tuning repositories (October 4, $0).** `bench_tasks.candidates` with a 2,000-line cap over the five tuning repositories: tomli and parse have no unused change over 60 source lines, toolz's are from 2015–2016, and more-itertools' biggest unused 2026 feature (`random_ordered_range`) nets 44 lines. The one large 2026 change, cachetools' `@cachedmethod` rework (descriptors plus `cache_info()`, 365 source lines over two commits), can't be a fair task: its 1,000 test lines pin exact deprecation behaviour on separate paths for Python before and after 3.13, and the reference's `__get__` reads an attribute it never sets (`self.__deprecated`). The September 29 batch of 100–200-line features in these repositories already passed at every Sonnet setting.
 
 A $0 survey of two repositories outside the corpus (shallow clones in ignored `work/bench/survey/`, the benchmark interpreter `work/bench/py312`, nothing installed):
@@ -297,6 +305,32 @@ A $0 survey of two repositories outside the corpus (shallow clones in ignored `w
 | Catch | Ships its own `CLAUDE.md` and `AGENTS.md`; whether the client reads them under `--setting-sources ''` is unchecked. Some 2026 commits are tagged `[CLAUDE]`/`[CODEX]` (written with agents) | 55 s is at the 60 s limit; a task's suite should be its subpackage |
 
 Either would add a tuning repository; the final split and its lock stay unchanged. Neither is built: the repository list was a user decision (September 26), so the choice is the user's.
+
+**networkx tuning tasks (user decision, October 4; $0).** networkx (BSD-3) joins the tuning split, with six tasks from 2026 commits, all in `bench/splits.json` under `tuning` (29 tuning tasks; the final specs and lock are unchanged). The clone is `git clone --shallow-since=2025-06-01 https://github.com/networkx/networkx.git work/bench/repos/networkx`, enough for every base. `bench_tasks.candidates` now takes a test pattern (`--tests '*/tests/'`), because networkx keeps its tests in many `*/tests/` directories. Each task's `test_dir` is the single directory its hidden tests live in, and its suite is that directory, except the weak-views task, whose suite is the whole package. No numpy or scipy is installed: no hidden test is skipped, and the suites skip only tests that need them. networkx isn't pip-installed, so its conftest warns about a "Mixed NetworkX configuration" (its test backend); base and reference behave the same.
+
+| Task | Type, commit date | Change | Hidden tests (reference passes) | Edge tests | Grading time | Why it might separate settings |
+| --- | --- | --- | --- | --- | --- | --- |
+| `nx-connectivity-digraph-cuts` | bug fix, August 21 | 116 source lines | 65 | 6 | 7 s | Five interacting defects in digraph node connectivity; the instruction gives the definition (minimum over ordered pairs) and symptoms, not the defects |
+| `nx-classes-weak-views` | bug fix, September 17 | 151 | 315 | 6 | 56 s (whole package) | A weak reference fix that must still serve views of temporary graphs, copies and pickles |
+| `nx-ismags-monomorphism` | feature, August 18 | 243 | 1,296 | 6 | 31 s | A new search mode inside a 1,200-line subgraph-matching algorithm, with symmetry pruning |
+| `nx-vf2-isolated-nodes` | bug fix, September 9 | 32 | 1,275 | 4 | 32 s | Moderate: a misplaced check, plus matcher reuse |
+| `nx-bipartite-butterflies` | feature, May 23 | 189 | 29 | 5 | 2 s | Moderate: counting with exact per-node and `nodes=` rules |
+| `nx-dag-antichain-width` | feature, July 2 | 53 | 77 | 5 | 10 s | Easier control: a known reduction (Dilworth) |
+
+Candidates left out:
+- **Flow functions taking a callable capacity** (8 source files): its hidden tests import a private helper (`_capacity_function`), so any fix without that exact name fails at import.
+- **Multigraph isomorphism in ISMAGS and VF2++:** its 446 rewritten test lines encode too many details to state in an instruction.
+- **An isomorphism match-helper API change, and changes that need numpy.**
+
+All six pass `bench_tasks validate` (`runs/bench-validate-20261004-180936.json`) and the harness's reference check with their edge suites (32 tests, written before any trial; `bench/edge_tests/README.md`). The ISMAGS instruction states the correct multigraph rule, the one VF2 follows. The upstream fix breaks it on some directed multigraphs, which neither the hidden tests nor the edge suite exercise.
+
+**Proposed screening run (needs the user's go):** the six networkx tasks × `sonnet-5.5`, `opus-5.5` and `sonnet-5.5-low-concise` × 1 trial, seed 0, same limits as 4a (30 turns, $1 per session), all on the subscription:
+
+```
+python3 -m modelpilot.bench --tasks nx-connectivity-digraph-cuts,nx-classes-weak-views,nx-ismags-monomorphism,nx-vf2-isolated-nodes,nx-bipartite-butterflies,nx-dag-antichain-width --arms sonnet-5.5,opus-5.5,sonnet-5.5-low-concise --trials 1 --seed 0 --subscription-arms sonnet-5.5,opus-5.5,sonnet-5.5-low-concise --live --run-budget 1 --claude work/claude-client/node_modules/.bin/claude
+```
+
+$0 API. About $4–8 of subscription use as sent, assuming these tasks cost 1.5–2.5× the harder tasks' trials ($0.12 Sonnet, $0.33 Opus). About 40–60 minutes with grading. It shows whether Sonnet 5.5 medium fails a task Opus passes, now under strict passes, and whether the cheapest default (low concise) fails where medium passes. Either result gives the router a task whose cheapest passing setting differs.
 
 **Proposed next run (approved September 30; ran September 30, October 1 and October 3, above):** the 7 harder tasks × `sonnet-5.5`, `opus-5.5`, `modelpilot` × 1 trial, seed 0, same limits as 4a (30 turns, $1 per session), `--run-budget 15`, with `--subscription-arms sonnet-5.5,opus-5.5` (user request), so only the ModelPilot arm spends API dollars (about $1–2 plus unpriced TypeSafe). Forecast $4.5–9 plus unpriced TypeSafe, assuming these tasks cost 2–4× 4a's per trial ($0.069 Sonnet, $0.170 Opus, $0.068 ModelPilot, cold-equivalent). It shows whether Sonnet 5.5 at medium fails where Opus passes, gives the mid-task step decisions their first live run, and feeds the re-grader (`python3 -m modelpilot.regrade`) for the priced-quality term. Adding `jev-compat-o55` costs about another $1–2.
 
