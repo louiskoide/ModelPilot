@@ -90,7 +90,7 @@ Status of the original design: proposal written September 22, 2026. The governor
 
 ## Why a policy is needed
 
-Today the governor records decisions and never acts. A "ModelPilot arm" would therefore behave exactly like a fixed-model arm. The comparison in CLAUDE.md work item 4 only means something if ModelPilot does something different, so this document defines what it does.
+Today the governor records decisions and never acts. A "ModelPilot arm" would therefore behave exactly like a fixed-model arm. The comparison in work item 4 (`docs/changelog.md`, "Next work, in order") only means something if ModelPilot does something different, so this document defines what it does.
 
 ## Goal
 
