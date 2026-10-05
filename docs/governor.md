@@ -2,7 +2,7 @@
 
 `modelpilot/governor.py` is the first end-to-end surface joining the M2 ledger, M4 verifier and M5 controls. It is durable: state lives in the same SQLite database as the M2 ledger, survives restarts and is shared by several processes. It never applies a model, effort or context change. Every decision is journaled with `applied: False`. Constructing it with any mode other than `dry-run` raises.
 
-This is item 2 of the CLAUDE.md work order. It adds durable recovery and concurrency before any action is enabled. It is now wired into the proxy (settlement), Claude Code hooks (observation, correction and rebase-plan delivery) and a cascade fallback path, all still dry-run with respect to the client. See "Wiring" and "Not done" below.
+This is item 2 of the work order (`docs/changelog.md`, "Next work, in order"). It adds durable recovery and concurrency before any action is enabled. It is now wired into the proxy (settlement), Claude Code hooks (observation, correction and rebase-plan delivery) and a cascade fallback path, all still dry-run with respect to the client. See "Wiring" and "Not done" below.
 
 ## Entry points
 
@@ -134,4 +134,4 @@ Known interaction: a refused call inside `Worker.dispatch` also sets that worker
 - **Broader live evidence.** The declared channel has one passing live session, a synthetic Read-only task on Sonnet 4.6/low. Live observation of writes and failures, other models, and `cascade_check --execute-fallback` have not been run.
 - **Live evidence for turn-end delivery and observed rebuilds.** Both are offline only (October 4). Claude Code 2.1.284 puts a blocked stop's reason into the next request twice: as a system reminder that begins `Stop hook blocking error from command: <hook command line>` and as `Stop hook feedback:`. Both carry the declared marker, and the model also sees the hook's command line (local paths, no credentials). Whether a live model accepts a correction framed as a "blocking error" is unmeasured. Rebuild observation relies on the proxy; a hooks-only setup would confirm only compaction. 2.1.284's hook payloads carry no model and only the client's own `effort.level` (on `PreToolUse`, `PostToolUse` and `Stop`), so the wire is used instead.
 - **Test-suite observations.** Only file hashes and failure text are observed. `suite`/`failures` need an explicit test adapter, as M3 has, rather than parsing arbitrary output.
-- **Enforcement.** Active mode is deliberately unavailable until the integrated arm has measured evidence (CLAUDE.md work items 3–4). The proxy never blocks, and hooks never change the model, effort or context.
+- **Enforcement.** Active mode is deliberately unavailable until the integrated arm has measured evidence (work items 3–4, `docs/changelog.md`). The proxy never blocks, and hooks never change the model, effort or context.

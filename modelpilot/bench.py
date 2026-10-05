@@ -458,7 +458,7 @@ class Trial:
         if auth == 'subscription' and (arm['kind'] not in SUBSCRIPTION_KINDS or adapter is not None or not oauth_token):
             raise ValueError(f'{arm_id}: only fixed arms run on a subscription, and they need its token')
         if arm['kind'] not in RUNNABLE and adapter is None:
-            raise NotImplementedError(f'{arm_id}: launcher not implemented yet (CLAUDE.md work item 4)')
+            raise NotImplementedError(f'{arm_id}: launcher not implemented yet (work item 4, docs/changelog.md)')
         if shape not in SHAPES:
             raise ValueError(f'unknown shape {shape}')
         if adapter is not None and adapter.arm_id != arm_id:
