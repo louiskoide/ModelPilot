@@ -110,7 +110,7 @@ def load(path=CONFIG):
     return cfg
 
 
-FORCE_CAUSES = ('tests_now_pass', 'tests_now_fail', 'spend_overrun', 'tests_pass')
+FORCE_CAUSES = ('tests_now_pass', 'tests_now_fail', 'spend_overrun', 'tests_pass', 'agent_finish')
 
 
 def _check_delegation(cfg):

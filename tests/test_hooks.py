@@ -8,7 +8,7 @@ import tempfile
 import unittest
 import unittest.mock
 from modelpilot.governor import Governor
-from modelpilot.hooks import channel_declaration, handle
+from modelpilot.hooks import REVIEW_AT_STOP, channel_declaration, handle
 
 FIXTURES = Path(__file__).parent/'fixtures'/'hooks-2.1.280'
 ROOT = Path(__file__).resolve().parents[1]
@@ -229,6 +229,80 @@ class HookTests(unittest.TestCase):
             self.assertIn('no declared correction channel', output['systemMessage'])
         finally:
             other.close()
+
+    # The review at the agent's finish (MODELPILOT_REVIEW_AT_STOP, set by the ModelPilot arm when its policy reviews there).
+
+    def reviewing(self):
+        self.env[REVIEW_AT_STOP] = '1'
+
+    def test_a_review_holds_the_finish_once_per_turn(self):
+        self.reviewing()
+        output = self.run_hook('Stop')
+        self.assertEqual(output['decision'], 'block')
+        self.assertTrue(output['reason'].startswith(f'[ModelPilot ledger update, code {self.code}] Task {self.task} is '
+                                                    'unchanged.'))
+        self.assertIn('the review follows this message under the same marker', output['reason'])
+        held, = self.gov.journal('review_block')
+        self.assertEqual((held['task'], held['revision']), (self.task, self.rev))
+        self.assertEqual(self.gov.journal('client_stop'), [])  # held: the turn goes on
+        # The client continues the turn; its next stop ends it, and a later turn's finish is held again.
+        self.assertEqual(self.run_hook('Stop', stop_hook_active=True), {})
+        self.assertEqual(len(self.gov.journal('client_stop')), 1)
+        self.assertEqual(self.run_hook('Stop')['decision'], 'block')
+        self.assertEqual(len(self.gov.journal('review_block')), 2)
+
+    def test_without_the_flag_the_finish_is_never_held(self):
+        self.assertEqual(self.run_hook('Stop'), {})
+        self.assertEqual(self.gov.journal('review_block'), [])
+
+    def test_a_pending_correction_goes_first_and_the_review_follows_it(self):
+        self.reviewing()
+        self.gov.state.correct(self.task, self.rev, 'Report the SECOND token instead')
+        first = self.run_hook('Stop')
+        self.assertIn('Report the SECOND token instead', first['reason'])
+        self.assertEqual(self.gov.journal('review_block'), [])
+        second = self.run_hook('Stop', stop_hook_active=True)
+        self.assertIn('the review follows', second['reason'])
+        self.assertEqual(self.gov.journal('review_block')[0]['revision'], self.rev + 1)
+        self.assertEqual(self.run_hook('Stop', stop_hook_active=True), {})
+
+    def test_no_review_once_the_limit_is_spent_or_cost_is_unknown(self):
+        self.reviewing()
+        self.gov.admit('mp-1', .5, self.task, self.rev, gate='spent')
+        self.gov.settle('mp-1', 1.0)  # the continuation would be refused
+        self.assertEqual(self.run_hook('Stop'), {})
+        other = Governor(self.db, 'unknown', 1)
+        try:
+            task = other.state.create('t', 'x')['id']
+            rev = other.state.claim(task, 1, 'client', seconds=3600)['revision']
+            other.declare_channel()
+            other.admit('mp-2', .1, task, rev, gate='spent')
+            other.settle('mp-2', None)
+            env = dict(self.env, MODELPILOT_SESSION='unknown', MODELPILOT_TASK=task)
+            self.assertEqual(handle('Stop', payload('Stop', self.work), env, clock=lambda: self.now[0]), {})
+        finally:
+            other.close()
+        self.assertEqual(self.gov.journal('review_block'), [])
+
+    def test_no_review_after_the_policy_stopped_the_task(self):
+        self.reviewing()
+        self.gov.note('policy_stop', {'status': 'stop', 'reason': 'policy_stop:no_stronger_setting'}, self.task, self.rev)
+        self.assertEqual(self.run_hook('Stop'), {})
+        self.assertEqual(self.gov.journal('review_block'), [])
+
+    def test_no_review_without_a_declared_channel_or_for_a_task_that_ended(self):
+        self.reviewing()
+        other = Governor(self.db, 'undeclared', 1)
+        try:
+            task = other.state.create('t', 'x')['id']
+            other.state.claim(task, 1, 'client', seconds=3600)
+            env = dict(self.env, MODELPILOT_SESSION='undeclared', MODELPILOT_TASK=task)
+            self.assertNotIn('decision', handle('Stop', payload('Stop', self.work), env, clock=lambda: self.now[0]))
+        finally:
+            other.close()
+        self.gov.state.cancel(self.task, self.rev)
+        self.assertNotIn('decision', self.run_hook('Stop'))
+        self.assertEqual(self.gov.journal('review_block'), [])
 
     def test_hooks_never_record_applied_actions(self):
         self.gov.state.correct(self.task, self.rev, 'x')

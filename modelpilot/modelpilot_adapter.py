@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 from .governor import Governor
 from .governed_session import hook_settings, OWNER
-from .hooks import channel_declaration
+from .hooks import REVIEW_AT_STOP, channel_declaration
 
 
 def switch_decision(source, target, prefix_tokens, output_tokens, horizon, available_usd, rates,
@@ -135,6 +135,9 @@ class ModelPilotAdapter:
         self.binding={'MODELPILOT_DB':str(self.db),'MODELPILOT_SESSION':self.session,
                       'MODELPILOT_LIMIT_USD':str(self.limit),'MODELPILOT_TASK':self.task,
                       'MODELPILOT_OWNER':OWNER,'MODELPILOT_HOOK_ERRORS':str(trial.dir/'hook-errors.jsonl')}
+        from .active_policy import reviews_at_finish
+        if self.policy is not None and hasattr(self.policy,'config') and reviews_at_finish(self.policy.config):
+            self.binding[REVIEW_AT_STOP]='1'  # the Stop hook holds the agent's finish once per turn for the review
 
     def proxy_options(self):
         options={'governor':{'db':self.db,'session':self.session,'limit_usd':self.limit,'task':self.task}}
@@ -185,6 +188,7 @@ class ModelPilotAdapter:
                                                         'stop_reason','cost_usd','delivered','brief_bytes')}
                        for e in gov.journal('delegation')]
             stops=[e['payload'] for e in gov.journal('policy_stop')]
+            held=len(gov.journal('review_block'))  # finishes the Stop hook held for a review
             from .policy_actions import escalation_proposal
             try:
                 row=gov.state.get(self.task)
@@ -214,7 +218,8 @@ class ModelPilotAdapter:
              'tools':{'enabled':self.tools,'threshold_bytes':self.threshold,'calls':tool_calls},
              'fixture_policy':None if active else fixture,
              'policy':dict(fixture,stops=stops,refusals=[r.get('refusal') for r in refused],decisions=decisions,
-                           delegation=delegated,parameters=parameters(self.model,self.effort,overrides=self.overrides))
+                           delegation=delegated,held_finishes=held,
+                           parameters=parameters(self.model,self.effort,overrides=self.overrides))
                  if active else None,
              'advisor':{'live':live,'calls':sum(bool(a) for a in advice),'failures':sum(bool(a.get('error')) for a in advice),
                         'auth_failures':sum(bool(a.get('auth')) for a in advice),
