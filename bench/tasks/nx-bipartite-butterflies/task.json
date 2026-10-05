@@ -1,0 +1,39 @@
+{
+ "id": "nx-bipartite-butterflies",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/algorithms/bipartite/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/bipartite/tests"
+ ],
+ "type": "feature",
+ "base": "58edf3456c3369246e0faa016f360c9e57cba156",
+ "reference": "c7d0f4bef90a4b4af3017e1bece1f62e5a8edb68",
+ "hidden_tests": [
+  "networkx/algorithms/bipartite/tests/test_cluster.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/bipartite/tests/test_cluster.py"
+ ],
+ "instruction": "Add butterflies(G, nodes=None) to networkx's bipartite algorithms (networkx/algorithms/bipartite/cluster.py, available as networkx.algorithms.bipartite.butterflies). A butterfly is a complete bipartite subgraph K_{2,2}: a 4-cycle whose nodes alternate between the two sides of an undirected bipartite graph. It returns a dict from each node to the number of butterflies that node belongs to, so each butterfly counts once for each of its four nodes and sum(values) == 4 * the number of butterflies: complete_bipartite_graph(2, 2) gives {0: 1, 1: 1, 2: 1, 3: 1}, K_{3,3} has 9 butterflies (6 at every node), K_{4,4} 36 and K_{5,5} 100. Every node of G is a key, with 0 when it is in no butterfly (isolated nodes included). nodes= only restricts which keys are returned: counts are always computed on the whole graph, and nodes not in G are ignored, as networkx.triangles does. Directed graphs raise NetworkXNotImplemented. Disconnected bipartite graphs work (no AmbiguousSolution). robins_alexander_clustering keeps returning the same values. Add tests.",
+ "source": "https://github.com/networkx/networkx/commit/c7d0f4bef90a4b4af3017e1bece1f62e5a8edb68",
+ "notes": "networkx tuning task (October 4, 2026; user decision to add networkx as a tuning repository to find tasks where Sonnet 5.5 medium fails). Python 3.12 with no numpy/scipy: tests that need them are skipped, and none of the hidden tests do. networkx is not pip-installed in the benchmark venv, so its conftest warns about a \"Mixed NetworkX configuration\" (the nx_loopback test backend); results are the same on base and reference. Tuning only.",
+ "instruction_source": "written from the fix commit message, its pull request discussion where linked, and the hidden tests; describes behavior, not the change"
+}

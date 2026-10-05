@@ -306,6 +306,32 @@ A $0 survey of two repositories outside the corpus (shallow clones in ignored `w
 
 Either would add a tuning repository; the final split and its lock stay unchanged. Neither is built: the repository list was a user decision (September 26), so the choice is the user's.
 
+**networkx tuning tasks (user decision, October 4; $0).** networkx (BSD-3) joins the tuning split, with six tasks from 2026 commits, all in `bench/splits.json` under `tuning` (29 tuning tasks; the final specs and lock are unchanged). The clone is `git clone --shallow-since=2025-06-01 https://github.com/networkx/networkx.git work/bench/repos/networkx`, enough for every base. `bench_tasks.candidates` now takes a test pattern (`--tests '*/tests/'`), because networkx keeps its tests in many `*/tests/` directories. Each task's `test_dir` is the single directory its hidden tests live in, and its suite is that directory, except the weak-views task, whose suite is the whole package. No numpy or scipy is installed: no hidden test is skipped, and the suites skip only tests that need them. networkx isn't pip-installed, so its conftest warns about a "Mixed NetworkX configuration" (its test backend); base and reference behave the same.
+
+| Task | Type, commit date | Change | Hidden tests (reference passes) | Edge tests | Grading time | Why it might separate settings |
+| --- | --- | --- | --- | --- | --- | --- |
+| `nx-connectivity-digraph-cuts` | bug fix, August 21 | 116 source lines | 65 | 6 | 7 s | Five interacting defects in digraph node connectivity; the instruction gives the definition (minimum over ordered pairs) and symptoms, not the defects |
+| `nx-classes-weak-views` | bug fix, September 17 | 151 | 315 | 6 | 56 s (whole package) | A weak reference fix that must still serve views of temporary graphs, copies and pickles |
+| `nx-ismags-monomorphism` | feature, August 18 | 243 | 1,296 | 6 | 31 s | A new search mode inside a 1,200-line subgraph-matching algorithm, with symmetry pruning |
+| `nx-vf2-isolated-nodes` | bug fix, September 9 | 32 | 1,275 | 4 | 32 s | Moderate: a misplaced check, plus matcher reuse |
+| `nx-bipartite-butterflies` | feature, May 23 | 189 | 29 | 5 | 2 s | Moderate: counting with exact per-node and `nodes=` rules |
+| `nx-dag-antichain-width` | feature, July 2 | 53 | 77 | 5 | 10 s | Easier control: a known reduction (Dilworth) |
+
+Candidates left out:
+- **Flow functions taking a callable capacity** (8 source files): its hidden tests import a private helper (`_capacity_function`), so any fix without that exact name fails at import.
+- **Multigraph isomorphism in ISMAGS and VF2++:** its 446 rewritten test lines encode too many details to state in an instruction.
+- **An isomorphism match-helper API change, and changes that need numpy.**
+
+All six pass `bench_tasks validate` (`runs/bench-validate-20261004-180936.json`) and the harness's reference check with their edge suites (32 tests, written before any trial; `bench/edge_tests/README.md`). The ISMAGS instruction states the correct multigraph rule, the one VF2 follows. The upstream fix breaks it on some directed multigraphs, which neither the hidden tests nor the edge suite exercise.
+
+**Proposed screening run (needs the user's go):** the six networkx tasks × `sonnet-5.5`, `opus-5.5` and `sonnet-5.5-low-concise` × 1 trial, seed 0, same limits as 4a (30 turns, $1 per session), all on the subscription:
+
+```
+python3 -m modelpilot.bench --tasks nx-connectivity-digraph-cuts,nx-classes-weak-views,nx-ismags-monomorphism,nx-vf2-isolated-nodes,nx-bipartite-butterflies,nx-dag-antichain-width --arms sonnet-5.5,opus-5.5,sonnet-5.5-low-concise --trials 1 --seed 0 --subscription-arms sonnet-5.5,opus-5.5,sonnet-5.5-low-concise --live --run-budget 1 --claude work/claude-client/node_modules/.bin/claude
+```
+
+$0 API. About $4–8 of subscription use as sent, assuming these tasks cost 1.5–2.5× the harder tasks' trials ($0.12 Sonnet, $0.33 Opus). About 40–60 minutes with grading. It shows whether Sonnet 5.5 medium fails a task Opus passes, now under strict passes, and whether the cheapest default (low concise) fails where medium passes. Either result gives the router a task whose cheapest passing setting differs.
+
 **Proposed next run (approved September 30; ran September 30, October 1 and October 3, above):** the 7 harder tasks × `sonnet-5.5`, `opus-5.5`, `modelpilot` × 1 trial, seed 0, same limits as 4a (30 turns, $1 per session), `--run-budget 15`, with `--subscription-arms sonnet-5.5,opus-5.5` (user request), so only the ModelPilot arm spends API dollars (about $1–2 plus unpriced TypeSafe). Forecast $4.5–9 plus unpriced TypeSafe, assuming these tasks cost 2–4× 4a's per trial ($0.069 Sonnet, $0.170 Opus, $0.068 ModelPilot, cold-equivalent). It shows whether Sonnet 5.5 at medium fails where Opus passes, gives the mid-task step decisions their first live run, and feeds the re-grader (`python3 -m modelpilot.regrade`) for the priced-quality term. Adding `jev-compat-o55` costs about another $1–2.
 
 ## Question

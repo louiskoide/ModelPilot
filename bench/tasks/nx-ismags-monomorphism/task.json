@@ -1,0 +1,41 @@
+{
+ "id": "nx-ismags-monomorphism",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/algorithms/isomorphism/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/isomorphism/tests"
+ ],
+ "type": "feature",
+ "base": "c7887a0b911d9740d11c27339d15cdc8a302ff84",
+ "reference": "ef9815531e684ef711f5a030a09d7ba59a52313c",
+ "hidden_tests": [
+  "networkx/algorithms/isomorphism/tests/test_common.py",
+  "networkx/algorithms/isomorphism/tests/test_ismags.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/isomorphism/tests/test_common.py",
+  "networkx/algorithms/isomorphism/tests/test_ismags.py"
+ ],
+ "instruction": "networkx's ISMAGS class (networkx/algorithms/isomorphism/ismags.py) finds isomorphisms, subgraph isomorphisms and largest common subgraphs, but not monomorphisms. Add ISMAGS.monomorphisms_iter(symmetry=True), a generator of mappings, and ISMAGS.is_monomorphic(symmetry=False), True when at least one exists. For ISMAGS(graph, subgraph, node_match, edge_match), a monomorphism maps every subgraph node to a distinct graph node so that each subgraph edge lands on a graph edge (in the same direction for directed graphs) and node and edge attributes match; unlike a subgraph isomorphism, graph edges between mapped nodes that have no subgraph counterpart are allowed. Mappings are dicts from graph nodes to subgraph nodes, the orientation subgraph_isomorphisms_iter uses. In multigraphs, k parallel edges between two subgraph nodes (or k self-loops on one) need at least k between their images, in the same direction. With symmetry=False the mappings are exactly those that GraphMatcher(graph, subgraph, node_match=..., edge_match=...).subgraph_monomorphisms_iter() yields (DiGraphMatcher for directed graphs), for Graph, DiGraph, MultiGraph and MultiDiGraph; with symmetry=True, mappings that differ only by a symmetry of the subgraph are yielded once, as subgraph_isomorphisms_iter(symmetry=True) does. Existing ISMAGS results (is_isomorphic, isomorphisms_iter, subgraph_is_isomorphic, subgraph_isomorphisms_iter, largest_common_subgraph) must not change. Add tests.",
+ "source": "https://github.com/networkx/networkx/commit/ef9815531e684ef711f5a030a09d7ba59a52313c",
+ "notes": "networkx tuning task (October 4, 2026; user decision to add networkx as a tuning repository to find tasks where Sonnet 5.5 medium fails). Python 3.12 with no numpy/scipy: tests that need them are skipped, and none of the hidden tests do. networkx is not pip-installed in the benchmark venv, so its conftest warns about a \"Mixed NetworkX configuration\" (the nx_loopback test backend); results are the same on base and reference. Tuning only.",
+ "instruction_source": "written from the fix commit message, its pull request discussion where linked, and the hidden tests; describes behavior, not the change"
+}

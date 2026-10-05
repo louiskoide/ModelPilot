@@ -1,0 +1,41 @@
+{
+ "id": "nx-connectivity-digraph-cuts",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/algorithms/connectivity/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/connectivity/tests"
+ ],
+ "type": "bug_fix",
+ "base": "1dda6d2fa692ce82521fa2536f9149d1433b4093",
+ "reference": "416c3e26da0567c9242aa415810dcffca27d625f",
+ "hidden_tests": [
+  "networkx/algorithms/connectivity/tests/test_connectivity.py",
+  "networkx/algorithms/connectivity/tests/test_cuts.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/connectivity/tests/test_connectivity.py",
+  "networkx/algorithms/connectivity/tests/test_cuts.py"
+ ],
+ "instruction": "networkx's node_connectivity and minimum_node_cut (networkx/algorithms/connectivity) give wrong answers on directed graphs, and self-loops and parallel edges throw them off on any graph. The node connectivity of a digraph is the smallest local node connectivity over all ordered pairs of nodes (s, t), and a minimum node cut is a smallest set of nodes whose removal leaves the digraph not strongly connected; a weakly but not strongly connected digraph has node connectivity 0 and an empty minimum node cut. Today both can report values that are too large, and minimum_node_cut can return a set that does not disconnect anything, or an empty set for a strongly connected digraph. For example DiGraph([(0, 1), (1, 2), (2, 0), (3, 0)]) must give node connectivity 0 and minimum_node_cut set(), and the directed triangle DiGraph([(0, 1), (1, 2), (2, 0)]) node connectivity 1 and a one-node minimum cut whose removal leaves it not strongly connected. minimum_st_node_cut(G, s, t) returns the empty set only when there is an edge from s to t: in a digraph an edge from t to s does not stop s from being separated from t (on the directed triangle, minimum_st_node_cut(G, 0, 2) == {1} and minimum_st_node_cut(G, 0, 1) == set()). Self-loops and parallel edges do not change node connectivity or node cuts: a complete graph on 5 nodes keeps node connectivity 4 and a 4-node minimum cut with a self-loop on every node, and as a MultiGraph with every edge doubled, undirected and as to_directed(). Every result must hold with each flow_func the functions accept. Results that are right today, including every undirected simple graph's, must not change. Add tests.",
+ "source": "https://github.com/networkx/networkx/commit/416c3e26da0567c9242aa415810dcffca27d625f",
+ "notes": "networkx tuning task (October 4, 2026; user decision to add networkx as a tuning repository to find tasks where Sonnet 5.5 medium fails). Python 3.12 with no numpy/scipy: tests that need them are skipped, and none of the hidden tests do. networkx is not pip-installed in the benchmark venv, so its conftest warns about a \"Mixed NetworkX configuration\" (the nx_loopback test backend); results are the same on base and reference. Tuning only.",
+ "instruction_source": "written from the fix commit message, its pull request discussion where linked, and the hidden tests; describes behavior, not the change"
+}

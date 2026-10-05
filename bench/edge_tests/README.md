@@ -59,6 +59,23 @@ Harder tuning tasks (added September 29, before any trial ran on them; same rule
 | tomli-decode-error-attrs | 4 | 0 |
 | toolz-compose-annotations | 6 | 0 |
 
+networkx tuning tasks (added October 4, before any trial ran on them; same rules). Where they can, they compare
+against brute force or VF2 on small random graphs:
+
+| Task | Tests | Base passes |
+| --- | --- | --- |
+| nx-connectivity-digraph-cuts | 6 | 1 |
+| nx-classes-weak-views | 6 | 5 |
+| nx-ismags-monomorphism | 6 | 0 |
+| nx-vf2-isolated-nodes | 4 | 2 |
+| nx-bipartite-butterflies | 5 | 1 |
+| nx-dag-antichain-width | 5 | 0 |
+
+One test was dropped before freezing, a test bug found by running it on the reference: it assumed ISMAGS's existing
+subgraph isomorphisms equal VF2's, which they don't on random graphs with self-loops, before or after the fix. The
+ISMAGS suite leaves out directed multigraphs: there the upstream fix itself accepts some mappings that put two
+parallel subgraph edges on one graph edge (9 of 40 random cases), which VF2 rejects.
+
 Two of these tests were corrected before freezing, both test bugs found by running them on the reference: the
 TLRU `popitem()` case expected the wrong item after an eviction, and a condition test paired a lock with a
 condition built on a different lock. `cachetools-cached-condition`'s threaded tests passed three runs in a row.

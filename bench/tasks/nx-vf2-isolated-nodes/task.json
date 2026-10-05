@@ -1,0 +1,41 @@
+{
+ "id": "nx-vf2-isolated-nodes",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/algorithms/isomorphism/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/isomorphism/tests"
+ ],
+ "type": "bug_fix",
+ "base": "9058e2f3029d1dd3b1952448049cb0d8302a06a8",
+ "reference": "56c7b0d0b6141ec0ffa6a9ebb5494417120b7f50",
+ "hidden_tests": [
+  "networkx/algorithms/isomorphism/tests/test_common.py",
+  "networkx/algorithms/isomorphism/tests/test_isomorphvf2.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/isomorphism/tests/test_common.py",
+  "networkx/algorithms/isomorphism/tests/test_isomorphvf2.py"
+ ],
+ "instruction": "networkx's VF2 matchers (GraphMatcher and DiGraphMatcher in networkx/algorithms/isomorphism/isomorphvf2.py) can yield mappings from isomorphisms_iter() for graphs that are not isomorphic: with G1 = empty_graph(2) and G2 = empty_graph(1), is_isomorphic() is False but isomorphisms_iter() yields the subgraph mappings, and the same happens with G1 = disjoint_union(path_graph(2), path_graph(2)) and G2 = path_graph(2), for Graph, DiGraph, MultiGraph and MultiDiGraph. isomorphisms_iter() must yield nothing whenever is_isomorphic() is False, and anything built on it must agree; subgraph_isomorphisms_iter() and subgraph_monomorphisms_iter() keep yielding those mappings. A matcher can be reused: after gm.is_isomorphic() returns True, gm.mapping holds the mapping it found, and list(gm.isomorphisms_iter()) afterwards yields every isomorphism (8 for two undirected 4-cycles, 4 for two directed ones), that mapping among them. Add tests.",
+ "source": "https://github.com/networkx/networkx/commit/56c7b0d0b6141ec0ffa6a9ebb5494417120b7f50",
+ "notes": "networkx tuning task (October 4, 2026; user decision to add networkx as a tuning repository to find tasks where Sonnet 5.5 medium fails). Python 3.12 with no numpy/scipy: tests that need them are skipped, and none of the hidden tests do. networkx is not pip-installed in the benchmark venv, so its conftest warns about a \"Mixed NetworkX configuration\" (the nx_loopback test backend); results are the same on base and reference. Tuning only.",
+ "instruction_source": "written from the fix commit message, its pull request discussion where linked, and the hidden tests; describes behavior, not the change"
+}
