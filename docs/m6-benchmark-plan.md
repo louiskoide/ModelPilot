@@ -381,6 +381,28 @@ Next question for the router: is Sonnet medium's ISMAGS failure repeatable, and 
 
 With the realistic failure price but weight 0.2, the gate jumped to Sonnet 5.5 high on `parse-strftime-directives`' two recorded turn starts (`runs/policy-replay-redo-weight-0.2-20261004.json`). Jev rated Sonnet medium at 0.10–0.12 there, yet Sonnet medium passed that task strictly in every trial, so the jumps would be pure cost. At 0.15 or less nothing jumps, and at 0.09 all 30 recorded turn starts stay at Sonnet 5.5 medium (`runs/policy-replay-redo-fitted-20261004.json`).
 
+**Results: the ModelPilot arm on networkx (October 5): `bench-20261005-084812`.** The user ran the 6 networkx tuning tasks × `modelpilot` × 3 trials, seed 4, code `7b78f8c`, pinned 2.1.284, API key, live Jev advisor, strict grading. It asks whether an advisor spots the task where Sonnet 5.5 has a real failure mode before the work starts. 18/18 trials complete and eligible, $2.38 known API spend plus unpriced TypeSafe calls, no unknown cost. Per task, against the fixed arms of the screening run and the ISMAGS repeat pooled (`runs/networkx-per-task-20261005.json`, `runs/paired-networkx-modelpilot-20261005.json`):
+
+| Task | low concise | Sonnet 5.5 medium | `modelpilot` | Opus 5.5 |
+| --- | --- | --- | --- | --- |
+| `nx-bipartite-butterflies` | 1/1, $0.052 | 1/1, $0.057 | 3/3, $0.071 | 1/1, $0.171 |
+| `nx-classes-weak-views` | 1/1, $0.145 | 1/1, $0.230 | 3/3, $0.226 | 1/1, $0.452 |
+| `nx-connectivity-digraph-cuts` | 1/1, $0.176 | 1/1, $0.183 | 3/3, $0.213 | 1/1, $0.466 |
+| `nx-dag-antichain-width` | 1/1, $0.043 | 1/1, $0.051 | 3/3, $0.066 | 1/1, $0.135 |
+| `nx-ismags-monomorphism` | 3/4, $0.156 | 2/4, $0.221 | 2/3, $0.210 | 4/4, $0.732 |
+| `nx-vf2-isolated-nodes` | 1/1, $0.067 | 1/1, $0.098 | 3/3, $0.067 | 1/1, $0.192 |
+| Per task (each task once) | $0.107, 47 s | $0.140, 75 s | $0.142, 103 s | $0.358, 115 s |
+
+Strict passes, cold-equivalent cost per trial (fixed arms API-key equivalent; `modelpilot` provider-only, a lower bound since the router is unpriced; its measured cost was $0.132, 17 of 18 trials starting warm).
+
+- **ModelPilot ran Sonnet 5.5 medium throughout,** so it tied fixed Sonnet 5.5 medium ($0.142 against $0.140 a task; 6 tasks, no claims). Every decision stayed: 17 turn starts on cost (`current_is_cheapest`), 1 without advice (TypeSafe hit its deadline, `APIUserAbortError`), and 12 mid-task steps. There were no jumps.
+- **Jev didn't spot the hard task.** On `nx-ismags-monomorphism` it said Sonnet 5.5 at 0.87–0.92 confidence (P(Opus) 0.04–0.07, effort high), and one of the three trials failed, on 10 hidden tests that mix a multigraph with a simple graph: the case every Sonnet miss on this task has failed. It leaned towards Opus only on tasks Sonnet always passes: `nx-classes-weak-views` (Opus chosen at 0.26–0.33, P(Opus) 0.50–0.55, xhigh; Sonnet 5/5) and `nx-connectivity-digraph-cuts` (P(Opus) 0.38–0.39, xhigh; Sonnet 5/5). This matches October 4's fit: Jev's warnings don't predict the misses.
+- **Trusting Jev more would not have helped** (`runs/policy-replay-networkx-20261005.json`, $0). Replayed at `jev_weight` 0.2 everything still stays. At 0.35 the policy raises Sonnet to high effort on ISMAGS (3 turn starts) and VF2 (1). With Jev alone (no calibration), it raises Sonnet to xhigh on weak-views (3) and connectivity (2), and to high on ISMAGS (3) and VF2 (1). No setting moves to Opus, the only setting measured to fix ISMAGS. Sonnet at high effort on ISMAGS is unmeasured.
+- **ISMAGS so far:** Opus 4/4, Sonnet 7/11 (medium 4/7 fixed and ModelPilot together, low concise 3/4), every Sonnet miss on the mixed-graph case. One-sided Fisher p = 0.24: still suggestive, not shown.
+- **The cost forecast runs short on the larger networkx tasks.** The turn-start forecast uses the tuning split's task shape. Three tasks spent 1.8–2.6× it (weak-views, connectivity, ISMAGS), the other three 0.5–0.8×. Each overrun fired a spend step: 12 in all, every one a stay, each costing one Jev call.
+- **The agents didn't use the host test tool.** `run_tests` ran in 1 of 18 trials, and never passed; tests ran through Bash. So no tests step fired. The delegation arm's forced review, which waits for the first passing `run_tests`, would have fired in 0 of 18 trials here (and in 1 of the 2 earlier ModelPilot trials on `tomli-decode-error-attrs`). Before a live delegation probe, the review needs a trigger that doesn't depend on that tool. Candidates: the agent's turn end (the `Stop` hook, which already blocks once to deliver a correction, offline-verified October 4), or Bash test runs recognized by the `PostToolUse` hook.
+- **Wall time** was 103 s a task against 75 s for fixed Sonnet medium. That's the same gap seen on the 7 harder tasks (100 s against 51 s), and still unexplained.
+
 **Proposed next run (approved September 30; ran September 30, October 1 and October 3, above):** the 7 harder tasks × `sonnet-5.5`, `opus-5.5`, `modelpilot` × 1 trial, seed 0, same limits as 4a (30 turns, $1 per session), `--run-budget 15`, with `--subscription-arms sonnet-5.5,opus-5.5` (user request), so only the ModelPilot arm spends API dollars (about $1–2 plus unpriced TypeSafe). Forecast $4.5–9 plus unpriced TypeSafe, assuming these tasks cost 2–4× 4a's per trial ($0.069 Sonnet, $0.170 Opus, $0.068 ModelPilot, cold-equivalent). It shows whether Sonnet 5.5 at medium fails where Opus passes, gives the mid-task step decisions their first live run, and feeds the re-grader (`python3 -m modelpilot.regrade`) for the priced-quality term. Adding `jev-compat-o55` costs about another $1–2.
 
 ## Question
