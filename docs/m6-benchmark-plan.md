@@ -349,6 +349,38 @@ $0 API. About $4–8 of subscription use as sent, assuming these tasks cost 1.5�
 
 Next question for the router: is Sonnet medium's ISMAGS failure repeatable, and does low concise pass it reliably? A repeat of that one task × the three settings × 3 trials would cost about $3.5–4 as sent (its trials cost $0.25, $0.79 and $0.18 as sent).
 
+**Results: the ISMAGS repeat (October 4): `bench-20261004-195612`.** User's go: `nx-ismags-monomorphism` × the same three arms × 3 trials, seed 3, code `572e317`, subscription, strict grading. 9/9 trials complete, $0 API, $3.68 as sent. One Opus trial's cost is unknown: one request failed with an SSL error between the proxy and the API after 13 successful ones (as on September 30). Its fix was already written and passes, so it counts as a pass but is left out of dollar figures. With the screening trial, 4 trials per setting:
+
+| | Strict passes | Cost per trial (cold, API-key equivalent) | Cost per strict pass | Wall time |
+| --- | ---: | ---: | ---: | ---: |
+| `sonnet-5.5-low-concise` | 3/4 | $0.156 | $0.21 | 57 s |
+| `sonnet-5.5` (medium) | 2/4 | $0.221 | $0.44 | 100 s |
+| `opus-5.5` | 4/4 | $0.732 (3 priced) | $0.73 | 181 s |
+
+- **A real Sonnet failure mode, at both settings.** Sonnet failed 3 of 8 trials, always on the hidden tests that mix a multigraph with a simple graph (one medium fix also miscounted paths in a cycle). Opus passed all four. One-sided Fisher exact p = 0.26 against every Sonnet trial, 0.21 against medium: suggestive, not shown.
+- **Low concise does no worse than medium here** (3/4 against 2/4) at 70% of the cost.
+- **Per strict pass, Opus is still the dearest setting**: $0.73 against $0.21 for low concise. That figure divides cost by pass rate, as if a failure were seen and redone. In a session the hidden tests are invisible, so a router must choose up front. Opus is then a quality purchase: about +25 points of pass rate over low concise for +$0.58 a task, or +50 points over medium for +$0.51. It pays only if a failed task is worth more than about $2.3 (against low concise) or $1.0 (against medium). That's the priced-quality term the user asked for on September 29, which still needs a dollar value per failure.
+- No advisor has seen these tasks yet: the ModelPilot arm never ran on networkx, so whether Jev would flag this task is unknown.
+
+**What a failure costs: the realistic redo (October 4, $0; user request).** The user asked that a failed task be priced by what it really costs to redo it. Every failed Sonnet 5.5 or Opus 5.5 trial so far (22, under strict grading) ended with the session reporting success and its fix in place; only Haiku's 2 failures hit the turn limit. So a failure is noticed after the session: the failed run is spent, and the task is redone in a new, cold session, on Opus 5.5 since it's the stronger setting, retried while it fails. `runs/redo-cost-20261004.py` prices that from every recorded trial, per task: E(s) = C_s + (1 − p_s) × C_opus / p_opus, with C the cold-equivalent cost per trial and p the strict pass rate (`runs/redo-cost-20261004.json`; 28 tuning tasks, `mi-reshape-multidim` left out because its only Opus trial has unknown cost). Human time to notice and report a bug isn't counted, so these are lower bounds.
+
+| First setting, failures redone on Opus | Expected cost per task |
+| --- | ---: |
+| Sonnet 5.5 low concise | $0.106 |
+| Sonnet 5.5 medium | $0.132 |
+| Opus 5.5 | $0.253 |
+| Perfect per-task choice of the three (hindsight) | $0.101 |
+
+- **A failure is worth about $0.25 on average**: a cold Opus redo session. That's $0.17 on the 4a tasks, $0.48 on `tomli-decode-error-attrs`, where Opus itself passes half the time, and $0.73 on `nx-ismags-monomorphism`. It is far below the $1–2.3 at which paying for Opus up front would pay on the ISMAGS task.
+- **Opus up front is cheapest only on the two tasks Sonnet almost never gets right**, `parse-decimal-grouping` and `tomli-decode-error-attrs`. Opus first pays when Sonnet's pass rate on a task is below roughly its cost ratio to Opus (0.2–0.4).
+- **Perfect routing would save at most 5% against always running low concise** ($0.005 a task), and only with hindsight. A router that can't tell those two tasks apart up front saves nothing. The cheaper default is worth 4× what routing could add.
+
+**The switch policy now prices failures this way.** In `configs/modelpilot-policy.json`:
+- `recovery.wasted_fraction` is 1.0, from 0.5: an unnoticed failure spends the whole run.
+- `calibration.jev_weight` is 0.09, from 0.2: the posterior mean fitted on strict outcomes.
+
+With the realistic failure price but weight 0.2, the gate jumped to Sonnet 5.5 high on `parse-strftime-directives`' two recorded turn starts (`runs/policy-replay-redo-weight-0.2-20261004.json`). Jev rated Sonnet medium at 0.10–0.12 there, yet Sonnet medium passed that task strictly in every trial, so the jumps would be pure cost. At 0.15 or less nothing jumps, and at 0.09 all 30 recorded turn starts stay at Sonnet 5.5 medium (`runs/policy-replay-redo-fitted-20261004.json`).
+
 **Proposed next run (approved September 30; ran September 30, October 1 and October 3, above):** the 7 harder tasks × `sonnet-5.5`, `opus-5.5`, `modelpilot` × 1 trial, seed 0, same limits as 4a (30 turns, $1 per session), `--run-budget 15`, with `--subscription-arms sonnet-5.5,opus-5.5` (user request), so only the ModelPilot arm spends API dollars (about $1–2 plus unpriced TypeSafe). Forecast $4.5–9 plus unpriced TypeSafe, assuming these tasks cost 2–4× 4a's per trial ($0.069 Sonnet, $0.170 Opus, $0.068 ModelPilot, cold-equivalent). It shows whether Sonnet 5.5 at medium fails where Opus passes, gives the mid-task step decisions their first live run, and feeds the re-grader (`python3 -m modelpilot.regrade`) for the priced-quality term. Adding `jev-compat-o55` costs about another $1–2.
 
 ## Question
