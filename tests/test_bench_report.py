@@ -455,6 +455,24 @@ class CostComponentTests(unittest.TestCase):
     def test_a_priced_request_without_the_write_split_cannot_be_split(self):
         self.assertIsNone(bench_report.cost_components([row(0.0, 0, 5000, split=False)], RATES))
 
+    def test_the_policys_consults_and_notes_count_in_the_trials_cost(self):
+        side = dict(row(1.5, 0, 0, input_tokens=8000, output=900, model='claude-opus-5'), kind='side_call',
+                    purpose='consult', status='ok')
+        rows = [row(0.0, 0, 5000, output=300), side, row(2.0, 5000, 400, output=120)]
+        total = sum(r['cost_usd'] for r in rows)
+        self.assertAlmostEqual(sum(bench_report.cost_components(rows, RATES).values()), total)
+        attributed = cache_attribution(rows, RATES)
+        self.assertAlmostEqual(attributed['measured_cost_usd'], total)
+        self.assertAlmostEqual(attributed['cold_equivalent_cost_usd'], total)
+        self.assertEqual(bench_report.setting_path(rows)['delegation'],
+                         [{'purpose': 'consult', 'model': 'claude-opus-5', 'effort': None, 'status': 'ok',
+                           'cost_usd': side['cost_usd']}])
+        # These rows carry no tools, so they are Claude Code's own side requests; the consult is not among them.
+        self.assertEqual(bench_report.setting_path(rows)['side']['requests'], 2)
+        unknown = cache_attribution(rows[:1] + [dict(side, cost_usd=None)] + rows[2:], RATES)
+        self.assertIsNone(unknown['measured_cost_usd'])
+        self.assertEqual(unknown['cold_equivalent_unknown'], 'unpriced_side_call')
+
 
 class ModelPilotBreakdownTests(unittest.TestCase):
     def mp(self, task, passed, cost, steps, *, stop='success', calls=()):

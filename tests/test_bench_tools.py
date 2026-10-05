@@ -191,7 +191,7 @@ class ToolTrialTests(unittest.TestCase):
 
     OPUS_RATES = dict(test_bench.RATES, **{'claude-opus-5-5': dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)})
 
-    def advised_trial(self, name, script, model, effort, limit=1, config=None, **kwargs):
+    def advised_trial(self, name, script, model, effort, limit=1, config=None, arm='modelpilot', **kwargs):
         """The active arm with Jev's real bridge and code, its TypeSafe answer stubbed ($0, never eligible). The policy
         runs with calibration off unless a config is given: the stub's answer is what should drive its moves."""
         if config is None:
@@ -202,7 +202,7 @@ class ToolTrialTests(unittest.TestCase):
                 'effort': {'choice': effort, 'confidence': .85,
                            'probabilities': {e: .85 if e == effort else .0375 for e in EFFORTS}}}
         with mock.patch.object(switch_policy, 'load', return_value=config):
-            adapter = bench.arm_adapter('modelpilot', limit, 1, advisor_stub=stub)
+            adapter = bench.arm_adapter(arm, limit, 1, advisor_stub=stub)
             with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
                 return self.modelpilot_trial(name, script, adapter, **kwargs)
 
@@ -256,6 +256,71 @@ class ToolTrialTests(unittest.TestCase):
         self.assertEqual(record['path']['steps'], [{'setting': ['claude-sonnet-5-5', 'xhigh'], 'requests': len(bodies),
                                                     'cost_usd': record['path']['steps'][0]['cost_usd']}])
         self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
+
+    def test_the_delegate_arm_reviews_a_passing_fix_through_the_real_client(self):
+        """modelpilot-delegate: when the host-run suite first passes, Opus 5.5 reviews a brief of host facts and its
+        advice joins Claude Code's own trailing system note, kept there on every later request."""
+        script = [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
+                  {'tool': 'mcp__modelpilot__search', 'input': {'query': 'def '}},
+                  {'tool': 'mcp__modelpilot__run_tests', 'input': {}},
+                  {'tool': 'mcp__modelpilot__search', 'input': {'query': 'return'}},
+                  {'text': 'Done.'}]
+        record = self.advised_trial('delegate', script, 'claude-sonnet-5-5', 'medium', arm='modelpilot-delegate',
+                                    rates=self.OPUS_RATES)
+        self.assertTrue(record['passed'], record['grade'])
+        bodies = [json.loads(b) for b in self.upstream.bodies]
+        consult, = [b for b in bodies if not b.get('stream') and not b.get('tools') and b['model'] == 'claude-opus-5-5']
+        brief = consult['messages'][0]['content']
+        self.assertIn('## Task', brief)
+        self.assertIn('passed', brief)  # the host-run suite
+        self.assertIn('pkg/__init__.py', brief)  # the diff against the trial's base commit
+        main = [b for b in bodies if b.get('stream') and b.get('tools')]
+        self.assertEqual({b['model'] for b in main}, {'claude-sonnet-5-5'})  # the conversation never moved
+        holding = [i for i, b in enumerate(main) if 'synthetic output' in json.dumps(b['messages'])]
+        self.assertEqual(holding, list(range(holding[0], len(main))))  # from delivery on, every request carries it
+        first = main[holding[0]]['messages']
+        where = next(i for i, m in enumerate(first) if 'synthetic output' in json.dumps(m))
+        self.assertEqual((first[where]['role'], where), ('system', len(first) - 1))  # Claude Code's trailing note
+        texts = [b['text'] for b in first[where]['content']]
+        self.assertTrue(texts[-1].startswith('[ModelPilot ledger update, code '), texts)
+        for later in main[holding[0] + 1:]:
+            self.assertEqual([b['text'] for b in later['messages'][where]['content']], texts)
+        accounting = record['accounting']
+        self.assertEqual((accounting['side_calls'], accounting['side_purposes']), (1, {'consult': 1}))
+        self.assertTrue(accounting['tokens_match'], accounting)  # the client's own requests only
+        self.assertTrue(accounting['cost_complete'], accounting)
+        self.assertAlmostEqual(accounting['cost_usd'], accounting['known_cost_usd'])
+        self.assertGreater(accounting['side_cost_usd'], 0)
+        routing = record['routing']
+        self.assertTrue(routing['accounting_matches'], routing)
+        delegated, = routing['policy']['delegation']
+        self.assertEqual((delegated['kind'], delegated['reason'], delegated['setting'], delegated['delivered']),
+                         ('consult', 'forced', ['claude-opus-5-5', 'medium'], True))
+        self.assertEqual(routing['policy']['parameters']['overrides']['delegation']['consult']['force'], ['tests_pass'])
+        self.assertEqual(record['path']['delegation'][0]['purpose'], 'consult')
+
+    def test_a_handoff_note_through_the_real_client(self):
+        cfg = switch_policy.with_overrides(switch_policy.load(), {'delegation': {'handoff_note': {'enabled': True}}})
+        cfg['calibration']['enabled'] = False
+        script = self.STALLED + [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
+                                 {'tool': 'mcp__modelpilot__run_tests', 'input': {}}, {'text': 'Done.'}]
+        record = self.advised_trial('note', script, 'claude-sonnet-5-5', 'high', config=cfg, rates=self.OPUS_RATES)
+        self.assertTrue(record['passed'], record['grade'])
+        bodies = [json.loads(b) for b in self.upstream.bodies]
+        note, = [b for b in bodies if not b.get('stream') and b.get('tools')]
+        main = [b for b in bodies if b.get('stream') and b.get('tools')]  # the client's own: always streamed
+        self.assertEqual([(b['model'], policy_actions.effective_effort(b)) for b in main],
+                         [('claude-sonnet-5-5', 'high')]*4 + [('claude-opus-5-5', 'high')]*3)
+        # The note's side request doesn't count as one of the agent's requests, so no step follows the move.
+        self.assertEqual([d['trigger'] for d in record['routing']['policy']['decisions']], ['turn_start', 'stuck_evidence'])
+        self.assertEqual(note['model'], 'claude-sonnet-5-5')  # the model being left, on its own cached prefix
+        self.assertEqual(note['tools'], main[3]['tools'])
+        for opus in main[4:]:
+            self.assertIn('which wrote this handoff note', json.dumps(opus['messages']))
+        self.assertNotIn('handoff note', json.dumps(main[3]['messages']))
+        self.assertEqual(record['accounting']['side_purposes'], {'handoff_note': 1})
+        self.assertTrue(record['accounting']['tokens_match'], record['accounting'])
+        self.assertTrue(record['routing']['accounting_matches'], record['routing'])
 
     def test_a_budget_refusal_ends_the_session_as_a_budget_stop(self):
         script = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}}] +

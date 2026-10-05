@@ -163,6 +163,25 @@ class ScheduleTests(unittest.TestCase):
         failed = bench.accounting(rows + [{'kind': 'messages', 'http_status': None, 'cost_usd': None}], {})
         self.assertEqual((failed['rejected_requests'], failed['transport_failures']), (1, 1))
 
+    def test_the_policys_side_calls_are_billed_but_not_matched_against_the_client(self):
+        rows = [{'kind': 'messages', 'http_status': 200, 'cost_usd': .01, 'usage': {'input_tokens': 5}},
+                {'kind': 'side_call', 'purpose': 'consult', 'http_status': 200, 'status': 'ok', 'cost_usd': .03,
+                 'usage': {'input_tokens': 900}},
+                {'kind': 'side_call', 'purpose': 'consult', 'status': 'refused', 'cost_usd': 0.0}]
+        final = {'total_cost_usd': .01, 'modelUsage': {'claude-sonnet-5-5': {'inputTokens': 5}}}
+        result = bench.accounting(rows, final)
+        self.assertEqual((result['requests'], result['side_calls'], result['side_refused']), (1, 1, 1))
+        self.assertAlmostEqual(result['cost_usd'], .04)
+        self.assertAlmostEqual(result['side_cost_usd'], .03)
+        self.assertEqual(result['side_purposes'], {'consult': 1})
+        self.assertTrue(result['tokens_match'])  # the client never saw the consult
+        self.assertTrue(result['client_cost_matches'])
+        unpriced = bench.accounting(rows + [{'kind': 'side_call', 'purpose': 'handoff_note', 'status': 'transport_error',
+                                             'cost_usd': None}], final)
+        self.assertIsNone(unpriced['cost_usd'])  # unknown stays unknown
+        self.assertIsNone(unpriced['side_cost_usd'])
+        self.assertNotIn('side_calls', bench.accounting(rows[:1], final))  # other arms' records are unchanged
+
     def test_jev_accounting_is_provider_only_and_skips_the_client_price(self):
         rows = [{'kind': 'messages', 'http_status': 200, 'cost_usd': .01, 'usage': {'input_tokens': 5}}]
         final = {'total_cost_usd': .04, 'modelUsage': {'jev-router': {'inputTokens': 5}}}

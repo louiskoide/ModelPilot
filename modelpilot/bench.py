@@ -88,6 +88,15 @@ ARMS = {
                    'checkout': 'work/jev-router-compat', 'models': POLICY_TIERS,
                    'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}),
                    'policy': 'docs/m6-modelpilot-policy.md'},
+    # The same arm with delegation on (October 5; docs/m6-modelpilot-policy.md, "Delegation"): priced consults and
+    # handoff notes, plus a consult made whatever its price when the host-run suite first passes, to measure what a
+    # review by a stronger setting is worth. Reported as its own arm.
+    'modelpilot-delegate': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'medium', 'advisor': 'jev',
+                            'checkout': 'work/jev-router-compat', 'models': POLICY_TIERS,
+                            'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}),
+                            'policy': 'docs/m6-modelpilot-policy.md',
+                            'policy_overrides': {'delegation': {'consult': {'enabled': True, 'force': ['tests_pass']},
+                                                                'handoff_note': {'enabled': True}}}},
 }
 RUNNABLE = ('fixed', 'jev')
 AUTHS = ('api_key', 'subscription')
@@ -143,7 +152,7 @@ def arm_adapter(arm, budget_usd, sessions, jev_key=None, advisor_stub=None):
                if jev_key or advisor_stub is not None else None)
     return ModelPilotAdapter(limit_usd=budget_usd * sessions, mode='active', tools=True, arm_id=arm,
                              model=ARMS[arm]['model'], effort=ARMS[arm]['effort'], advisor=advisor,
-                             models=ARMS[arm].get('models'))
+                             models=ARMS[arm].get('models'), overrides=ARMS[arm].get('policy_overrides'))
 
 
 def schedule(tasks, arms, trials, seed):
@@ -168,6 +177,11 @@ def accounting(rows, final, jev=False):
     unpriced = sum(r.get('cost_usd') is None for r in messages)
     known = sum(r['cost_usd'] for r in messages if r.get('cost_usd') is not None)
     client = final.get('total_cost_usd')
+    # The ModelPilot policy's own consults and handoff notes: billed, but never seen by the client.
+    side_rows = [r for r in rows if r.get('kind') == 'side_call']
+    sides = [r for r in side_rows if r.get('status') != 'refused']
+    side_unpriced = sum(r.get('cost_usd') is None for r in sides)
+    side_known = sum(r['cost_usd'] for r in sides if r.get('cost_usd') is not None)
     out = {'requests': len(messages), 'http_statuses': [r.get('http_status') for r in messages],
            # Answered by the API with an error; a transport failure (no status) is not a rejection.
            'rejected_requests': sum(isinstance(r.get('http_status'), int) and r['http_status'] != 200 for r in messages),
@@ -176,18 +190,24 @@ def accounting(rows, final, jev=False):
            'count_tokens_requests': sum(r.get('kind') == 'count_tokens' for r in rows),  # free; never in requests
            'models': [r.get('model') for r in messages], 'unpriced_requests': unpriced,
            # Unknown cost stays unknown: a trial with any unpriced request has no dollar total.
-           'cost_usd': known if unpriced == 0 and messages else None, 'known_cost_usd': known,
-           'cost_if_rejected_free_usd': if_free, 'rejected_assumption': 'API error responses counted as $0 (unconfirmed)',
+           'cost_usd': known + side_known if unpriced == 0 and side_unpriced == 0 and messages else None,
+           'known_cost_usd': known + side_known,
+           'cost_if_rejected_free_usd': if_free + side_known if if_free is not None and side_unpriced == 0 else None,
+           'rejected_assumption': 'API error responses counted as $0 (unconfirmed)',
            'cost_scope': 'provider_only_router_unpriced' if jev else 'complete',
            'proxy_tokens': proxy_tokens, 'client_tokens': client_tokens,
            'tokens_match': bool(usage) and proxy_tokens == client_tokens,
            'client_cost_usd': client,
            'client_cost_basis': 'sentinel_model_unknown_price' if jev else 'client_model_table',
-           'client_cost_matches': None if jev else
+           'client_cost_matches': None if jev else  # the client's own requests only
            isinstance(client, (int, float)) and unpriced == 0 and abs(client - known) < 1e-6,
            'first_byte_seconds': [r.get('first_byte_seconds') for r in messages]}
     if jev:
         out['router_cost_usd'] = None
+    if side_rows:
+        out.update(side_calls=len(sides), side_refused=len(side_rows) - len(sides), side_unpriced=side_unpriced,
+                   side_purposes=dict(Counter(r.get('purpose') for r in sides)),
+                   side_cost_usd=side_known if side_unpriced == 0 else None)
     return out
 
 
@@ -803,7 +823,7 @@ def modelpilot_manifest(arms, budget_usd, sessions):
     """What each ModelPilot arm ran, for the manifest; None without one."""
     from .active_policy import parameters
     return {a: {'mode': 'active (user-approved September 26, benchmark arm only)',
-                'parameters': parameters(ARMS[a]['model'], ARMS[a]['effort']),
+                'parameters': parameters(ARMS[a]['model'], ARMS[a]['effort'], overrides=ARMS[a].get('policy_overrides')),
                 'policy_sha256': hashlib.sha256((ROOT/ARMS[a]['policy']).read_bytes()).hexdigest(),
                 'governor_limit_usd': budget_usd * sessions,
                 'limit_basis': 'wire cost, admitted while measured spend is below the limit (the client budget-stop '

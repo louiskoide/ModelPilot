@@ -16,26 +16,32 @@ The client starts at the arm's fallback setting (S0, used when Jev is unavailabl
 wired by the adapter. R6: every Messages request is admitted before it is sent, on measured spend
 against the same per-task limit as the other arms; unknown cost halts, and a refused request is
 answered by the proxy with an API-style error and never reaches the provider. A move also needs the
-limit to cover its full rebuild. Not implemented: per-message effort, Haiku targets and worker drafts.
+limit to cover its full rebuild. Delegation (config 'delegation', off in the modelpilot arm): the gate may
+consult a stronger setting on a brief of host facts instead of switching, and a mid-task model switch may carry
+a handoff note from the model being left; both are side requests the proxy sends (ProxyServer.side_call), and
+their text is delivered into the conversation and kept in place (delegation.py). Not implemented: Haiku targets
+and worker drafts.
 """
 import hashlib
 import json
 import threading
 import time
-from . import switch_policy
+from . import delegation, switch_policy
 from .fixture_dispatch import Dispatcher, ProxyPolicy
-from .policy_actions import effort_anchor, escalation_proposal, transform_request, with_effort_messages
+from .policy_actions import effort_anchor, effort_message, escalation_proposal, transform_request
 from .proxy import request_effort
 
 SIGNALS = {'repeated_error': 'the same error keeps repeating', 'edit_oscillation': 'edits keep going back and forth',
            'stalled_tests': 'the test suite stopped improving', 'retry_language': 'the agent keeps retrying'}
 STEP_CAUSES = {'tests_now_pass': 'the test suite now passes', 'tests_now_fail': 'the test suite now fails',
-               'spend_overrun': 'spending since the last decision has reached its forecast'}
+               'spend_overrun': 'spending since the last decision has reached its forecast',
+               'tests_pass': 'the test suite passes'}
 
 
-def parameters(model, effort, config=None):
-    """The arm's frozen parameters: its fallback start, where it decides, and the switch rule."""
-    cfg = config or switch_policy.load()
+def parameters(model, effort, config=None, overrides=None):
+    """The arm's frozen parameters: its fallback start, where it decides, and the switch rule. overrides: the arm's
+    changes to the config file (bench.ARMS 'policy_overrides'), recorded with it."""
+    cfg = switch_policy.with_overrides(config or switch_policy.load(), overrides)
     return {'S0': [model, effort], 'advisor': 'Jev (compat checkout): its model question unchanged, plus one effort question',
             'decision_points': cfg['decision_points'], 'effort_changes_at': cfg['effort_changes_at'],
             'step': {k: cfg['step'][k] for k in ('enabled', 'min_requests_between', 'max_per_revision', 'overrun_factor')},
@@ -46,7 +52,7 @@ def parameters(model, effort, config=None):
                            'of their rewrite, and enough confidence); never climbs. P_ok blends Jev with measured '
                            'pass rates when calibration is on; a failure is redone at the turn\'s effort',
             'stop_on': 'stuck with no stronger setting', 'stuck': 'm2 heuristic-v1 (score >= 3, window 6)',
-            'config_sha256': hashlib.sha256(switch_policy.CONFIG.read_bytes()).hexdigest(),
+            'config_sha256': hashlib.sha256(switch_policy.CONFIG.read_bytes()).hexdigest(), 'overrides': overrides or {},
             'admission': 'measured spend below the per-task limit; a move also needs the limit to cover its full '
                          'rebuild (request bytes/3 tokens at the dearest write rate), not its output allowance',
             'per_message_effort': {k: cfg['per_message_effort'][k] for k in ('enabled', 'placement', 'beta')},
@@ -54,6 +60,8 @@ def parameters(model, effort, config=None):
                                 outcomes=cfg['calibration']['outcomes']),
             'cost_model': {k: cfg[k] for k in ('defaults', 'effort_output_factor', 'effort_request_factor',
                                                'bytes_per_token')},
+            'delegation': {kind: {k: v for k, v in switch_policy.delegation(cfg, kind).items() if k != 'about'}
+                           for kind in ('consult', 'handoff_note')},
             'not_implemented': (['per-message effort'] if not cfg['per_message_effort']['enabled'] else [])
                                + ['Haiku targets', 'worker drafts (lever 3)']}
 
@@ -101,6 +109,9 @@ class ActivePolicy(ProxyPolicy):
         # task -> [(index in the client's messages, effort)]: effort messages sent; task -> (message count, digest) of the
         # previous main-loop request, to see that the client only appended since
         self.effort_messages, self.history = {}, {}
+        # task -> [((mode, index in the client's messages), text)]: consult advice and handoff notes delivered
+        self.deliveries, self.briefs = {}, {}
+        self.workspace = self.base = None  # the trial's workspace and base commit (set by the adapter), for briefs
 
     def check_upstream(self, origin):
         pass  # ProxyServer accepts only direct Anthropic HTTPS or loopback HTTP (offline tests).
@@ -153,16 +164,24 @@ class ActivePolicy(ProxyPolicy):
             return None  # the turn start decides first
         last = decided[-1]
         spend = gov.spend(task, last['created'])
+        # The policy's own consults and notes count as spend, not as the agent's requests.
+        spend['requests'] -= sum(e['payload'].get('request_id') is not None and e['payload'].get('status') != 'refused'
+                                 for e in gov.journal('delegation') if e['task'] == task and e['created'] >= last['created'])
         if (sum(e['payload']['trigger'] == 'step' for e in decided) >= cfg['max_per_revision']
                 or spend['requests'] < cfg['min_requests_between']):
             return None
         facts = {'requests': spend['requests'], 'spent_usd': spend['spent_usd'],
                  'forecast_usd': last['payload'].get('forecast_usd')}
-        suite = gov.state.observations(task, revision, 'failures')
-        if (len(suite) == 2 and (suite[0]['failures'] == 0) != (suite[1]['failures'] == 0)
-                and suite[0]['seq'] > last['payload'].get('suite_seq', 0)):
+        suite = gov.state.observations(task, revision, 'failures', 1000)
+        new = bool(suite) and suite[0]['seq'] > last['payload'].get('suite_seq', 0)
+        # The suite passes for the first time in this revision (a review point for a forced consult)
+        first_pass = new and suite[0]['failures'] == 0 and all(s['failures'] != 0 for s in suite[1:])
+        if new and len(suite) >= 2 and (suite[0]['failures'] == 0) != (suite[1]['failures'] == 0):
             cause = 'tests_now_pass' if suite[0]['failures'] == 0 else 'tests_now_fail'
-            return 'step', f"{revision}/step/tests/{suite[0]['seq']}", dict(facts, cause=cause)
+            return 'step', f"{revision}/step/tests/{suite[0]['seq']}", dict(facts, cause=cause, first_pass=first_pass)
+        consult = switch_policy.delegation(self.config, 'consult')
+        if first_pass and consult['enabled'] and 'tests_pass' in consult.get('force', ()):
+            return 'step', f"{revision}/step/tests/{suite[0]['seq']}", dict(facts, cause='tests_pass', first_pass=True)
         forecast = facts['forecast_usd']
         if not spend['unknown'] and forecast and spend['spent_usd'] >= cfg['overrun_factor'] * forecast:
             return 'step', f"{revision}/step/spend/{last['seq']}", dict(facts, cause='spend_overrun')
@@ -194,10 +213,24 @@ class ActivePolicy(ProxyPolicy):
         reach = switch_policy.content_positions(current.get('messages') or [])
         prof = switch_policy.profile(self.config, current, self.warm(task, setting, now),
                                      entries=self.entries(task, now, reach))
+        prof['history'] = any(m.get('role') == 'assistant' for m in request.get('messages') or [])
+        consult = switch_policy.delegation(self.config, 'consult')
+        if consult['enabled'] and trigger in consult['at']:
+            done = sum(e['payload']['kind'] == 'consult' for e in gov.journal('delegation')
+                       if e['task'] == task and e['revision'] == revision)
+            text = self.brief(gov, task, trigger, facts, setting)
+            self.briefs[key] = text
+            prof.update(consults_left=consult['max_per_revision'] - done,
+                        brief_tokens=len(text.encode()) / self.config['bytes_per_token'],
+                        force_consult=bool(facts) and (facts['cause'] in consult['force'] or
+                                                       bool(facts.get('first_pass')) and 'tests_pass' in consult['force']))
         decision = switch_policy.decide(self.config, rates, usable, setting, prof, trigger)
+        if decision['action'] != 'consult':
+            self.briefs.pop(key, None)
         suite = gov.state.observations(task, revision, 'failures', 1)
         decision.update(point=key, suite_seq=suite[0]['seq'] if suite else 0, step=facts,
-                        profile={k: prof[k] for k in ('prefix_tokens', 'messages_tokens', 'warm', 'warm_entries')},
+                        profile={k: prof[k] for k in ('prefix_tokens', 'messages_tokens', 'warm', 'warm_entries', 'history',
+                                                      'consults_left', 'brief_tokens', 'force_consult') if k in prof},
                         advice=None if advice is None else
                         {k: advice.get(k) for k in ('model', 'effort', 'metrics', 'usage', 'router_model', 'ms', 'stub',
                                                     'error', 'status', 'auth', 'prompt_chars', 'prompt_sha256', 'models')})
@@ -205,12 +238,14 @@ class ActivePolicy(ProxyPolicy):
             gov._journal('advisor_decision', decision, task, revision)
         return decision
 
-    def plan(self, gov, rates, task, request):
-        """The decision (_plan), then, with per-message effort on, the body rewritten so effort is carried by effort-only
-        system messages and the top-level effort stays the client's: the cached conversation then survives an effort
-        change. A deferral that must still carry earlier effort messages gets a 'forward' body."""
-        result = self._plan(gov, rates, task, request)
-        if not self.config['per_message_effort']['enabled'] or result.get('status') in ('stop', 'not_main_loop'):
+    def plan(self, gov, rates, task, request, side=None):
+        """The decision (_plan), then the body rewritten to carry the task's context: with per-message effort on, effort
+        rides in effort-only system messages and the top-level effort stays the client's, so the cached conversation
+        survives an effort change; consult advice and handoff notes are put back where they were first delivered. A
+        deferral that must still carry them gets a 'forward' body. side: the proxy's side_call for this request (sends
+        consults and notes); without it nothing is delegated."""
+        result = self._plan(gov, rates, task, request, side)
+        if result.get('status') in ('stop', 'not_main_loop'):
             return result
         admitted = result.get('status') == 'admitted'
         if admitted:
@@ -218,42 +253,148 @@ class ActivePolicy(ProxyPolicy):
             setting = (ticket['target_model'], ticket['target_effort'])
         else:
             setting = (request['model'], request_effort(request))
-        body = self.carry_effort(task, request, result['request'] if admitted else request, setting)
+        body = self.carry(task, request, result['request'] if admitted else request, setting)
         if body is None:
             return result
+        body, delivered = body
+        extra = {'deliveries': delivered} if delivered else {}
         beta = self.config['per_message_effort']['beta']
-        extra = {'beta': beta} if beta else {}
+        if beta:
+            extra['beta'] = beta
         return dict(result, request=body, **extra) if admitted else dict(result, forward=body, **extra)
 
-    def carry_effort(self, task, request, body, setting):
-        """body with the task's effort messages, top-level effort set back to the client's; a new effort message at
-        this request's frontier when the setting's effort differs from the one in effect. None: nothing to change."""
-        model, effort = setting
+    def _per_message(self, request, setting):
+        return (self.config['per_message_effort']['enabled'] and switch_policy.per_message(self.config, setting[0])
+                and (request.get('thinking') or {}).get('type') == 'adaptive' and setting[1] is not None)
+
+    def carry(self, task, request, body, setting):
+        """(body, deliveries carried) with the task's effort messages (top-level effort set back to the client's; a new
+        effort message at this request's frontier when the setting's effort differs from the one in effect, at a turn
+        start) and its deliveries. None: nothing to change."""
         messages = request.get('messages') or []
-        if (not switch_policy.per_message(self.config, model) or (request.get('thinking') or {}).get('type') != 'adaptive'
-                or len(body.get('messages') or []) != len(messages) or effort is None):
-            return None  # not supported here: the top-level effort (the caller's body) carries it
+        if len(body.get('messages') or []) != len(messages):
+            return None  # a body that isn't this request's messages: leave it as it is
+        effort, per_message = setting[1], self._per_message(request, setting)
         client_effort = request_effort(request)
         with self.lock:
             sent, seen = self.effort_messages.get(task, []), self.history.get(task)
+            delivered = self.deliveries.get(task, [])
             if seen and (len(messages) < seen[0] or prefix_digest(messages[:seen[0]]) != seen[1]):
-                sent = []  # the client rewrote its history (e.g. compaction): the cache is gone anyway, start over
+                sent, delivered = [], []  # the client rewrote its history (e.g. compaction): the cache is gone anyway
             self.history[task] = (len(messages), prefix_digest(messages))
             current = sent[-1][1] if sent else client_effort
             # Only at a turn start: inside a turn's tool loop an effort message does not take effect.
-            if effort != current and user_turns(request)[1]:
+            if per_message and effort != current and user_turns(request)[1]:
                 anchor = effort_anchor(messages, self.config['per_message_effort']['placement'])
                 if sent and anchor <= sent[-1][0]:
                     sent = sent[:-1]  # a second change at the same frontier replaces the first
                 if effort != (sent[-1][1] if sent else client_effort):
                     sent = sent + [(anchor, effort)]
-            self.effort_messages[task] = sent
-        if not sent:
-            return None  # the client's own effort is in effect and nothing was ever changed
-        return with_effort_messages(dict(body, output_config=dict(body.get('output_config') or {}, effort=client_effort)),
-                                    sent)
+            self.effort_messages[task], self.deliveries[task] = sent, delivered
+        out = self.render(body, client_effort, sent if per_message else [], delivered)
+        if out is None and delivered:  # the client's messages no longer hold a delivery where it went: stop carrying them
+            with self.lock:
+                self.deliveries[task] = []
+            delivered = []
+            out = self.render(body, client_effort, sent if per_message else [], [])
+        return None if out is None else (out, len(delivered))
 
-    def _plan(self, gov, rates, task, request):
+    @staticmethod
+    def render(body, client_effort, sent, delivered):
+        """body with effort messages and deliveries in place; None when there is nothing to add or a delivery can't be
+        placed."""
+        if not sent and not delivered:
+            return None
+        if sent:
+            body = dict(body, output_config=dict(body.get('output_config') or {}, effort=client_effort))
+        return delegation.apply(body, delivered, [(index, effort_message(e)) for index, e in sent])
+
+    def rendered(self, task, request, body, setting):
+        """What this request would be sent as at setting, from the state carried so far (no new effort message, no
+        state change): the side request for a handoff note reads that cached prefix."""
+        with self.lock:
+            sent, delivered = list(self.effort_messages.get(task, [])), list(self.deliveries.get(task, []))
+        out = self.render(body, request_effort(request), sent if self._per_message(request, setting) else [], delivered)
+        return out or body
+
+    def deliver(self, task, request, text):
+        """Keep text in the conversation from this request on; False when the request has nowhere to put it."""
+        where = delegation.frontier(request.get('messages') or [])
+        if not where:
+            return False
+        with self.lock:
+            self.deliveries[task] = self.deliveries.get(task, []) + [(where, text)]
+        return True
+
+    def brief(self, gov, task, trigger, facts, setting):
+        spec = switch_policy.delegation(self.config, 'consult')
+        if trigger == 'stuck_evidence':
+            signals = gov.state.recommend(task).get('signals') or {}
+            why = (delegation.WHY['stuck_evidence'] + ': ' +
+                   ('; '.join(text for name, text in SIGNALS.items() if signals.get(name)) or 'progress has stalled') + '.')
+        else:
+            why = delegation.WHY['tests_pass' if facts.get('first_pass') and facts['cause'] == 'tests_now_pass'
+                                 else facts['cause']]
+        return delegation.brief(gov, task, why, setting, facts, self.workspace, self.base, spec)
+
+    def route_brief(self, text, setting, target):
+        """Jev's second role: who answers the brief. Its model and effort when that setting is stronger than the
+        current one, else the gate's target. Returns (setting, Jev's answer or None)."""
+        if self.advisor is None or not switch_policy.delegation(self.config, 'consult')['route_brief']:
+            return target, None
+        answer = self.advisor.ask({'messages': [{'role': 'user', 'content': text}]}, setting[0], self.catalog,
+                                  self.config['effort_order'])
+        if not answer or answer.get('error'):
+            return target, answer
+        model, effort = (answer.get('model') or {}).get('choice'), (answer.get('effort') or {}).get('choice')
+        routed = (model, effort if model in self.config['models'] and self.config['models'][model]['efforts'] else None)
+        if routed in switch_policy.settings(self.config) and routed != tuple(setting) and \
+                switch_policy.at_least(self.config, routed, setting):
+            return routed, answer
+        return target, answer
+
+    def consult(self, gov, task, revision, point, decision, request, setting, side):
+        """Ask the consult setting about the brief, once per decision point, and deliver its advice."""
+        spec = switch_policy.delegation(self.config, 'consult')
+        if side is None or any(e['payload'].get('point') == point[1] for e in gov.journal('delegation') if e['task'] == task):
+            return None
+        text = self.briefs.pop(point[1], None) or self.brief(gov, task, point[0], point[2], setting)
+        who, answer = self.route_brief(text, setting, tuple(decision['consult']))
+        result = side('consult', delegation.consult_request(text, who, spec), spec['timeout_seconds'])
+        advice = delegation.reply_text(result.get('message'), spec['advice_max_bytes'])
+        delivered = bool(advice) and self.deliver(task, request, delegation.framing(
+            'consult', advice, gov.channel_code(), f'{who[0]} at {who[1]} effort'))
+        entry = {'kind': 'consult', 'point': point[1], 'trigger': point[0], 'reason': decision['reason'],
+                 'gate_setting': decision['consult'], 'setting': list(who), 'status': result.get('status'),
+                 'http_status': result.get('http_status'), 'stop_reason': (result.get('message') or {}).get('stop_reason'),
+                 'request_id': result.get('request_id'), 'cost_usd': result.get('cost_usd'), 'delivered': delivered,
+                 'brief_bytes': len(text.encode()), 'brief': text, 'advice': advice,
+                 'routing': None if answer is None else {k: answer.get(k) for k in ('model', 'effort', 'error', 'usage', 'ms')}}
+        with gov.db:
+            gov._journal('delegation', entry, task, revision)
+        return entry
+
+    def handoff_note(self, gov, task, revision, point, request, current, setting, target, side):
+        """Before a model move with earlier work in the conversation: the model being left writes a note in a side
+        request on its own cached prefix; the note is delivered with the move."""
+        spec = switch_policy.delegation(self.config, 'handoff_note')
+        if (not spec['enabled'] or side is None or setting[0] == target[0]
+                or not any(m.get('role') == 'assistant' for m in request.get('messages') or [])):
+            return None
+        body = delegation.note_request(self.rendered(task, request, current, setting), spec)
+        result = side('handoff_note', body, spec['timeout_seconds']) if body else {'status': 'no_frontier'}
+        note = delegation.reply_text(result.get('message'), spec['note_max_bytes'])
+        delivered = bool(note) and self.deliver(task, request, delegation.framing(
+            'handoff_note', note, gov.channel_code(), f'{setting[0]} at {setting[1]} effort'))
+        entry = {'kind': 'handoff_note', 'point': point[1], 'trigger': point[0], 'source': list(setting),
+                 'target': list(target), 'status': result.get('status'), 'http_status': result.get('http_status'),
+                 'stop_reason': (result.get('message') or {}).get('stop_reason'), 'request_id': result.get('request_id'),
+                 'cost_usd': result.get('cost_usd'), 'delivered': delivered, 'note': note}
+        with gov.db:
+            gov._journal('delegation', entry, task, revision)
+        return entry
+
+    def _plan(self, gov, rates, task, request, side=None):
         """Returns a ticket for an applied request, a stop, or a deferral dict (forward the original)."""
         if request.get('model') != self.client_model or not request.get('tools'):
             return {'status': 'not_main_loop'}
@@ -279,6 +420,8 @@ class ActivePolicy(ProxyPolicy):
             with gov.db:
                 gov._journal('policy_stop', stop, task, revision)
             return stop  # the task ends unfinished, with no retry
+        if decision and decision['action'] == 'consult':
+            self.consult(gov, task, revision, point, decision, request, setting, side)
         deferral = None
         if decision and decision['action'] == 'jump' and tuple(decision['target']) != setting:
             jump = dict(proposal, action='jump', trigger=point[0], decision=point[1],
@@ -288,6 +431,7 @@ class ActivePolicy(ProxyPolicy):
             except ValueError as exc:
                 ticket = {'status': 'deferred', 'reason': 'refused:' + str(exc)}
             if ticket['status'] == 'admitted':
+                self.handoff_note(gov, task, revision, point, request, current, setting, tuple(decision['target']), side)
                 self.sent(task, decision['target'], now, tokens, positions)
                 return dict(ticket, kind='escalation')
             deferral = ticket

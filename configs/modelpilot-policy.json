@@ -48,6 +48,20 @@
     "about": "Effort rides in an effort-only system message (beta mid-conversation-output-config-2026-07-01; Claude Code 2.1.284 already sends its older spelling per-turn-control-2026-07-01) placed after the client's own effort message, which 2.1.284 puts on the system note after the prompt; the top-level effort stays the client's. Every earlier message is put back where it was first sent. Evidence (runs/thinking-probe-per-message-effort-20261001-160146, $0.93): a message at a turn start raised thinking to the native xhigh level at every step with the cache kept; changes inside the tool loop, by message or top-level, changed nothing and also kept the cache (the client's message outranks the top-level effort). So new messages are added only at turn starts (effort_changes_at)."
   },
   "effort_changes_at": ["turn_start"],
+  "delegation": {
+    "about": "Two more ways to act on Jev's advice mid-task, besides staying and switching (docs/m6-modelpilot-policy.md, 'Delegation'). Both are side requests the proxy sends itself, admitted and settled by the governor, and delivered into the main conversation as system-role text kept in place on every later request. Off in the modelpilot arm; the modelpilot-delegate arm turns them on.",
+    "consult": {
+      "enabled": false, "at": ["step", "stuck_evidence"], "force": [], "max_per_revision": 2,
+      "effectiveness": 0.5, "brief_max_bytes": 24000, "test_output_bytes": 4000, "output_tokens": 1500,
+      "advice_tokens": 400, "advice_max_bytes": 6000, "max_tokens": 16000, "route_brief": true, "timeout_seconds": 240,
+      "about": "Consult Jev's model at Jev's effort on a bounded brief of host facts (task instruction, latest run_tests result, diff against the trial's base commit, why it is asking), when that setting is stronger than the current one and the gate prices it below staying and switching. P_consult = P_ok(current) + effectiveness x (P_ok(target) - P_ok(current)); effectiveness, output_tokens (thinking included, at medium; scaled by the effort output factor) and advice_tokens are guesses. route_brief: Jev answers who takes the brief. force: step causes ('tests_now_pass', 'tests_now_fail', 'spend_overrun', or 'tests_pass': the latest run_tests passes for the first time in the revision) at which a consult is made whatever its price, for measurement only."
+    },
+    "handoff_note": {
+      "enabled": false, "output_tokens": 1200, "note_tokens": 400, "note_max_bytes": 4000, "max_tokens": 8000,
+      "timeout_seconds": 180,
+      "about": "Before a mid-task model switch (the request holds earlier assistant turns), the model being left writes a short state-of-the-work note in a side request that reuses its cache; the note goes into the new model's first request. Its cost (the prefix read, output_tokens including thinking, and note_tokens written into the new conversation) is added to the switch; its benefit is unmeasured and not priced."
+    }
+  },
   "calibration": {
     "enabled": true, "jev_weight": 0.09, "applies_at": ["turn_start", "step"],
     "outcomes": {

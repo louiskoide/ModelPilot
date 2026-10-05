@@ -34,6 +34,14 @@ with that of each direct move:
   again on the strongest), so staying on a setting likely to fail carries the same downstream risk as
   moving to Jev's setting now.
 
+- delegation (config 'delegation', off by default): at the decision points consult.at lists, a consult
+  candidate keeps the current setting and asks a stronger one (Jev's model at Jev's effort) once, on a
+  bounded brief: consult + P_consult x run(current) + (1 - P_consult) x recover(current), with
+  P_consult = P_ok(current) + effectiveness x (P_ok(target) - P_ok(current)). consult.force makes a consult at
+  the step causes it lists whatever its price (measurement only). With handoff_note on, a model move
+  whose request holds earlier work also pays for the note the model being left writes; its benefit isn't
+  priced.
+
 A move goes straight to its target and never climbs. It must beat staying by the hysteresis, scaled
 by how plausible the current setting is: the margin protects a setting that may well be enough from
 marginal moves, not one that is almost certain to fail. Downgrades also need a multiple of their
@@ -91,6 +99,7 @@ def load(path=CONFIG):
             or not (pme['beta'] is None or isinstance(pme['beta'], str) and pme['beta'] and ',' not in pme['beta'])):
         raise ValueError('per_message_effort: enabled is a boolean, placement before_result or after_result, beta null '
                          'or one header value')
+    _check_delegation(cfg)
     for model, spec in cfg['models'].items():
         if any(e not in order for e in spec['efforts']):
             raise ValueError(f'{model}: an effort is not in effort_order')
@@ -99,6 +108,50 @@ def load(path=CONFIG):
     if not settings(cfg):
         raise ValueError('No candidate settings')
     return cfg
+
+
+FORCE_CAUSES = ('tests_now_pass', 'tests_now_fail', 'spend_overrun', 'tests_pass')
+
+
+def _check_delegation(cfg):
+    consult, note = delegation(cfg, 'consult'), delegation(cfg, 'handoff_note')
+    sizes = ('brief_max_bytes', 'test_output_bytes', 'advice_max_bytes', 'max_tokens', 'output_tokens', 'advice_tokens')
+    if type(consult['enabled']) is not bool or (consult['enabled'] and not (
+            isinstance(consult['at'], list) and set(consult['at']) <= {'step', 'stuck_evidence'}
+            and isinstance(consult['force'], list) and set(consult['force']) <= set(FORCE_CAUSES)
+            and _count(consult['max_per_revision'], 0) and all(_count(consult[k], 1) for k in sizes)
+            and _at_least_number(consult['effectiveness'], 0) and consult['effectiveness'] <= 1
+            and type(consult['route_brief']) is bool and _positive(consult['timeout_seconds']))):
+        raise ValueError('delegation.consult: enabled is a boolean; when enabled, at among step and stuck_evidence, force among '
+                         f'{FORCE_CAUSES}, max_per_revision >= 0, positive integer sizes, effectiveness in [0, 1], '
+                         'route_brief a boolean, a positive timeout')
+    if type(note['enabled']) is not bool or (note['enabled'] and not (
+            all(_count(note[k], 1) for k in ('output_tokens', 'note_tokens', 'note_max_bytes', 'max_tokens'))
+            and _positive(note['timeout_seconds']))):
+        raise ValueError('delegation.handoff_note: enabled is a boolean; when enabled, positive integer sizes and timeout')
+
+
+def with_overrides(cfg, overrides):
+    """A copy of a loaded config with an arm's overrides merged in (nested dicts merge; other values replace), then
+    checked as load() checks the file. Only keys the config already has can be overridden."""
+    out = json.loads(json.dumps(cfg))
+
+    def merge(into, update, where):
+        for k, v in update.items():
+            if k not in into:
+                raise ValueError(f'Unknown policy setting {where}{k}')
+            if isinstance(v, dict) and isinstance(into[k], dict):
+                merge(into[k], v, f'{where}{k}.')
+            else:
+                into[k] = v
+    merge(out, overrides or {}, '')
+    _check_delegation(out)
+    return out
+
+
+def delegation(cfg, kind):
+    """The consult or handoff_note settings; a config without them has delegation off."""
+    return (cfg.get('delegation') or {}).get(kind) or {'enabled': False}
 
 
 def _rank(cfg, model):
@@ -225,6 +278,35 @@ def switch_cost(cfg, rates, current, target, prof, warm=None, reuse=False):
     return tokens * extra / 1e6
 
 
+def _horizon(cfg, setting, prof):
+    return max(1.0, prof['horizon_requests'] * _scale(cfg, setting, prof)[0])
+
+
+def consult_cost(cfg, rates, current, target, prof):
+    """One consult: the brief at the target's uncached input price, its output (thinking included) at the target's
+    output price, scaled by effort, and the advice written into the main conversation once and read after."""
+    spec, write = delegation(cfg, 'consult'), 'write_' + cfg['cache_write_ttl']
+    brief = prof.get('brief_tokens') or spec['brief_max_bytes'] / cfg['bytes_per_token']
+    base = prof.get('output_effort')
+    output = spec['output_tokens'] * (cfg['effort_output_factor'][target[1]] / cfg['effort_output_factor'][base]
+                                      if target[1] and base else 1.0)
+    rt, rc = rates[target[0]], rates[current[0]]
+    advice = spec['advice_tokens'] * (rc[write] + (_horizon(cfg, current, prof) - 1) * rc['read'])
+    return (brief * rt['input'] + output * rt['output'] + advice) / 1e6
+
+
+def note_cost(cfg, rates, current, target, prof):
+    """A handoff note before a model move: the model being left reads its prefix and writes the note, which the
+    target then writes into its conversation and reads after. Nothing for a move that keeps the model, or before any
+    work (no earlier assistant turn), or with notes off."""
+    spec = delegation(cfg, 'handoff_note')
+    if not spec['enabled'] or current[0] == target[0] or not prof.get('history'):
+        return 0.0
+    rc, rt, write = rates[current[0]], rates[target[0]], 'write_' + cfg['cache_write_ttl']
+    return (prof['prefix_tokens'] * rc['read'] + spec['output_tokens'] * rc['output'] +
+            spec['note_tokens'] * (rt[write] + (_horizon(cfg, target, prof) - 1) * rt['read'])) / 1e6
+
+
 def measured_ok(cfg, setting):
     """The tuning split's pass rate, with a uniform prior ((passed + 1) / (trials + 2)), of the strongest measured
     setting that setting is at least as strong as; None when no measured setting is that weak."""
@@ -255,6 +337,20 @@ def _at_least_number(value, floor):
 
 def _label(setting):
     return f'{setting[0]}/{setting[1]}'
+
+
+def _consult_target(cfg, current, model, effort, forced=False):
+    """Who a consult asks: Jev's model at Jev's effort (a separate request runs at any effort), when that is stronger
+    than the current setting; for a forced consult, else the strongest model at that effort or the current one."""
+    every = settings(cfg)
+    strongest = max((m for m, _ in every), key=lambda m: _rank(cfg, m))
+    for m, e in [(model, effort)] + ([(strongest, effort), (strongest, current[1])] if forced else []):
+        if m not in cfg['models']:
+            continue
+        c = (m, e if cfg['models'][m]['efforts'] else None)
+        if c in every and c != tuple(current) and at_least(cfg, c, current):
+            return c
+    return None
 
 
 def decide(cfg, rates, advice, current, prof, trigger):
@@ -366,16 +462,38 @@ def _decide(cfg, rates, advice, current, prof, trigger):
         r = recovery(c)
         recover = wasted * run + switch_cost(cfg, rates, c, r, prof, warm=True) + from_scratch(r)
         p, switch = probability(c), switch_cost(cfg, rates, current, c, prof, reuse=True)
-        row = {'setting': _label(c), 'p_ok': p, 'switch_usd': switch, 'run_usd': run, 'recover_usd': recover,
-               'expected_usd': switch + p * run + (1 - p) * recover, '_setting': c}
+        note = note_cost(cfg, rates, current, c, prof)  # the handoff note the model being left writes, if on
+        row = {'setting': _label(c), 'p_ok': p, 'switch_usd': switch + note, 'run_usd': run, 'recover_usd': recover,
+               'expected_usd': switch + note + p * run + (1 - p) * recover, '_setting': c}
+        if note:
+            row['note_usd'] = note
         if calibrated:
             row.update(p_jev=jev_ok(c), p_measured=measured_ok(cfg, c))
         rows.append(row)
-    out['candidates'] = [{k: v for k, v in r.items() if k != '_setting'} for r in rows]
     stay = rows[0]
+    consult = delegation(cfg, 'consult')
+    asked = (consult['enabled'] and trigger in consult['at']
+             and prof.get('consults_left', consult.get('max_per_revision', 0)) > 0)
+    forced = bool(asked and prof.get('force_consult'))
+    adviser = _consult_target(cfg, current, jm, je, forced) if asked else None
+    if adviser:  # stay, and ask a stronger setting once on a bounded brief
+        p = stay['p_ok'] + consult['effectiveness'] * max(0.0, probability(adviser) - stay['p_ok'])
+        cost = consult_cost(cfg, rates, current, adviser, prof)
+        rows.append({'setting': 'consult:' + _label(adviser), 'p_ok': p, 'switch_usd': 0.0, 'consult_usd': cost,
+                     'run_usd': stay['run_usd'], 'recover_usd': stay['recover_usd'],
+                     'expected_usd': cost + p * stay['run_usd'] + (1 - p) * stay['recover_usd'], '_setting': current})
+    out['candidates'] = [{k: v for k, v in r.items() if k != '_setting'} for r in rows]
+    if forced and adviser:  # measurement only: consult.force names this step's cause
+        return dict(out, action='consult', consult=list(adviser), reason='forced')
     best = min(rows, key=lambda r: r['expected_usd'])
     if best is stay:
         return dict(out, action='stay', reason='current_is_cheapest')
+    if adviser and best is rows[-1]:
+        benefit, required = stay['expected_usd'] - best['expected_usd'], cfg['hysteresis_usd'] * stay['p_ok']
+        out.update(benefit_usd=benefit, required_usd=required, downgrade=False)
+        if benefit <= required:
+            return dict(out, action='stay', reason='not_worth_switching')
+        return dict(out, action='consult', consult=list(adviser), reason='expected_cost_lower')
     target = best['_setting']
     downgrade = is_downgrade(cfg, target, current)
     if downgrade:
