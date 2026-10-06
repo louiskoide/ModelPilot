@@ -260,8 +260,10 @@ class ToolTrialTests(unittest.TestCase):
     def test_the_delegate_arm_reviews_at_the_finish_through_the_real_client(self):
         """modelpilot-delegate: when the agent ends its turn, the Stop hook holds the finish once and Opus 5.5 reviews a
         brief of host facts; its advice joins Claude Code's trailing system note on the request that continues the turn,
-        and stays there. The agent never runs the host test tool, as in 17 of 18 networkx trials."""
+        and stays there. The agent never runs the host test tool, as in 17 of 18 networkx trials, but tests through Bash,
+        and the brief carries that run."""
         script = [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
+                  {'tool': 'Bash', 'input': {'command': 'python3 -m unittest 2>&1 | tail -3', 'description': 'tests'}},
                   {'tool': 'mcp__modelpilot__search', 'input': {'query': 'def '}},
                   {'text': 'Done.'},
                   {'tool': 'mcp__modelpilot__search', 'input': {'query': 'return'}},
@@ -276,6 +278,9 @@ class ToolTrialTests(unittest.TestCase):
         self.assertIn('## Task', brief)
         self.assertIn('ended its turn', brief)
         self.assertIn('has not run the host test tool', brief)
+        # The agent's own run, as the real client returned it.
+        self.assertRegex(brief, r'1 Bash call ran tests\. .*\nNewest:\n\$ python3 -m unittest 2>&1 \| tail -3\n'
+                                r'output \(tail\):\nRan \d+ tests? in [\d.]+s\n\nOK\n')
         self.assertIn('pkg/__init__.py', brief)  # the diff against the trial's base commit
         main = [b for b in bodies if b.get('stream') and b.get('tools')]
         self.assertEqual({b['model'] for b in main}, {'claude-sonnet-5-5'})  # the conversation never moved

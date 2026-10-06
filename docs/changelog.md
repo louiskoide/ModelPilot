@@ -2,6 +2,17 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 5, 2026: the consult brief carries the agent's own test runs
+
+Offline, $0, user request (plan item 1, first half). Details: `docs/m6-modelpilot-policy.md`, "Delegation".
+
+- **Cause, confirmed.** In all 6 probe trials (`bench-20261005-153506`) the agent ran pytest through Bash before its finish; the 2 `run_tests` calls (tomli trials 0 and 2) came after the review, so `latest_tests` had nothing and every brief said no tests ran.
+- **Fix.** `delegation.agent_test_runs` reads the request's conversation: a Bash call counts when a shell line outside here-document bodies runs pytest, `python -m pytest`/`unittest`, tox, nox or `make test`/`check` (after env assignments and wrappers such as `timeout 60` or `uv run`); `grep pytest`, `pip install pytest` and the `@pytest.mark` lines of a heredoc edit don't. The brief gets a new section, "The agent's own test runs (Bash)": each run's test lines and the output the client returned, the newest with its tail, earlier ones by their last summary line, within `test_output_bytes`, labelled as the agent's commands, not host-run. The host's `run_tests` section is unchanged. `CONSULT_SYSTEM` and the delivery framing now say "test runs so far". Ad hoc check scripts (`python3 /tmp/d.py`, `python3 - <<EOF`) aren't recognized.
+- **Checked on the probe's data.** Rebuilt from each trial's transcript up to the held finish, all 6 briefs would have shown 1–3 runs (0.5–1.6 KB), the newest passing in each; two tomli briefs also list earlier failing runs. The real-client delegate test (2.1.284) now has the agent test through Bash and asserts the brief carries its `python3 -m unittest` line and output.
+- **Replay.** `policy_replay --arm modelpilot-delegate` on the probe is identical to HEAD's (replay uses recorded `brief_tokens`). Unrelated gap seen on the way: replay doesn't restore `force_consult`, so the 6 forced finish reviews replay as `stay`.
+- **Tests.** 601 offline tests pass on Python 3.12 with the pinned 2.1.284 client first on PATH, none skipped (`runs/consult-brief-agent-tests-regression-py312.log`); the 3 new ones are in `tests/test_delegation.py`, and the real-client delegate test in `tests/test_bench_tools.py` gained its Bash run.
+- Next: the tuning comparison of switching against consulting (live; plan before approval).
+
 ## October 5, 2026: delegation probe written up
 
 $0 write-up of the user's live probe `bench-20261005-153506` (`modelpilot-delegate` on `tomli-decode-error-attrs` and `nx-ismags-monomorphism` × 3, $1.45 measured plus unpriced TypeSafe calls). Details: `docs/m6-benchmark-plan.md`, "Results: the delegation probe".
