@@ -6,13 +6,19 @@ today's config and rates, and reports where the decision changes beside each tri
 
     python3 -m modelpilot.policy_replay runs/bench-<ts> [runs/bench-<ts2> ...] [--arm ARM] [--out FILE]
 
---arm replays through that arm's overrides of the config (bench.ARMS 'policy_overrides', e.g. modelpilot-delegate).
+--arm replays through that arm's overrides of the config (bench.ARMS 'policy_overrides', e.g. modelpilot-delegate)
+and from that arm's start (S0): while a trial is still on the start it recorded (every decision so far the same), a
+decision is replayed from the arm's start instead, and a recorded stay there counts as a stay on the arm's start.
+That asks what the gate would decide from a new start (low concise since October 6) at the points the trial reached.
 Only recorded decision points replay: a point a newer config would add (a forced review at the agent's finish or
 when the suite first passes) was never journaled, so it can't appear here.
 
-The journal's token counts were estimated at the bytes_per_token of the recording (4 in every run so far);
-they are rescaled to the current value. A decision after one whose replay differs is marked path_diverged:
-the trial would not have reached it the same way. Databases are opened read-only; nothing is called.
+The journal's token counts were estimated at the bytes_per_token of the recording: the trial's recorded parameters
+give it since October 3 (2.8), and older trials, which don't, used 4 (--recorded-bytes-per-token). They are rescaled to
+the current value. Before October 6 every trial was replayed at 4, which put the October 5-6 runs' prefixes 1.43x high.
+
+A decision after one whose replay differs is marked path_diverged: the trial would not have reached it the same way.
+Databases are opened read-only; nothing is called.
 """
 import argparse
 from collections import Counter
@@ -25,6 +31,10 @@ from . import switch_policy
 RECORDED_BYTES_PER_TOKEN = 4  # configs/modelpilot-policy.json at every recorded run before October 3
 
 
+def _parameters(record):
+    return ((record.get('routing') or {}).get('policy') or {}).get('parameters') or {}
+
+
 def recorded_decisions(db_path):
     """The advisor decisions journaled in one trial's governor database, in order."""
     db = sqlite3.connect(f'file:{Path(db_path).resolve()}?immutable=1', uri=True)
@@ -35,10 +45,12 @@ def recorded_decisions(db_path):
         db.close()
 
 
-def replay(payload, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_TOKEN):
-    """switch_policy.decide on one journaled decision; None when the journal lacks what it needs."""
+def replay(payload, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_TOKEN, current=None):
+    """switch_policy.decide on one journaled decision, from current (default: the recorded setting); None when the
+    journal lacks what it needs."""
     profile = payload.get('profile')
-    if not profile or not payload.get('current') or payload.get('trigger') not in switch_policy.TRIGGERS:
+    current = current or payload.get('current')
+    if not profile or not current or payload.get('trigger') not in switch_policy.TRIGGERS:
         return None
     scale = recorded_bytes_per_token / cfg['bytes_per_token']
     prof = dict(cfg['defaults'], prefix_tokens=profile['prefix_tokens'] * scale,
@@ -51,7 +63,7 @@ def replay(payload, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_TOKE
         prof['brief_tokens'] = profile['brief_tokens']
     advice = payload.get('advice')
     usable = advice if advice and not advice.get('error') else None  # as active_policy.decide
-    return switch_policy.decide(cfg, rates, usable, payload['current'], prof, payload['trigger'])
+    return switch_policy.decide(cfg, rates, usable, current, prof, payload['trigger'])
 
 
 def _setting(decision):
@@ -62,8 +74,16 @@ def _p_current(decision):
     return (decision.get('candidates') or [{}])[0].get('p_ok')
 
 
-def replay_run(run_dir, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_TOKEN):
-    """One row per journaled decision of every ModelPilot trial in a run."""
+def recorded_start(record, payloads):
+    """The setting a trial started on: its arm's recorded S0, else its first decision's current setting."""
+    start = _parameters(record).get('S0')
+    return tuple(start or (payloads[0].get('current') if payloads else None) or ())
+
+
+def replay_run(run_dir, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_TOKEN, start=None):
+    """One row per journaled decision of every ModelPilot trial in a run. recorded_bytes_per_token: for trials that
+    don't record their own. start: replay from this setting while a trial is still on the start it recorded (see the
+    module docstring)."""
     from .bench_report import cold_cost, load_run
     _, records = load_run(run_dir, rates)
     outcome = {(r['task'], r['arm'], r.get('trial', 0)): r for r in records}
@@ -75,13 +95,24 @@ def replay_run(run_dir, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_
         if (record.get('routing') or {}).get('kind') != 'modelpilot_policy':
             continue
         diverged = False
-        for payload in recorded_decisions(db_path):
-            new = replay(payload, cfg, rates, recorded_bytes_per_token)
+        per_token = (_parameters(record).get('cost_model') or {}).get('bytes_per_token') or recorded_bytes_per_token
+        payloads = recorded_decisions(db_path)
+        began = recorded_start(record, payloads)
+        rebase = bool(start and began and tuple(start) != began)
+        for payload in payloads:
+            on_start = rebase and not diverged and tuple(payload.get('current') or ()) == began
+            current = list(start) if on_start else payload.get('current')
+            new = replay(payload, cfg, rates, per_token, current=current)
             row = {'run': Path(run_dir).name, 'task': task, 'arm': arm, 'trial': trial, 'point': payload.get('point'),
-                   'trigger': payload.get('trigger'), 'current': '/'.join(payload.get('current') or []),
+                   'trigger': payload.get('trigger'), 'current': '/'.join(str(x) for x in current or []),
                    'recorded': {'action': payload.get('action'), 'target': _setting(payload),
                                 'p_ok_current': _p_current(payload)},
                    'trial_passed': record.get('passed'), 'trial_cost_usd': cold_cost(record) if record else None}
+            baseline = row['recorded']
+            if on_start:  # what the recorded decision was, read from the new start: a stay there is a stay here
+                stayed = baseline['target'] == '/'.join(str(x) for x in began)
+                baseline = dict(baseline, target=row['current'] if stayed else baseline['target'])
+                row.update(recorded_current='/'.join(str(x) for x in began), baseline=baseline)
             if new is None:
                 row['replayed'] = None
                 row['status'] = 'not_replayable'
@@ -89,7 +120,7 @@ def replay_run(run_dir, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_
                 row['replayed'] = {'action': new['action'], 'target': _setting(new), 'reason': new.get('reason'),
                                    'p_ok_current': _p_current(new), 'forecast_usd': new['forecast_usd'],
                                    'candidates': new.get('candidates')}
-                changed = (new['action'], _setting(new)) != (payload.get('action'), _setting(payload))
+                changed = (new['action'], _setting(new)) != (baseline['action'], baseline['target'])
                 row['status'] = 'path_diverged' if diverged else 'changed' if changed else 'same'
                 diverged = diverged or changed
             rows.append(row)
@@ -100,29 +131,37 @@ def summarize(rows):
     return {'decisions': len(rows), 'status': dict(Counter(r['status'] for r in rows)),
             'by_trigger': {t: dict(Counter(r['status'] for r in rows if r['trigger'] == t))
                            for t in sorted({r['trigger'] for r in rows if r['trigger']})},
-            'moves': dict(Counter(f"{r['recorded']['action']} {r['recorded']['target']} -> "
+            'rebased': sum('baseline' in r for r in rows),
+            'moves': dict(Counter(f"{_baseline(r)['action']} {_baseline(r)['target']} -> "
                                   f"{r['replayed']['action']} {r['replayed']['target']}"
                                   for r in rows if r['status'] == 'changed'))}
+
+
+def _baseline(row):
+    """The recorded decision as compared: read from the new start when the row was rebased."""
+    return row.get('baseline') or row['recorded']
 
 
 def main():
     from .bench import rates
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('runs', type=Path, nargs='+')
-    parser.add_argument('--recorded-bytes-per-token', type=float, default=RECORDED_BYTES_PER_TOKEN)
-    parser.add_argument('--arm', help="Replay through this arm's policy overrides (bench.ARMS)")
+    parser.add_argument('--recorded-bytes-per-token', type=float, default=RECORDED_BYTES_PER_TOKEN,
+                        help="For trials that don't record theirs (before October 3)")
+    parser.add_argument('--arm', help="Replay through this arm's policy overrides (bench.ARMS), from its start")
     parser.add_argument('--out', type=Path, help='Write the rows and summary here (must not exist)')
     args = parser.parse_args()
     from .bench import ARMS
     overrides = ARMS[args.arm].get('policy_overrides') if args.arm else None
+    start = [ARMS[args.arm]['model'], ARMS[args.arm]['effort']] if args.arm else None
     cfg, table = switch_policy.with_overrides(switch_policy.load(), overrides), rates()
-    rows = [row for run in args.runs for row in replay_run(run, cfg, table, args.recorded_bytes_per_token)]
+    rows = [row for run in args.runs for row in replay_run(run, cfg, table, args.recorded_bytes_per_token, start)]
     result = {'config_sha256': hashlib.sha256(switch_policy.CONFIG.read_bytes()).hexdigest(), 'arm': args.arm,
-              'overrides': overrides,
+              'overrides': overrides, 'start': start,
               'recorded_bytes_per_token': args.recorded_bytes_per_token, 'summary': summarize(rows), 'rows': rows}
     for r in rows:
-        new = r['replayed'] or {}
-        print(f"{r['run'][6:]} {r['task']:30s} {r['trigger']:14s} {r['recorded']['action']:4s} {r['recorded']['target']:24s} "
+        new, was = r['replayed'] or {}, _baseline(r)
+        print(f"{r['run'][6:]} {r['task']:30s} {r['trigger']:14s} {was['action']:4s} {was['target']:24s} "
               f"-> {new.get('action', '-'):4s} {new.get('target', '-'):24s} {r['status']:13s} "
               f"p(current) {r['recorded']['p_ok_current'] or 0:.2f} -> {new.get('p_ok_current') or 0:.2f}  "
               f"passed {r['trial_passed']}")

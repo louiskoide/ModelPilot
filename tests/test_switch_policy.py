@@ -328,13 +328,16 @@ class CalibrationTests(unittest.TestCase):
     def test_the_shipped_config_is_calibrated_on_the_fixed_arms_strict_tuning_results(self):
         cal = self.cfg['calibration']
         self.assertTrue(cal['enabled'])
-        # Strict passes (hidden grader and edge suite, October 4) over full sets of the tuning tasks.
-        self.assertEqual(cal['outcomes'], {f'{S}/medium': {'passed': 43, 'trials': 46},
-                                           f'{O}/medium': {'passed': 23, 'trials': 23}})
-        self.assertAlmostEqual(sp.measured_ok(self.cfg, (S, 'medium')), 44 / 48)
-        self.assertAlmostEqual(sp.measured_ok(self.cfg, (S, 'high')), 44 / 48)  # nothing stronger measured on Sonnet
-        self.assertAlmostEqual(sp.measured_ok(self.cfg, (O, 'xhigh')), 24 / 25)  # at least as strong as a measured one
-        self.assertIsNone(sp.measured_ok(self.cfg, (S, 'low')))  # nothing measured that weak: Jev's estimate alone
+        # Strict passes (hidden grader and edge suite, October 4) over full sets of the 29 tuning tasks (October 6);
+        # Sonnet 5.5 low is low concise, the ModelPilot arms' start.
+        self.assertEqual(cal['outcomes'], {f'{S}/low': {'passed': 27, 'trials': 29},
+                                           f'{S}/medium': {'passed': 48, 'trials': 52},
+                                           f'{O}/medium': {'passed': 29, 'trials': 29}})
+        self.assertAlmostEqual(sp.measured_ok(self.cfg, (S, 'low')), 28 / 31)
+        self.assertAlmostEqual(sp.measured_ok(self.cfg, (S, 'medium')), 49 / 54)
+        self.assertAlmostEqual(sp.measured_ok(self.cfg, (S, 'high')), 49 / 54)  # nothing stronger measured on Sonnet
+        self.assertAlmostEqual(sp.measured_ok(self.cfg, (O, 'xhigh')), 30 / 31)  # at least as strong as a measured one
+        self.assertAlmostEqual(sp.measured_ok(self.cfg, (O, 'low')), 28 / 31)  # only Sonnet 5.5 low is as weak
 
     def test_p_ok_blends_the_measured_rate_with_jevs_estimate(self):
         decision = self.decide(self.TLRU)
@@ -351,11 +354,31 @@ class CalibrationTests(unittest.TestCase):
         before = self.decide(self.TLRU, cfg=jev_only(self.cfg))
         self.assertEqual((before['action'], before['target']), ('jump', [S, 'high']))
 
-    def test_an_unmeasured_weaker_setting_keeps_jevs_estimate(self):
-        decision = self.decide(advice(S, 'low', effort_p=.9), current=(S, 'medium'))
+    def test_a_setting_with_nothing_measured_as_weak_keeps_jevs_estimate(self):
+        cfg = copy.deepcopy(self.cfg)
+        del cfg['calibration']['outcomes'][f'{S}/low']  # as before October 6
+        decision = self.decide(advice(S, 'low', effort_p=.9), current=(S, 'medium'), cfg=cfg)
         low = next(c for c in decision['candidates'] if c['setting'] == f'{S}/low')
         self.assertIsNone(low['p_measured'])
         self.assertAlmostEqual(low['p_ok'], low['p_jev'])
+
+    # Jev's recorded first answer for cachetools-cache-key (bench-20261006-093401), its usual shape on the tuning
+    # tasks: Sonnet 5.5, effort medium, nothing on low.
+    USUAL = {'model': {'choice': S, 'confidence': .91, 'probabilities': {S: .95, H: .02, O: .03}},
+             'effort': {'choice': 'medium', 'confidence': .55,
+                        'probabilities': {'low': 0, 'medium': .64, 'high': .33, 'xhigh': .03, 'max': 0}}}
+
+    def test_the_low_concise_start_holds_against_jevs_usual_medium_answer(self):
+        decision = self.decide(self.USUAL, current=(S, 'low'))
+        self.assertEqual((decision['action'], decision['target']), ('stay', [S, 'low']))
+        stay = decision['candidates'][0]
+        self.assertAlmostEqual(stay['p_measured'], 28 / 31)
+        self.assertLess(stay['p_jev'], .02)
+        # At the weight fitted on medium's outcomes alone, Jev's effort answer alone moved the start to medium.
+        cfg = copy.deepcopy(self.cfg)
+        cfg['calibration']['jev_weight'] = .09
+        moved = self.decide(self.USUAL, current=(S, 'low'), cfg=cfg)
+        self.assertEqual((moved['action'], moved['target']), ('jump', [S, 'medium']))
 
     def test_stuck_evidence_is_never_calibrated(self):
         adv = advice(S, 'medium')

@@ -17,7 +17,7 @@ Switching model OR effort wrote a new cache prefix in tested M0 conditions. Retu
 - M0 cache harness and M1 pass-through proxy: verified, including an 8-hour soak. Missing: one-hour TTL, other request shapes, broad proxy compatibility.
 - M2 ledger, M3 workers, M4 verifier, M5 controls: bounded harnesses, small live checks; not integrated.
 - M6 benchmark: fixed, Jev and ModelPilot arms run live on 29 tuning tasks; the final split (`bench/splits.json`) is locked, not yet run.
-- ModelPilot arm: Jev advises, `switch_policy` decides; `modelpilot-delegate` adds consults and handoff notes.
+- ModelPilot arm: starts at low concise; Jev advises, `switch_policy` decides; delegation (consults, handoff notes) is off.
 - Governor: dry-run surface wired into the proxy and hooks; one live governed session passed. Missing: live turn-end delivery, observed rebuilds, fallback, active mode.
 
 The project is a tested set of components and bounded harnesses, not an operational end-to-end governor. Never present the toy benchmark as proof of production quality or savings.
@@ -27,9 +27,9 @@ The project is a tested set of components and bounded harnesses, not an operatio
 Files are under `runs/`; the full table, failures included: `docs/evidence.md`.
 
 - Cheapest at equal quality: `sonnet-5.5-low-concise`, $0.0689 a task, $0.0180 below Sonnet 5.5 medium on 23 tuning tasks (`paired-low-concise-23-20261004.json`); $0.107 against $0.140 on networkx.
-- Sonnet 5.5 falls short (strict passes) on `parse-decimal-grouping` (medium 1/6, Opus 4/4), `tomli-decode-error-attrs` (0/10, 2/4) and `nx-ismags-monomorphism` (5/8, 4/4). Every Sonnet/Opus failure reported success; a redo costs about $0.25 a task (`redo-cost-20261004.json`).
-- The ModelPilot arm never left Sonnet 5.5 medium on networkx ($0.142 against $0.140 a task, `bench-20261005-084812`). `jev_weight` is 0.09, maximum likelihood 0: Jev doesn't predict the misses.
-- A forced Opus review at the finish changed no strict outcome on 27 tuning tasks (26/27 either way) for +$0.069 a task (`bench-20261006-093401`).
+- Sonnet 5.5 falls short (strict) on `parse-decimal-grouping` (medium 1/6, Opus 4/4), `tomli-decode-error-attrs` (0/10, 2/4) and `nx-ismags-monomorphism` (5/8, 4/4). Every Sonnet/Opus failure reported success; a redo costs about $0.25 a task (`redo-cost-20261004.json`).
+- The ModelPilot arm never left low concise on the 29 tuning tasks (`bench-20261006-134508`): +$0.0045 a task against it, no difference shown; a third of Opus 5.5's cost, 0.915 against 0.981 strict (`opus-vs-modelpilot-20261006.json`). `jev_weight` 0.03 (maximum likelihood 0): Jev doesn't predict the misses.
+- A forced Opus review at the finish rescued none of 27 tuning tasks (26/27 strict either way), +$0.069 a task (`bench-20261006-093401`).
 - Cache writes are about 45% of cost, mostly growth, never rebuilds (`cache-write-sources-20261003.json`). Tool-result bytes are 80–90% source read or searched, 6–10% test output (`tool-result-split-20261005.txt`).
 
 ## Working rules
@@ -59,7 +59,7 @@ python3 -m modelpilot.m5 --out runs/m5-new-report.json
 python3 -m modelpilot.governor --out runs/governor-demo.json
 ```
 
-- Latest: 601 offline tests pass on Python 3.12 (`runs/delegate-tuning-results-regression-py312.log`); record counts in `docs/changelog.md`.
+- Latest: 603 offline tests pass on Python 3.12 (`runs/low-concise-start-regression-py312.log`); record counts in `docs/changelog.md`.
 - Put the pinned client 2.1.284 (`work/claude-client/node_modules/.bin`) first on PATH: 2.1.289 retries refused requests. System Python 3.9 has two known `test_transport` errors.
 - Real-client, bench and Jev tests need `work/` and node; CI (3.10, 3.14) skips them. With `work/` symlinked into a worktree, the Jev launcher's checkout-path test fails.
 - Paid, all behind `--live` (inspect each plan first): `cache_probe`, `claude_check`, `worker_check`, `cascade_check`, `evaluate`, `jev_check`, `jev_route_check`, `governed_session`, `bench`, `thinking_probe`. Limits are stopping thresholds, not billing caps.
@@ -69,16 +69,21 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 - Cache and proxy: `cache_probe`, `proxy`, `fixtures`, `soak`. Ledger and governor: `m2`, `m2_mcp`, `governor`, `hooks`, `governed_session` (`docs/governor.md`).
 - Benchmark: `bench`, `bench_tasks`, `bench_report`, `regrade` (`docs/m6-benchmark-plan.md`). Jev arms: `bench_jev`, `jev_*` (`docs/bench-adapters.md`).
 - ModelPilot arm: `active_policy`, `switch_policy`, `advisor`, `delegation`, `policy_replay`, `modelpilot_adapter`, `bench_tools`, `fixture_dispatch`, `policy_actions` (`docs/m6-modelpilot-policy.md`, `configs/modelpilot-policy.json`).
-- Probes and milestone harnesses: `thinking_probe` (`docs/thinking-history-probe.md`), `evaluate`, `claude_check`, `workers`, `m4`, `m5` (`docs/m*.md`).
 
 ## Plan, in order
 
-Built offline first; any live run needs the user's approval. Reviewed October 5 (`docs/changelog.md`).
+Built offline first; any live run needs the user's approval. Reviewed October 6 (`docs/changelog.md`).
 
-1. Done October 6: delegation stays off (a forced review changed no outcome).
-2. Low concise as the ModelPilot arms' home: `effort: low` and `bench/prompts/concise.md` in `bench.ARMS`, and low concise's strict outcomes in `calibration` (else Jev alone prices low). Done when `policy_replay` runs clean; then compare with low concise.
-3. Caveman's proxy as an arm (user decision): first a $0 pass of its engine over recorded tool results (mostly source, which it elides to signatures), then low concise behind it on the subscription, about $2–3 as sent.
-4. Skip advisor calls and spend-overrun steps that no Jev answer could change (replay first). Saves TypeSafe calls, not wall time.
-5. Variance check, then 4b on the final split once the user confirms its trial-count rule.
-6. Governor: live evidence for turn-end delivery and observed rebuilds; dry-run meanwhile.
-7. Jev: TypeSafe pricing, and whether rejected 400s are billed.
+1. Call Jev only where some answer could change the decision; skip no-op spend steps. Replay first.
+2. Steps read the agent's Bash test runs (`modelpilot/delegation.py` parses them), not only `run_tests`.
+3. Drop the arm's unused tools and channel paragraph while delegation is off.
+4. $0: does anything known before a run separate the 3 tasks Sonnet misses?
+5. Catch misses after a run: Opus writes edge tests from the spec; the host runs them; a failure escalates.
+6. Long-session benchmark: idle gaps, compaction, a one-hour TTL probe.
+7. Price an unnoticed miss in the gate.
+8. 30 more labelled tasks before any predictor.
+9. Caveman's proxy (user decision): $0 pass over recorded tool results, then low concise behind it; strict passes decide.
+10. ModelPilot's own predictor, if 4 and 8 show misses predictable; never edit Jev.
+11. Variance check, then 4b on the final split once the user confirms its trial-count rule.
+12. Governor: live evidence for turn-end delivery and observed rebuilds; dry-run meanwhile.
+13. Jev: TypeSafe pricing, and whether rejected 400s are billed.

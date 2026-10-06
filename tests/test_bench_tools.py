@@ -11,6 +11,7 @@ from modelpilot import bench, fixtures, policy_actions, switch_policy
 from modelpilot.bench_tools import OWNER, ToolServer, excerpt
 from modelpilot.governor import Governor
 from modelpilot.modelpilot_adapter import ModelPilotAdapter
+from modelpilot.proxy import system_text
 from tests import test_bench_tasks as synthetic
 from tests import test_bench
 from tests.test_bench_jev import ACCOUNT_CATALOG, POLICY_TIERS
@@ -237,7 +238,8 @@ class ToolTrialTests(unittest.TestCase):
 
     def test_per_message_effort_through_the_real_client(self):
         """With per-message effort on, the jump to Jev's effort rides in an effort-only system message: every main-loop
-        request keeps the client's top-level effort, and the message stays where it was first sent."""
+        request keeps the client's top-level effort (low, the arm's start since October 6), and the message stays where
+        it was first sent."""
         cfg = switch_policy.load()
         cfg['per_message_effort']['enabled'] = True
         cfg['calibration']['enabled'] = False
@@ -246,8 +248,11 @@ class ToolTrialTests(unittest.TestCase):
         record = self.advised_trial('per-message', script, 'claude-sonnet-5-5', 'xhigh', config=cfg, rates=self.OPUS_RATES)
         self.assertTrue(record['passed'], record['grade'])
         bodies = [json.loads(b) for b in self.upstream.bodies if b'"tools"' in b]
-        self.assertEqual({b['output_config']['effort'] for b in bodies}, {'medium'})
+        self.assertEqual({b['output_config']['effort'] for b in bodies}, {'low'})
         self.assertEqual({policy_actions.effective_effort(b) for b in bodies}, {'xhigh'})
+        concise = bench.appended_prompt(bench.ARMS['modelpilot'])['text']
+        self.assertTrue(all(concise in system_text(b) for b in bodies))  # the start's prompt stays on every move
+        self.assertEqual((record['prompt_check']['applied'], record['prompt_check']['missing']), (True, 0))
         ours = [[i for i, m in enumerate(b['messages']) if m.get('output_config') and m.get('content') == []] for b in bodies]
         clients = [[i for i, m in enumerate(b['messages']) if m.get('output_config') and m.get('content') != []] for b in bodies]
         self.assertEqual(ours, [ours[0]] * len(bodies))  # put back where it was first sent
@@ -312,8 +317,9 @@ class ToolTrialTests(unittest.TestCase):
         delegated, = routing['policy']['delegation']
         self.assertEqual((delegated['kind'], delegated['trigger'], delegated['reason'], delegated['setting'],
                           delegated['delivered']), ('consult', 'step', 'forced', ['claude-opus-5-5', 'medium'], True))
+        # Jev's medium beats the low start here (calibration off); the review then goes to Opus 5.5 at that effort.
         self.assertEqual([(d['trigger'], d['action']) for d in routing['policy']['decisions']],
-                         [('turn_start', 'stay'), ('step', 'consult')])
+                         [('turn_start', 'jump'), ('step', 'consult')])
         self.assertEqual(routing['policy']['parameters']['overrides']['delegation']['consult']['force'], ['agent_finish'])
         self.assertEqual(record['path']['delegation'][0]['purpose'], 'consult')
 
@@ -344,12 +350,12 @@ class ToolTrialTests(unittest.TestCase):
         script = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}}] +
                   [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 4 + [{'text': 'Done.'}])
         # Jev says the client's own setting: stay; three scripted Sonnet 5.5 replies reach the limit.
-        record = self.advised_trial('budget', script, 'claude-sonnet-5-5', 'medium', limit=2.5 * (100*2 + 4*10) / 1e6)
+        record = self.advised_trial('budget', script, 'claude-sonnet-5-5', 'low', limit=2.5 * (100*2 + 4*10) / 1e6)
         session, = record['sessions']
         self.assertEqual((session['stop'], session['requests']), ('budget_stop', 3), session)
         self.assertEqual((record['accounting']['refused_requests'], record['accounting']['refusal_reasons']),
                          (1, {'insufficient_budget': 1}))
-        self.assertEqual(self.main_loop(), [('claude-sonnet-5-5', 'medium')]*3)  # the refused one never left
+        self.assertEqual(self.main_loop(), [('claude-sonnet-5-5', 'low')]*3)  # the refused one never left
         self.assertEqual(record['routing']['policy']['refusals'], ['insufficient_budget'])
 
     def test_the_delegate_arm_never_holds_a_finish_the_policy_or_the_budget_ended(self):
@@ -383,7 +389,9 @@ class ToolTrialTests(unittest.TestCase):
         with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
             record = self.modelpilot_trial('no-key', script, bench.arm_adapter('modelpilot', 1, 1))
         self.assertTrue(record['passed'], record['grade'])
-        self.assertEqual(set(self.main_loop()), {('claude-sonnet-5-5', 'medium')})
+        self.assertEqual(set(self.main_loop()), {('claude-sonnet-5-5', 'low')})  # low concise since October 6
+        self.assertEqual(record['append_system_prompt']['path'], 'bench/prompts/concise.md')
+        self.assertTrue(record['prompt_check']['applied'], record['prompt_check'])
         self.assertEqual((record['routing']['benchmark_eligible'], record['routing']['ineligible_reason']),
                          (False, 'no_advisor'))
 

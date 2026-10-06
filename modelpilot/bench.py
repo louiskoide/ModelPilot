@@ -84,14 +84,20 @@ ARMS = {
     # Jev (the compat checkout, advice only) predicts the model and effort; ModelPilot's proxy jumps there when the
     # expected cost says it pays (active_policy). The client asks for the fallback start (S0), used while Jev is
     # unavailable. Like jev-compat-o55 it discovers only the policy's models, so Jev's model question is the same.
-    'modelpilot': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'medium', 'advisor': 'jev',
+    # Since October 6 the start is low concise, the cheapest fixed setting at equal strict passes (plan item 2): the
+    # client runs at low effort with the concise prompt appended, which stays in every request whatever the setting.
+    'modelpilot': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'low', 'advisor': 'jev',
+                   'append_system_prompt': 'bench/prompts/concise.md',
                    'checkout': 'work/jev-router-compat', 'models': POLICY_TIERS,
                    'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}),
                    'policy': 'docs/m6-modelpilot-policy.md'},
     # The same arm with delegation on (October 5; docs/m6-modelpilot-policy.md, "Delegation"): priced consults and
     # handoff notes, plus a consult made whatever its price when the agent ends its turn (the Stop hook holds the
     # finish once per turn), to measure what a review by a stronger setting is worth. Reported as its own arm.
-    'modelpilot-delegate': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'medium', 'advisor': 'jev',
+    # From the low start (October 6) the forced review goes to Jev's setting when that is stronger, usually Sonnet 5.5
+    # medium, where from medium it went to Opus 5.5 medium (switch_policy._consult_target).
+    'modelpilot-delegate': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'low', 'advisor': 'jev',
+                            'append_system_prompt': 'bench/prompts/concise.md',
                             'checkout': 'work/jev-router-compat', 'models': POLICY_TIERS,
                             'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}),
                             'policy': 'docs/m6-modelpilot-policy.md',
@@ -283,8 +289,9 @@ def effort_check(rows, effort):
 
 
 def appended_prompt(arm):
-    """A fixed arm's appended system prompt: its file, text and hash; None without one."""
-    if arm.get('kind') != 'fixed' or not arm.get('append_system_prompt'):
+    """An arm's appended system prompt (fixed arms, and the ModelPilot arms since October 6): its file, text and hash;
+    None without one."""
+    if not arm.get('append_system_prompt'):
         return None
     path = ROOT/arm['append_system_prompt']
     data = path.read_bytes()

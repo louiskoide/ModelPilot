@@ -43,7 +43,7 @@ class ScheduleTests(unittest.TestCase):
         self.assertIsNone(bench.arm_adapter('sonnet-5', 1.5, 1))
         adapter = bench.arm_adapter('modelpilot', 1.5, 2, jev_key='ts-key')
         self.assertEqual((adapter.policy.mode, adapter.tools, adapter.limit), ('active', True, 3.0))
-        self.assertEqual((adapter.arm_id, adapter.model, adapter.effort), ('modelpilot', 'claude-sonnet-5-5', 'medium'))
+        self.assertEqual((adapter.arm_id, adapter.model, adapter.effort), ('modelpilot', 'claude-sonnet-5-5', 'low'))
         self.assertIs(adapter.policy.advisor, adapter.advisor)
         self.assertEqual((adapter.advisor.live, adapter.advisor.key, adapter.advisor.checkout),
                          (True, 'ts-key', bench.ROOT/'work/jev-router-compat'))
@@ -203,15 +203,19 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(command[command.index('--effort') + 1], 'low')
         self.assertNotIn('--effort', bench.client_command('/c', 'do it', 'claude-sonnet-5-5', 30, 1.0, ['--session-id', 'x']))
 
-    def test_a_fixed_arm_appends_its_prompt_file_and_the_others_do_not(self):
+    def test_an_arm_appends_its_prompt_file_and_the_others_do_not(self):
         appended = bench.appended_prompt(bench.ARMS['sonnet-5.5-concise'])
         data = (bench.ROOT/'bench/prompts/concise.md').read_bytes()
         self.assertEqual((appended['file'], appended['sha256']), (bench.ROOT/'bench/prompts/concise.md', hashlib.sha256(data).hexdigest()))
         self.assertEqual(appended['text'], data.decode().strip())
         self.assertTrue(all(len(line) < 400 for line in appended['text'].splitlines()))
         self.assertLess(len(data), 1500)  # written once per session and re-read every step: keep it short
-        for arm in ('sonnet-5.5', 'sonnet-5.5-low', 'modelpilot', 'jev-compat-o55'):
+        for arm in ('sonnet-5.5', 'sonnet-5.5-low', 'jev-compat-o55'):
             self.assertIsNone(bench.appended_prompt(bench.ARMS[arm]), arm)
+        # The ModelPilot arms start where low concise runs (October 6): low effort, the same prompt.
+        for arm in ('modelpilot', 'modelpilot-delegate'):
+            self.assertEqual(bench.appended_prompt(bench.ARMS[arm]), appended, arm)
+            self.assertEqual(bench.ARMS[arm]['effort'], bench.ARMS['sonnet-5.5-low-concise']['effort'])
         command = bench.client_command('/c', 'do it', 'claude-sonnet-5-5', 30, 1.0, ['--session-id', 'x'],
                                        append_prompt=appended['file'])
         self.assertEqual(command[command.index('--append-system-prompt-file') + 1], str(appended['file']))
