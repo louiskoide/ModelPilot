@@ -73,6 +73,42 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(summary['status'], {'changed': 1, 'path_diverged': 1, 'not_replayable': 1, 'same': 1})
         self.assertEqual(summary['moves'], {f'jump {S}/high -> stay {S}/medium': 1})
 
+    def test_an_arms_start_replaces_the_recorded_one_until_the_path_diverges(self):
+        stay = dict(self.jump, action='stay', target=[S, 'medium'])
+        step = {'point': '1/step/spend/3', 'trigger': 'step', 'current': [S, 'medium'], 'action': 'stay',
+                'target': [S, 'medium'], 'candidates': [{'p_ok': .97}], 'profile': PROFILE, 'advice': TLRU}
+        high = dict(step, current=[S, 'high'], target=[S, 'high'])
+        # Since October 3 a trial records the bytes per token its profiles were estimated at.
+        recorded = {'S0': [S, 'medium'], 'cost_model': {'bytes_per_token': 2.8}}
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp)/'bench-x'
+            run.mkdir()
+            (run/'manifest.json').write_text(json.dumps({'seed': 0, 'arms': {'modelpilot': {}}}))
+            for task, payloads in (('t-jumped', [self.jump, high]), ('t-stayed', [stay, step])):
+                journal(run/task/'modelpilot'/'0', payloads)
+                (run/task/'modelpilot'/'0'/'trial.json').write_text(json.dumps(
+                    dict(record(task), routing={'kind': 'modelpilot_policy', 'policy': {'parameters': recorded}})))
+            rows = pr.replay_run(run, self.cfg, self.rates, start=[S, 'low'])
+            unchanged = pr.replay_run(run, self.cfg, self.rates, start=[S, 'medium'])
+        self.assertEqual([(r['task'], r['trigger'], r['current'], r['status']) for r in rows],
+                         [('t-jumped', 'turn_start', f'{S}/low', 'changed'), ('t-jumped', 'step', f'{S}/high', 'path_diverged'),
+                          ('t-stayed', 'turn_start', f'{S}/low', 'same'), ('t-stayed', 'step', f'{S}/low', 'same')])
+        # A recorded stay on the recorded start counts as a stay on the new start; a jump keeps its target.
+        self.assertEqual([r['baseline'] for r in rows if 'baseline' in r],
+                         [{'action': 'jump', 'target': f'{S}/high', 'p_ok_current': .11},
+                          {'action': 'stay', 'target': f'{S}/low', 'p_ok_current': .11},
+                          {'action': 'stay', 'target': f'{S}/low', 'p_ok_current': .97}])
+        self.assertEqual({r['recorded_current'] for r in rows if 'baseline' in r}, {f'{S}/medium'})
+        self.assertEqual(rows[2]['recorded'], {'action': 'stay', 'target': f'{S}/medium', 'p_ok_current': .11})
+        summary = pr.summarize(rows)
+        self.assertEqual((summary['rebased'], summary['moves']), (3, {f'jump {S}/high -> stay {S}/low': 1}))
+        # The trial's own bytes per token, not the pre-October 3 default of 4.
+        self.assertAlmostEqual(rows[2]['replayed']['forecast_usd'],
+                               pr.replay(stay, self.cfg, self.rates, 2.8, current=[S, 'low'])['forecast_usd'])
+        self.assertNotAlmostEqual(rows[2]['replayed']['forecast_usd'],
+                                  pr.replay(stay, self.cfg, self.rates, 4, current=[S, 'low'])['forecast_usd'])
+        self.assertFalse(any('baseline' in r for r in unchanged))  # the recorded start: nothing to rebase
+
 
 if __name__ == '__main__':
     unittest.main()

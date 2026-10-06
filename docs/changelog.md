@@ -2,6 +2,19 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 6, 2026: low concise as the ModelPilot arms' start
+
+Offline, $0 (plan item 2). Details: `docs/m6-modelpilot-policy.md`, "Low concise as the start".
+
+- **Arms.** `modelpilot` and `modelpilot-delegate` now start at Sonnet 5.5 low with `bench/prompts/concise.md` appended, as `sonnet-5.5-low-concise` runs. `bench.appended_prompt` serves any arm that names a prompt, so these trials record `prompt_check` too.
+- **Calibration over all 29 tuning tasks.** Sonnet 5.5 low 27/29 (low concise), medium 48/52, Opus 5.5 medium 29/29: 0.903, 0.907, 0.968 with the uniform prior. Until now there was no low rate, and medium and Opus covered the first 23 tasks only. Low effort's factors are measured too (`runs/low-effort-factors-20261006.json`): 0.94× the requests and 0.90× the output per request of medium, where the guesses were 1.0× and 0.7×.
+- **`jev_weight` 0.09 → 0.03.** The first replay from the low start moved to Sonnet 5.5 medium at 37 of 83 turn starts. Jev's effort answer almost never allows low (mean estimate 0.01; low concise passed 27/29), and 9% weight was enough to tip the gate. Refitted the October 4 way over all 110 outcomes (`runs/jev-weight-fit-20261006.json`, which reproduces October 4's fit exactly first): posterior mean 0.028, 95% bound 0.08, maximum likelihood 0.
+- **Replay clean** (`runs/policy-replay-low-concise-start-20261006.json`, six ModelPilot runs, 144 decisions): all 83 turn starts stay on Sonnet 5.5 low, 44 of them by the hysteresis (medium at most $0.005 cheaper in expectation). They all stay up to a weight of 0.06; at 0.08, 32 move to medium. 11% of the posterior lies above 0.06. Nothing moves to Opus.
+- **`policy_replay` fixes.** `--arm` replays from the arm's start as well as through its overrides. Each trial's recorded `bytes_per_token` is used. Until now every trial was rescaled from 4, which put the October 5–6 runs' prefixes 1.43× high; re-replayed correctly at their own config, `policy-replay-delegate-as-modelpilot-20261006.json`'s and the networkx replay's conclusions hold.
+- **Open points.** Raising a client at native low through an effort message is unmeasured (the probe raised a client at medium). The cost model's task shape is still medium's without the prompt ($0.080 forecast at low against $0.069 measured). From the low start the delegate arm's forced review would go to Sonnet 5.5 medium (Jev's setting), not Opus 5.5.
+- Tests: 603 offline tests pass on Python 3.12 with the pinned 2.1.284 client first on PATH, none skipped (`runs/low-concise-start-regression-py312.log`). New: the low start against Jev's usual answer (`tests/test_switch_policy.py`), the replay's start and bytes per token (`tests/test_policy_replay.py`); the real-client arm tests now run from low with the prompt on the wire (`tests/test_bench_tools.py`).
+- Next: compare the arm with low concise, live, both arms paired on the 29 tuning tasks (about $2.5 API plus TypeSafe, about $2.5 subscription as sent; command and reading in `docs/m6-benchmark-plan.md`, "Proposed run: the ModelPilot arm from low concise").
+
 ## October 6, 2026: switching against consulting on the tuning tasks
 
 $0 write-up of the user's live run `bench-20261006-093401`: `modelpilot-delegate` on the 29 tuning tasks × 1 trial, code `2c6339b`, $4.05 known plus unpriced TypeSafe calls (plan item 1). Details: `docs/m6-benchmark-plan.md`, "Results: switching against consulting".
