@@ -24,6 +24,18 @@ NEXT = LOOP[:4] + [{'role': 'system', 'content': 'reminder'},  # resent as a pla
                                                    'cache_control': {'type': 'ephemeral'}}]}]
 
 
+# An edit and a test run in one Bash call, as the probe's agents wrote them.
+EDIT_AND_TEST = ("cat >> tests/test_x.py <<'EOF'\nimport pytest\n\n\n@pytest.mark.parametrize('n', [1, 2])\ndef test_n(n):\n"
+                 "    assert n\nEOF\npython3 -m pytest -q tests 2>&1 | tail -3")
+
+
+def bash(id, command, output, error=False):
+    """A Bash call and the result the client returned for it."""
+    result = {'type': 'tool_result', 'tool_use_id': id, 'content': output}
+    return [{'role': 'assistant', 'content': [{'type': 'tool_use', 'id': id, 'name': 'Bash', 'input': {'command': command}}]},
+            {'role': 'user', 'content': [dict(result, is_error=True) if error else result]}]
+
+
 def delegating(consult=True, note=True, **consult_settings):
     cfg = switch_policy.load()
     cfg['calibration']['enabled'] = False
@@ -144,7 +156,50 @@ class BriefTests(unittest.TestCase):
         text = delegation.brief(self.gov, self.task, 'why', (S, 'medium'), None, self.work, self.base, spec)
         self.assertLessEqual(len(text.encode()), 3000)
         self.assertIn('has not run the host test tool', text)
+        self.assertIn("None of the agent's Bash calls ran a test runner.", text)
         self.assertIn('cut by the host', text)
+
+    def test_the_brief_carries_the_agents_own_test_runs(self):
+        """bench-20261005-153506: every agent tested through Bash before its finish, and every brief said no tests ran."""
+        spec = switch_policy.load()['delegation']['consult']
+        messages = LOOP[:1] + bash('b1', EDIT_AND_TEST, '1 failed, 18 passed in 0.61s') + bash(
+            'b2', 'python3 -W error -m pytest -q tests 2>&1 | tail -4', '....\n20 passed in 0.61s')
+        text = delegation.brief(self.gov, self.task, delegation.WHY['agent_finish'], (S, 'medium'), None, self.work,
+                                self.base, spec, messages)
+        self.assertIn('has not run the host test tool', text)  # run_tests is still its own section
+        own = text[text.index("## The agent's own test runs (Bash)"):text.index('## Current changes')]
+        self.assertIn('2 Bash calls ran tests, oldest first', own)
+        self.assertIn('$ python3 -m pytest -q tests 2>&1 | tail -3\n  -> 1 failed, 18 passed in 0.61s', own)
+        self.assertIn('Newest:\n$ python3 -W error -m pytest -q tests 2>&1 | tail -4\noutput (tail):\n....\n20 passed', own)
+        self.assertNotIn('parametrize', own)  # the here-document's body is the edit, which the diff shows
+
+    def test_only_calls_that_run_a_test_runner_count(self):
+        messages = (bash('g', 'grep -rn pytest pyproject.toml; pip install pytest', 'pytest>=7') +
+                    bash('h', "cat > tests/test_x.py <<'EOF'\nimport pytest\n\n\ndef test_x():\n    pytest.skip()\nEOF", '') +
+                    [{'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 'r', 'name': 'Read',
+                                                        'input': {'file_path': 'pytest.ini'}}]}])
+        self.assertIsNone(delegation.agent_test_runs(messages, 4000))
+        for line in ('python3 -m pytest -q', 'cd .. && PYTHONPATH=src pytest tests', 'timeout 300 python -m pytest x',
+                     'uv run pytest', '/opt/bin/python3.12 -m unittest discover -s tests', 'tox -e py312', 'make test'):
+            self.assertTrue(delegation.runs_tests(line), line)
+        for line in ('grep -n pytest setup.cfg', 'python3 -c "import pytest"', 'cat tox.ini', 'make', 'echo unittest'):
+            self.assertFalse(delegation.runs_tests(line), line)
+        # A here-string isn't a here-document: the lines after it are still commands.
+        self.assertEqual(delegation.shell_lines('cat <<<EOF\npytest -q'), ['cat <<<EOF', 'pytest -q'])
+
+    def test_many_runs_keep_the_newest_and_drop_the_oldest(self):
+        messages = []
+        for i in range(40):
+            messages += bash(f'b{i}', f'python3 -m pytest -q tests/test_{i}.py', f'{i} failed, 1 passed', error=True)
+        messages += bash('last', 'python3 -m pytest -q', [{'type': 'text', 'text': 'E' * 9000 + '\n3 failed, 9 passed'}])
+        text = delegation.agent_test_runs(messages, 2000)
+        self.assertLessEqual(len(text.encode()), 2000)
+        self.assertIn('41 Bash calls ran tests, oldest first (', text)
+        self.assertIn('earlier not shown', text)
+        self.assertNotIn('test_0.py', text)
+        self.assertIn('$ python3 -m pytest -q tests/test_39.py\n  -> 39 failed, 1 passed (the client reported the call as '
+                      'failed)', text)
+        self.assertTrue(text.endswith('\n3 failed, 9 passed'))  # the newest output's tail, from list content
 
 
 class PricingTests(unittest.TestCase):

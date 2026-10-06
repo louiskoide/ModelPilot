@@ -1,10 +1,11 @@
 """Consults and handoff notes for the ModelPilot arm (docs/m6-modelpilot-policy.md, "Delegation").
 
-A consult asks a stronger setting once, in a small separate request, about a brief built from host facts
-only: the task instruction from the ledger, the latest host-run test result, the workspace's diff against the
-trial's base commit, and why ModelPilot is asking. A handoff note is a side request to the model being left: the
-request it would have sent anyway, plus an operator instruction to write the state of the work for the model
-taking over.
+A consult asks a stronger setting once, in a small separate request, about a brief of facts the host collects,
+never the agent's account of its work: the task instruction from the ledger, the latest host-run test result, the
+agent's own test runs through Bash (the test commands and the output the client returned for them), the workspace's
+diff against the trial's base commit, and why ModelPilot is asking. A handoff note is a side request to the model
+being left: the request it would have sent anyway, plus an operator instruction to write the state of the work for
+the model taking over.
 
 Either answer reaches the main conversation as system-role text (the API's operator channel). Claude Code 2.1.284
 ends every tool-loop request with its own text system message, and the API takes a text system message only
@@ -14,10 +15,11 @@ in every later request, so from the API's side the history only grows and the ca
 """
 import copy
 from pathlib import Path
+import re
 import subprocess
 
 CONSULT_SYSTEM = ('You are a senior software engineer consulted about another engineer\'s work in progress on a Python '
-                  'repository. You see the task, the latest test run and the current diff, collected by the build host. '
+                  'repository. You see the task, its test runs so far and the current diff, collected by the build host. '
                   'Answer in under 300 words of plain text: what is most likely wrong or missing, measured against the '
                   'task\'s exact wording (edge cases, inputs and behaviours it requires that the change does not handle '
                   'or test), and the next concrete step. Name functions, cases and lines; a short code snippet is fine. '
@@ -37,6 +39,12 @@ WHY = {'tests_now_pass': 'The test suite the host runs now passes. Review the ch
                        'does: every failure measured so far ended with the agent reporting success.',
        'spend_overrun': 'The work is taking longer than forecast.',
        'stuck_evidence': 'The host\'s progress check says the agent is stuck'}
+# Agents run their tests through Bash, often after a here-document edit in the same call (bench-20261005-153506: every
+# trial, before any run_tests call).
+SEPARATORS = re.compile(r'&&|\|\||\$\(|[;&|()`]')
+WRAPPERS = {'env', 'command', 'exec', 'time', 'nice', 'timeout', 'uv', 'poetry', 'pipenv', 'pdm', 'run'}
+HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+SUMMARY = re.compile(r'\b\d+ (?:passed|failed|errors?)\b|^Ran \d+ tests?\b|^(?:OK|FAILED)\b')
 
 
 def _cut(text, limit, keep='head'):
@@ -95,16 +103,95 @@ def latest_tests(gov, task, limit):
     return '\n'.join(lines)
 
 
-def brief(gov, task, why, setting, facts, workspace, base, spec):
-    """The consult brief, host facts only, at most brief_max_bytes. facts: the decision point's step facts or None."""
+def runs_tests(line):
+    """Whether a shell line runs a test runner: pytest, py.test, tox or nox, python -m pytest or unittest, or make test or
+    check, after any environment assignments and wrappers (env, timeout 60, uv run, ...). grep pytest doesn't."""
+    for part in SEPARATORS.split(line):
+        words = part.split()
+        while words and (words[0] in WRAPPERS or re.fullmatch(r'[A-Za-z_]\w*=\S*|[\d.]+[smhd]?', words[0])):
+            words = words[1:]
+        program = words[0].rsplit('/', 1)[-1] if words else ''
+        if (program in ('pytest', 'py.test', 'tox', 'nox')
+                or re.fullmatch(r'python[\d.]*', program) and any(
+                    a == '-m' and b in ('pytest', 'unittest') for a, b in zip(words, words[1:]))
+                or program == 'make' and {'test', 'check'} & set(words[1:])):
+            return True
+    return False
+
+
+def shell_lines(command):
+    """The command's lines outside here-document bodies (file contents and scripts, not commands)."""
+    lines, ends = [], []
+    for line in command.splitlines():
+        if ends:
+            if line.strip() == ends[0]:
+                ends.pop(0)
+            continue
+        lines.append(line)
+        ends = [m.group(2) for m in HEREDOC.finditer(line)]
+    return lines
+
+
+def _result_text(content):
+    if isinstance(content, str):
+        return content
+    return '\n'.join(b['text'] for b in content or [] if isinstance(b, dict) and isinstance(b.get('text'), str))
+
+
+def agent_test_runs(messages, limit):
+    """The agent's own test runs in the conversation, as text within limit bytes; None when there are none. A run is
+    a Bash call with a shell line that runs a test runner, shown by those lines and the output the client returned
+    for the call: the newest with its output's tail, earlier ones (oldest first) by their last summary line, the
+    oldest left out when they take more than half the room. Ad hoc check scripts aren't recognized."""
+    calls, runs = {}, []
+    for message in messages or []:
+        content = message.get('content') if isinstance(message, dict) else None
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict):
+                continue
+            if block.get('type') == 'tool_use' and block.get('name') == 'Bash':
+                command = (block.get('input') or {}).get('command')
+                lines = [l.strip() for l in shell_lines(command) if runs_tests(l)] if isinstance(command, str) else []
+                if lines:
+                    calls[block.get('id')] = lines
+            elif block.get('type') == 'tool_result' and block.get('tool_use_id') in calls:
+                runs.append((calls.pop(block['tool_use_id']), _result_text(block.get('content')), bool(block.get('is_error'))))
+    if not runs:
+        return None
+    command = lambda lines: '\n'.join('$ ' + _cut(l, 300) for l in lines)
+    failed = lambda error: ' (the client reported the call as failed)' if error else ''
+    earlier = []
+    for lines, output, error in reversed(runs[:-1]):
+        found = [l.strip() for l in output.splitlines() if SUMMARY.search(l.strip())]
+        last = found[-1] if found else next((l.strip() for l in reversed(output.splitlines()) if l.strip()), '(no output)')
+        entry = f'{command(lines)}\n  -> {_cut(last, 200)}{failed(error)}'
+        if len('\n'.join([entry] + earlier).encode()) > limit // 2:
+            break
+        earlier.insert(0, entry)
+    lines, output, error = runs[-1]
+    left = len(runs) - 1 - len(earlier)
+    head = ('1 Bash call ran tests' if len(runs) == 1 else f'{len(runs)} Bash calls ran tests, oldest first') + (
+        f' ({left} earlier not shown)' if left else '') + (
+        '. The commands are the agent\'s and the output is what the client returned; the host ran none of them.')
+    newest = f'Newest:\n{command(lines)}{failed(error)}\noutput (tail):\n'
+    text = '\n'.join([head] + earlier + [newest])
+    return text + _cut(output.strip() or '(no output)', max(0, limit - len(text.encode())), keep='tail')
+
+
+def brief(gov, task, why, setting, facts, workspace, base, spec, messages=()):
+    """The consult brief, at most brief_max_bytes: host facts, plus the output the client returned for the agent's own
+    test runs (messages: the conversation the request carries), labelled as such. facts: the step facts or None."""
     instruction = gov.state.get(task)['instruction']
     tests = latest_tests(gov, task, spec['test_output_bytes'])
+    own = agent_test_runs(messages, spec['test_output_bytes'])
     head = [f'Why the host is asking: {why}',
             f'The agent runs {setting[0]} at {setting[1]} effort.' + (
                 f" {facts['requests']} requests and ${facts['spent_usd']:.4f} since the host's last check"
                 f"{' (forecast $%.4f)' % facts['forecast_usd'] if facts.get('forecast_usd') else ''}." if facts else ''),
             '', '## Task', instruction.strip(), '', '## Latest host-run test result',
-            tests or 'The agent has not run the host test tool yet.', '', '## Current changes (diff against the task\'s base)']
+            tests or 'The agent has not run the host test tool yet.', '', '## The agent\'s own test runs (Bash)',
+            own or 'None of the agent\'s Bash calls ran a test runner.', '',
+            '## Current changes (diff against the task\'s base)']
     text = '\n'.join(head) + '\n'
     room = spec['brief_max_bytes'] - len(text.encode())
     changes = workspace_changes(workspace, base, max(0, room)) if room > 0 else ''
@@ -145,7 +232,7 @@ def framing(kind, text, code, source):
     marker = f'[ModelPilot ledger update, code {code}] ' if code else '[ModelPilot] '
     if kind == 'consult':
         return (f'{marker}The task is unchanged. A consultation on your work so far ({source}, from the task, the '
-                f'latest host test run and your current diff) returned the advice below. Check it against the repository '
+                f'test runs so far and your current diff) returned the advice below. Check it against the repository '
                 f'and act on what holds up.\n\n{text}')
     return (f'{marker}The task is unchanged. You are taking over this task from {source}, which wrote this handoff note '
             f'on the state of the work:\n\n{text}')

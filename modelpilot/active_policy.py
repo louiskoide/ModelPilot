@@ -251,7 +251,7 @@ class ActivePolicy(ProxyPolicy):
         if consult['enabled'] and trigger in consult['at']:
             done = sum(e['payload']['kind'] == 'consult' for e in gov.journal('delegation')
                        if e['task'] == task and e['revision'] == revision)
-            text = self.brief(gov, task, trigger, facts, setting)
+            text = self.brief(gov, task, trigger, facts, setting, request.get('messages'))
             self.briefs[key] = text
             prof.update(consults_left=consult['max_per_revision'] - done,
                         brief_tokens=len(text.encode()) / self.config['bytes_per_token'],
@@ -359,7 +359,7 @@ class ActivePolicy(ProxyPolicy):
             self.deliveries[task] = self.deliveries.get(task, []) + [(where, text)]
         return True
 
-    def brief(self, gov, task, trigger, facts, setting):
+    def brief(self, gov, task, trigger, facts, setting, messages):
         spec = switch_policy.delegation(self.config, 'consult')
         if trigger == 'stuck_evidence':
             signals = gov.state.recommend(task).get('signals') or {}
@@ -368,7 +368,7 @@ class ActivePolicy(ProxyPolicy):
         else:
             why = delegation.WHY['tests_pass' if facts.get('first_pass') and facts['cause'] == 'tests_now_pass'
                                  else facts['cause']]
-        return delegation.brief(gov, task, why, setting, facts, self.workspace, self.base, spec)
+        return delegation.brief(gov, task, why, setting, facts, self.workspace, self.base, spec, messages)
 
     def route_brief(self, text, setting, target):
         """Jev's second role: who answers the brief. Its model and effort when that setting is stronger than the
@@ -391,7 +391,8 @@ class ActivePolicy(ProxyPolicy):
         spec = switch_policy.delegation(self.config, 'consult')
         if side is None or any(e['payload'].get('point') == point[1] for e in gov.journal('delegation') if e['task'] == task):
             return None
-        text = self.briefs.pop(point[1], None) or self.brief(gov, task, point[0], point[2], setting)
+        text = self.briefs.pop(point[1], None) or self.brief(gov, task, point[0], point[2], setting,
+                                                             request.get('messages'))
         who, answer = self.route_brief(text, setting, tuple(decision['consult']))
         result = side('consult', delegation.consult_request(text, who, spec), spec['timeout_seconds'])
         advice = delegation.reply_text(result.get('message'), spec['advice_max_bytes'])

@@ -59,7 +59,7 @@ python3 -m modelpilot.m5 --out runs/m5-new-report.json
 python3 -m modelpilot.governor --out runs/governor-demo.json
 ```
 
-- Latest: 598 offline tests pass on Python 3.12 (`runs/delegate-probe-results-regression-py312.log`); record counts in `docs/changelog.md`.
+- Latest: 601 offline tests pass on Python 3.12 (`runs/consult-brief-agent-tests-regression-py312.log`); record counts in `docs/changelog.md`.
 - Put the pinned client 2.1.284 (`work/claude-client/node_modules/.bin`) first on PATH: 2.1.289 retries refused requests. System Python 3.9 has two known `test_transport` errors.
 - Real-client, bench and Jev tests need `work/` and node; CI (3.10, 3.14) skips them. With `work/` symlinked into a worktree, the Jev launcher's checkout-path test fails.
 - Paid, all behind `--live` (inspect each plan first): `cache_probe`, `claude_check`, `worker_check`, `cascade_check`, `evaluate`, `jev_check`, `jev_route_check`, `governed_session`, `bench`, `thinking_probe`. Limits are stopping thresholds, not billing caps.
@@ -75,7 +75,7 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 
 Built offline first; any live run needs the user's approval. Reviewed October 5 (`docs/changelog.md`).
 
-1. Delegation: put the agent's own test runs in the consult brief (every probe brief said none ran), then compare switching with consulting on the tuning tasks.
+1. Delegation: compare switching with consulting on the tuning tasks (the consult brief now carries the agent's Bash test runs).
 2. Low concise as the ModelPilot arms' home: `effort: low` and `bench/prompts/concise.md` in `bench.ARMS`, and low concise's strict outcomes in `calibration` (else Jev alone prices low). Done when `policy_replay` runs clean; then compare with low concise.
 3. Caveman's proxy as an arm (user decision): first a $0 pass of its engine over recorded tool results (mostly source, which it elides to signatures), then low concise behind it on the subscription, about $2–3 as sent.
 4. Skip advisor calls and spend-overrun steps that no Jev answer could change (replay first). Saves TypeSafe calls, not wall time.
