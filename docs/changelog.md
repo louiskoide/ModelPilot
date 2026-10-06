@@ -2,6 +2,17 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 6, 2026: switching against consulting on the tuning tasks
+
+$0 write-up of the user's live run `bench-20261006-093401`: `modelpilot-delegate` on the 29 tuning tasks × 1 trial, code `2c6339b`, $4.05 known plus unpriced TypeSafe calls (plan item 1). Details: `docs/m6-benchmark-plan.md`, "Results: switching against consulting".
+
+- **Method.** A `policy_replay --arm modelpilot` of the run differs from the recorded decisions only at the 27 forced reviews (`runs/policy-replay-delegate-as-modelpilot-20261006.json`). So each trial's state at its held finish, with its cost to that point, is the switching arm's result in the same trial. `runs/prereview-20261006.py` rebuilt those states from the briefs' complete diffs. The $0 regrade is `regrade-prereview-bench-20261006-093401`, and `runs/delegate-vs-switch-20261006.py` pairs them with the final states and the earlier fixed arms.
+- **Result.** Strict passes were 26/27 before and after the review: no rescue, no breakage. tomli's keyword-construction bug was missed again (1 of 4 counting the probe), and `parse-decimal-grouping` and ISMAGS passed before any review. The review added $0.069 a trial, 95% [0.057, 0.084] ($0.087 → $0.156), and 38 s (46 → 84 s). Agents changed their diff after 18 reviews (source lines in 6), but the graders can't tell those edits apart.
+- **Economics.** At about $0.25 a redo, a review pays only where failure probability × catch rate exceeds about 28%. Sonnet medium fails about 9% of these tasks, and Jev doesn't identify which ones.
+- **Faults, not model results.** `nx-classes-weak-views` hit a DNS lookup failure at start (ineligible). `mi-numeric-range-consistent` had a stalled stream whose cost is unknown, so the governor halted the trial before its finish; it is excluded from dollars.
+- No code changed. Plan item 1 is done; next is item 2 (low concise as the arms' home).
+- Tests: 601 offline tests pass on Python 3.12 with the pinned 2.1.284 client first on PATH, none skipped (`runs/delegate-tuning-results-regression-py312.log`).
+
 ## October 5, 2026: the consult brief carries the agent's own test runs
 
 Offline, $0, user request (plan item 1, first half). Details: `docs/m6-modelpilot-policy.md`, "Delegation".

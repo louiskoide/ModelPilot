@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Updated October 5, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
+Updated October 6, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
 
 ## Objective
 
@@ -29,7 +29,7 @@ Files are under `runs/`; the full table, failures included: `docs/evidence.md`.
 - Cheapest at equal quality: `sonnet-5.5-low-concise`, $0.0689 a task, $0.0180 below Sonnet 5.5 medium on 23 tuning tasks (`paired-low-concise-23-20261004.json`); $0.107 against $0.140 on networkx.
 - Sonnet 5.5 falls short (strict passes) on `parse-decimal-grouping` (medium 1/6, Opus 4/4), `tomli-decode-error-attrs` (0/10, 2/4) and `nx-ismags-monomorphism` (5/8, 4/4). Every Sonnet/Opus failure reported success; a redo costs about $0.25 a task (`redo-cost-20261004.json`).
 - The ModelPilot arm never left Sonnet 5.5 medium on networkx ($0.142 against $0.140 a task, `bench-20261005-084812`). `jev_weight` is 0.09, maximum likelihood 0: Jev doesn't predict the misses.
-- A forced Opus review at the finish works live but rescued 1 of 6 trials, missing tomli's keyword bug twice (`bench-20261005-153506`).
+- A forced Opus review at the finish changed no strict outcome on 27 tuning tasks (26/27 either way) for +$0.069 a task (`bench-20261006-093401`).
 - Cache writes are about 45% of cost, mostly growth, never rebuilds (`cache-write-sources-20261003.json`). Tool-result bytes are 80–90% source read or searched, 6–10% test output (`tool-result-split-20261005.txt`).
 
 ## Working rules
@@ -59,7 +59,7 @@ python3 -m modelpilot.m5 --out runs/m5-new-report.json
 python3 -m modelpilot.governor --out runs/governor-demo.json
 ```
 
-- Latest: 601 offline tests pass on Python 3.12 (`runs/consult-brief-agent-tests-regression-py312.log`); record counts in `docs/changelog.md`.
+- Latest: 601 offline tests pass on Python 3.12 (`runs/delegate-tuning-results-regression-py312.log`); record counts in `docs/changelog.md`.
 - Put the pinned client 2.1.284 (`work/claude-client/node_modules/.bin`) first on PATH: 2.1.289 retries refused requests. System Python 3.9 has two known `test_transport` errors.
 - Real-client, bench and Jev tests need `work/` and node; CI (3.10, 3.14) skips them. With `work/` symlinked into a worktree, the Jev launcher's checkout-path test fails.
 - Paid, all behind `--live` (inspect each plan first): `cache_probe`, `claude_check`, `worker_check`, `cascade_check`, `evaluate`, `jev_check`, `jev_route_check`, `governed_session`, `bench`, `thinking_probe`. Limits are stopping thresholds, not billing caps.
@@ -75,7 +75,7 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 
 Built offline first; any live run needs the user's approval. Reviewed October 5 (`docs/changelog.md`).
 
-1. Delegation: compare switching with consulting on the tuning tasks (the consult brief now carries the agent's Bash test runs).
+1. Done October 6: delegation stays off (a forced review changed no outcome).
 2. Low concise as the ModelPilot arms' home: `effort: low` and `bench/prompts/concise.md` in `bench.ARMS`, and low concise's strict outcomes in `calibration` (else Jev alone prices low). Done when `policy_replay` runs clean; then compare with low concise.
 3. Caveman's proxy as an arm (user decision): first a $0 pass of its engine over recorded tool results (mostly source, which it elides to signatures), then low concise behind it on the subscription, about $2–3 as sent.
 4. Skip advisor calls and spend-overrun steps that no Jev answer could change (replay first). Saves TypeSafe calls, not wall time.
