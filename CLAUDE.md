@@ -28,7 +28,7 @@ Files are under `runs/`; the full table, failures included: `docs/evidence.md`.
 
 - Cheapest at equal quality: `sonnet-5.5-low-concise`, $0.0689 a task, $0.0180 below Sonnet 5.5 medium on 23 tuning tasks (`paired-low-concise-23-20261004.json`); $0.107 against $0.140 on networkx.
 - Sonnet 5.5 falls short (strict passes) on `parse-decimal-grouping` (medium 1/6, Opus 4/4), `tomli-decode-error-attrs` (0/10, 2/4) and `nx-ismags-monomorphism` (5/8, 4/4). Every Sonnet/Opus failure reported success; a redo costs about $0.25 a task (`redo-cost-20261004.json`).
-- The ModelPilot arm never left Sonnet 5.5 medium on networkx ($0.142 against $0.140 a task, `bench-20261005-084812`). `jev_weight` is 0.03 (refit with low's outcomes), maximum likelihood 0: Jev doesn't predict the misses.
+- From low concise, the ModelPilot arm never left it on the 29 tuning tasks (`bench-20261006-134508`): +$0.0045 a task against low concise, no difference shown; a third of Opus 5.5's cost at 0.915 against 0.981 strict for its setting (`opus-vs-modelpilot-20261006.json`). `jev_weight` 0.03, maximum likelihood 0: Jev doesn't predict the misses.
 - A forced Opus review at the finish changed no strict outcome on 27 tuning tasks (26/27 either way) for +$0.069 a task (`bench-20261006-093401`).
 - Cache writes are about 45% of cost, mostly growth, never rebuilds (`cache-write-sources-20261003.json`). Tool-result bytes are 80–90% source read or searched, 6–10% test output (`tool-result-split-20261005.txt`).
 
@@ -76,7 +76,7 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 Built offline first; any live run needs the user's approval. Reviewed October 5 (`docs/changelog.md`).
 
 1. Done October 6: delegation stays off (a forced review changed no outcome).
-2. Done October 6: the arms start at low concise; replayed, all 83 turn starts stay there. Next: compare with low concise (live, about $2.5 API plus $2.5 subscription; command in `docs/m6-benchmark-plan.md`).
+2. Done October 6: the arms start at low concise; live, the arm never left it (`bench-20261006-134508`).
 3. Caveman's proxy as an arm (user decision): first a $0 pass of its engine over recorded tool results (mostly source, which it elides to signatures), then low concise behind it on the subscription, about $2–3 as sent.
 4. Skip advisor calls and spend-overrun steps that no Jev answer could change (replay first). Saves TypeSafe calls, not wall time.
 5. Variance check, then 4b on the final split once the user confirms its trial-count rule.

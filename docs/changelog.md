@@ -2,6 +2,16 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 6, 2026: the ModelPilot arm from low concise, live
+
+$0 write-up of the user's live run `bench-20261006-134508`: `modelpilot` against `sonnet-5.5-low-concise` on the 29 tuning tasks × 1 trial, code `55e2ae5`, $1.90 known API spend plus 36 unpriced TypeSafe calls, $2.39 subscription as sent. Details: `docs/m6-benchmark-plan.md`, "Results: the ModelPilot arm from low concise".
+
+- **As replayed.** The arm never left Sonnet 5.5 low: 26 turn starts and 8 spend-overrun steps stayed, every request carried low effort and the concise prompt, and a replay reproduces all 36 decisions. Jev never advised low (Sonnet medium 16, high 7, xhigh 1, Opus xhigh 2); at the October 4 weight, 14 turn starts here would have moved to medium.
+- **Result.** Strict passes 25/26 against 26/28; both missed tomli's keyword test, and low concise also missed `parse-decimal-grouping`. Cost $0.0822 (lower bound) against $0.0786 a trial; paired +$0.0045 [−0.0006, +0.0098], no difference shown. About $0.0024 of it is the arm's larger first request (about 650 tokens: 3 more tools and the channel declaration).
+- **Faults, not model results.** A subscription 429 stopped the run after 57 trials, so one ModelPilot trial never ran. DNS failures made 2 ModelPilot trials ineligible. Two low concise trials (DNS, closed stream) have unknown cost.
+- **Against fixed Opus 5.5** (user question; $0, cross-run, `runs/opus-vs-modelpilot-20261006.json`): on the same 26 tasks ModelPilot cost a third of Opus ($0.082 against $0.248 a task; −$0.166 [−0.215, −0.125]) at 0.962 against 0.981 strict. Over all trials its setting passes 0.915, 0.066 below Opus on three tasks, so always-Opus pays only above about $2.58 per unnoticed miss. The saving is the cheap default's; fixed low concise gets it without ModelPilot.
+- No code changed. Plan item 2 is done: on the tuning tasks the arm is low concise plus a fixed overhead. Next is plan item 3 (caveman's $0 first pass); item 4 would remove the 34 no-op advisor decisions.
+
 ## October 6, 2026: low concise as the ModelPilot arms' start
 
 Offline, $0 (plan item 2). Details: `docs/m6-modelpilot-policy.md`, "Low concise as the start".

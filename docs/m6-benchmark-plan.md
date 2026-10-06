@@ -448,6 +448,41 @@ python3.12 -m modelpilot.bench --tasks "$TASKS" --arms modelpilot,sonnet-5.5-low
 
 Reading: if `modelpilot` stays on Sonnet 5.5 low throughout, matches low concise's strict passes and costs about the same, the arm is low concise plus overhead on these tasks, as the replay says. A move to medium or Opus, or a cost gap beyond the overhead, is what to explain.
 
+**Results: the ModelPilot arm from low concise against low concise (October 6): `bench-20261006-134508`.** The user ran the command above: code `55e2ae5` (branch `low-concise-start`, committed), pinned 2.1.284, `modelpilot` on the API key with live Jev, low concise on the subscription, strict grading in the run. $1.90 known API spend plus unpriced TypeSafe calls (36), $2.39 of subscription use as sent. Summary `runs/bench-20261006-134508/summary.strict.json`.
+
+Faults, none of them model results. A subscription 429 on the 57th trial (`cachetools-tlru-stale`, low concise; its fix passes) stopped the run, as designed, so `mi-reshape-multidim` × `modelpilot` never ran. DNS lookups failed (`gaierror`) for about five minutes: two `modelpilot` trials (`nx-vf2-isolated-nodes`, `mi-running-minmax-stable`) failed on their first request and are ineligible (`catalog_incomplete`), and one low concise trial (`mi-reshape-multidim`) lost its last request. One low concise stream closed mid-response (`cachetools-ttl-expire`, 120 s). Those two low concise trials passed, but their cost is unknown, so they are left out of dollar figures.
+
+| | `modelpilot` (start: low concise) | `sonnet-5.5-low-concise` |
+| --- | --- | --- |
+| Eligible complete trials | 26 | 28 |
+| Strict passes | 25/26 | 26/28 |
+| Hidden-test passes | 26/26 | 28/28 |
+| Mean cost a trial (cold-equivalent) | $0.0822, lower bound (TypeSafe unpriced) | $0.0786 (26 priced) |
+| Cost per strict pass | $0.0855 | $0.0851 |
+| Mean wall time | 39 s | 44 s (one stalled trial at 120 s) |
+
+Paired by task, `modelpilot` minus low concise (25 tasks, 24 for dollars; task bootstrap, seed 7): cost +$0.0045 a task, 95% [−0.0006, +0.0098]; strict pass rate +0.04 [0, 0.12]; wall time −4.1 s [−20.3, +8.3]. No difference shown.
+
+- **The arm never left low concise.** All 26 turn starts and all 8 mid-task steps (every one a spend overrun) stayed on Sonnet 5.5 low: 10 turn starts on cost, 16 by the hysteresis. Every main-loop request ran at low with the concise prompt (`prompt_check` applied in every trial). No switch writes and no rebuilds. Replayed, the policy reproduces all 36 recorded decisions (`runs/policy-replay-low-concise-live-20261006.json`).
+- **Jev never advised low.** Its 26 first answers were Sonnet 5.5 medium 16 times, high 7, xhigh 1, and Opus 5.5 xhigh twice (`cachetools-cached-condition`, `nx-classes-weak-views`). Both arms passed both tasks Jev sent to Opus, and Jev advised Sonnet 5.5 medium on `tomli-decode-error-attrs`, the task both arms missed. The gate priced Opus 5.5 xhigh at $0.55 against $0.12 for staying. Replayed at the October 4 weight (0.09), 14 of the 28 recorded turn starts here would have moved to Sonnet 5.5 medium; at 0.03 none did.
+- **Misses are the known ones.** Both arms missed `tomli-decode-error-attrs` on the keyword-construction edge test (`test_line_starts_and_keywords`). Low concise also missed `parse-decimal-grouping` (`test_numbers_without_separators`), which ModelPilot passed: one trial each, so variance.
+- **Where the extra $0.0045 comes from.** Over the 24 priced pairs, ModelPilot paid +$0.0012 in cache writes, +$0.0015 in reads and +$0.0016 in output a trial. Its first request is about 650 tokens larger (7,962 against 7,309): three more tools (the R5 `run_tests`, `search`, `expand_output`) and the channel declaration before the prompt. That costs about $0.0024 a trial (written once, read on 7.3 requests). The rest is 7.3 requests against 7.0 and 5% more output, within noise. The 36 TypeSafe calls are on top, unpriced.
+- **Still unprobed:** raising a client at native low with an effort message, since nothing moved.
+- **What it says:** single trials, no claims. On the tuning tasks the arm from low concise is low concise plus a fixed overhead of about 3% (about 650 tokens of prefix) and an advisor call per turn start and step, all of which stayed. Routing adds nothing here, because nothing the policy sees identifies the tasks where Sonnet fails. Plan item 4 (skip advisor calls and spend steps no Jev answer could change) targets those 34 no-op decisions.
+
+**Against fixed Opus 5.5 (cross-run, $0; user question, October 6).** `runs/opus-vs-modelpilot-20261006.py` pairs this run's 26 eligible ModelPilot trials with every complete fixed Opus 5.5 and low concise trial on record for the same tasks, repeats included. Strict passes and cold-equivalent cost are per-task means, so each task weighs the same. No new run was needed: Opus already has 35 trials on these tasks.
+
+| Same 26 tuning tasks | Trials | Strict pass rate | Cost a task |
+| --- | --- | --- | --- |
+| `modelpilot` (low start) | 26 | 0.962 | $0.082 (lower bound) |
+| Fixed Opus 5.5 | 35 | 0.981 | $0.248 |
+| Fixed low concise | 54 | 0.915 | $0.078 |
+
+- **Cost:** ModelPilot cost a third of Opus: −$0.166 a task, 95% [−0.215, −0.125].
+- **Quality:** −0.019 strict [−0.058, 0], only on `tomli-decode-error-attrs` (Opus 2/4). That flatters ModelPilot. Its one trial per task passed `parse-decimal-grouping` and `nx-ismags-monomorphism`, where its setting usually fails or often does. Over all trials, its setting (low concise) passes 0.915 against Opus's 0.981. The gap is 0.066, all on those three tasks (Opus against low concise: tomli 0.5 against 0, parse-decimal 1 against 0, ISMAGS 1 against 0.8), and every miss reported success.
+- **The trade:** always running Opus costs $0.170 a task more and avoids 0.066 misses a task. It pays only if an unnoticed miss costs more than about $2.58 to find and fix later.
+- **What it says:** the saving against Opus is the cheap default's, not routing's. Fixed low concise gets the same saving without ModelPilot, and ModelPilot's own difference from it is the tie plus overhead above. Against Opus the default cuts cost by two thirds at about 7 points of strict passes on three tasks. With hindsight routing at best 5% cheaper (`runs/redo-cost-20261004.json`), the policy sits near the cost optimum by never moving. These are tuning tasks with single ModelPilot trials and cross-run comparators, so none of this is proof of production savings. Opus belongs as an arm in the final-split run (plan item 5).
+
 **Proposed next run (approved September 30; ran September 30, October 1 and October 3, above):** the 7 harder tasks × `sonnet-5.5`, `opus-5.5`, `modelpilot` × 1 trial, seed 0, same limits as 4a (30 turns, $1 per session), `--run-budget 15`, with `--subscription-arms sonnet-5.5,opus-5.5` (user request), so only the ModelPilot arm spends API dollars (about $1–2 plus unpriced TypeSafe). Forecast $4.5–9 plus unpriced TypeSafe, assuming these tasks cost 2–4× 4a's per trial ($0.069 Sonnet, $0.170 Opus, $0.068 ModelPilot, cold-equivalent). It shows whether Sonnet 5.5 at medium fails where Opus passes, gives the mid-task step decisions their first live run, and feeds the re-grader (`python3 -m modelpilot.regrade`) for the priced-quality term. Adding `jev-compat-o55` costs about another $1–2.
 
 ## Question
