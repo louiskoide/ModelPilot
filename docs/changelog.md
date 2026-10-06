@@ -2,6 +2,17 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 5, 2026: delegation probe written up
+
+$0 write-up of the user's live probe `bench-20261005-153506` (`modelpilot-delegate` on `tomli-decode-error-attrs` and `nx-ismags-monomorphism` × 3, $1.45 measured plus unpriced TypeSafe calls). Details: `docs/m6-benchmark-plan.md`, "Results: the delegation probe".
+
+- **Mechanism, live 6/6.** The `Stop` hook held each finish once, the forced Opus 5.5 review reached the continuation, and every agent acted on it. Strict passes: tomli 1/3, ISMAGS 3/3.
+- **Graded before and after the review.** Each brief carried the trial's complete diff, so the pre-review states were saved as `runs/prereview-bench-20261005-153506` and graded at $0. tomli went 0/3 → 1/3 (Opus named the keyword-construction bug once and missed it twice); ISMAGS was already 3/3. The review rescued 1 of 6 trials.
+- **Brief flaw.** Every brief said no tests had run: it reads only `run_tests` results, and the agents ran their tests through Bash. Fix before the tuning comparison.
+- **Cost.** The review cost about $0.09 a trial on tomli and $0.16 on ISMAGS. Per strict pass, tomli $0.51 against Opus 5.5's $0.48; ISMAGS $0.33, where the passes were Sonnet's own.
+- **Harness fix.** `regrade --out` with a relative path broke tasks whose spec sets `pythonpath` (tomli). `PYTHONPATH` was relative to the checkout the tests run from, so the hidden grader couldn't import the package and every trial "failed". `bench_tasks.run_tests` and `test_env_paths` now make it absolute (`test_a_relative_tree_still_finds_its_pythonpath`, which failed before the fix), and a relative-path regrade of the tomli trials now reproduces their verdicts. Earlier regrades used the default absolute path and are unaffected.
+- **Tests.** 598 offline tests pass on Python 3.12 with the pinned 2.1.284 client first on PATH, none skipped (`runs/delegate-probe-results-regression-py312.log`).
+
 ## October 5, 2026: efficiency plan reviewed, CLAUDE.md cut from 80,648 to 8,143 bytes
 
 Offline, $0, user request: review a handoff doc ("CLAUDE.md restructure and efficiency plan", written against `508ba23`) and bring into `CLAUDE.md` what holds up. Worked in worktree `../ModelPilot-claude-md` (branch `claude-md-restructure`) while `bench-20261005-153506` ran in the main checkout.

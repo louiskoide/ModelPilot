@@ -114,8 +114,8 @@ def task_tree(task, repo, commit, destination):
 
 
 def test_env_paths(task, tree):
-    """PYTHONPATH entries the grader uses, and the agent gets, for this task."""
-    return [str(Path(tree)/task['pythonpath'])] if task.get('pythonpath') else []
+    """PYTHONPATH entries the grader uses, and the agent gets, for this task. Absolute: the tests run from the tree."""
+    return [os.path.abspath(Path(tree)/task['pythonpath'])] if task.get('pythonpath') else []
 
 
 def workspace(task, repo, destination):
@@ -253,7 +253,7 @@ def python_satisfies(python, minimum):
 def run_tests(command, tree, python, pythonpath=None, home=None, tmp=None, keep_output=False):
     env = clean_env(python, home, tmp)
     if pythonpath:
-        env['PYTHONPATH'] = str(Path(tree)/pythonpath)
+        env['PYTHONPATH'] = os.path.abspath(Path(tree)/pythonpath)  # cwd is the tree, so a relative one points nowhere
     argv = [python if part == '{python}' else part for part in command]
     started = time.monotonic()
     try:

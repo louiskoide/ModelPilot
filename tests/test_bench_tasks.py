@@ -142,6 +142,21 @@ class BenchTaskTests(unittest.TestCase):
         finally:
             del os.environ['ANTHROPIC_API_KEY']
 
+    def test_a_relative_tree_still_finds_its_pythonpath(self):
+        # regrade --out with a relative path handed the grader a relative tree: PYTHONPATH then pointed nowhere from
+        # the tests' working directory, and every trial of a src-layout task (tomli) "failed" (October 5).
+        (self.root/'src'/'srcpkg').mkdir(parents=True)
+        (self.root/'src'/'srcpkg'/'__init__.py').write_text('VALUE = "IMPORTED"\n')
+        cwd = os.getcwd()
+        os.chdir(self.root.parent)
+        self.addCleanup(os.chdir, cwd)
+        tree = Path(self.root.name)
+        probe = ['{python}', '-c', 'import srcpkg; print(srcpkg.VALUE)']
+        self.assertIn('IMPORTED', run_tests(probe, tree, sys.executable, 'src')['output_tail'])
+        [entry] = bench_tasks.test_env_paths({'pythonpath': 'src'}, tree)
+        self.assertTrue(Path(entry).is_absolute())
+        self.assertEqual(Path(entry).resolve(), (self.root/'src').resolve())
+
     def test_committed_task_specs_are_complete(self):
         specs = sorted((Path(__file__).resolve().parents[1]/'bench'/'tasks').glob('*/task.json'))
         self.assertGreaterEqual(len(specs), 5)
