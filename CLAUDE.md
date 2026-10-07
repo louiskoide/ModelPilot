@@ -77,7 +77,7 @@ Built offline first; any live run needs the user's approval. 1–4 done October 
 
 5. Spec-written tests: the first probe caught 1 of 3 (parse), $0.13 a task; a 29-task run waits on 7.
 6. Long-session benchmark: idle gaps, compaction, a one-hour TTL probe.
-7. Price each miss, not one set price: the late fix (measured: repair from a host-written bug report) plus damage, unknown until real incidents; meanwhile exposure and per-task break-even damage.
+7. Price each miss, not one set price: the late fix (measured: repair from a host-written bug report) plus damage, unknown until real incidents. Exposure, break-even done October 6; late-fix harness next.
 8. 30 more labelled tasks before any predictor.
 9. Caveman's proxy (user decision): $0 pass over recorded tool results, then low concise behind it; strict passes decide.
 10. ModelPilot's own predictor, only if 8 shows misses predictable; never edit Jev.
