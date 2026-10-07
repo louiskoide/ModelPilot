@@ -154,6 +154,11 @@ def delegation(cfg, kind):
     return (cfg.get('delegation') or {}).get(kind) or {'enabled': False}
 
 
+def delegating(cfg):
+    """Whether consults or handoff notes are on: only they speak to the agent, through the declared channel."""
+    return any(delegation(cfg, kind)['enabled'] for kind in ('consult', 'handoff_note'))
+
+
 def _rank(cfg, model):
     return cfg['models'][model]['rank']
 

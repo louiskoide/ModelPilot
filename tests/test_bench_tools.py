@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest import mock
 from modelpilot import bench, fixtures, policy_actions, switch_policy
-from modelpilot.bench_tools import OWNER, ToolServer, excerpt
+from modelpilot.bench_tools import OWNER, TOOL_NAMES, ToolServer, excerpt
 from modelpilot.governor import Governor
 from modelpilot.modelpilot_adapter import ModelPilotAdapter
 from modelpilot.proxy import system_text
@@ -192,9 +192,10 @@ class ToolTrialTests(unittest.TestCase):
 
     OPUS_RATES = dict(test_bench.RATES, **{'claude-opus-5-5': dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)})
 
-    def advised_trial(self, name, script, model, effort, limit=1, config=None, arm='modelpilot', **kwargs):
+    def advised_trial(self, name, script, model, effort, limit=1, config=None, arm='modelpilot', tools=None, **kwargs):
         """The active arm with Jev's real bridge and code, its TypeSafe answer stubbed ($0, never eligible). The policy
-        runs with calibration off unless a config is given: the stub's answer is what should drive its moves."""
+        runs with calibration off unless a config is given: the stub's answer is what should drive its moves. tools=True
+        gives an arm without delegation the R5 tools, for scripts whose host test runs drive the policy."""
         if config is None:
             config = switch_policy.load()
             config['calibration']['enabled'] = False
@@ -203,7 +204,7 @@ class ToolTrialTests(unittest.TestCase):
                 'effort': {'choice': effort, 'confidence': .85,
                            'probabilities': {e: .85 if e == effort else .0375 for e in EFFORTS}}}
         with mock.patch.object(switch_policy, 'load', return_value=config):
-            adapter = bench.arm_adapter(arm, limit, 1, advisor_stub=stub)
+            adapter = bench.arm_adapter(arm, limit, 1, advisor_stub=stub, tools=tools)
             with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
                 return self.modelpilot_trial(name, script, adapter, **kwargs)
 
@@ -213,7 +214,7 @@ class ToolTrialTests(unittest.TestCase):
     def test_the_active_arm_jumps_straight_to_jevs_setting_and_again_on_stuck_evidence(self):
         script = self.STALLED + [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
                                  {'tool': 'mcp__modelpilot__run_tests', 'input': {}}, {'text': 'Done.'}]
-        record = self.advised_trial('active', script, 'claude-sonnet-5-5', 'high', rates=self.OPUS_RATES)
+        record = self.advised_trial('active', script, 'claude-sonnet-5-5', 'high', tools=True, rates=self.OPUS_RATES)
         self.assertTrue(record['passed'], record['grade'])
         # The first request (a turn start) jumps from the client's Sonnet 5.5 medium straight to Jev's Sonnet 5.5 high;
         # three stalled suite runs are evidence it isn't enough, and inside the turn only the model can move: Opus 5.5,
@@ -289,6 +290,10 @@ class ToolTrialTests(unittest.TestCase):
         self.assertIn('pkg/__init__.py', brief)  # the diff against the trial's base commit
         main = [b for b in bodies if b.get('stream') and b.get('tools')]
         self.assertEqual({b['model'] for b in main}, {'claude-sonnet-5-5'})  # the conversation never moved
+        # Delegation on: the R5 tools and the declared channel its deliveries speak through.
+        self.assertTrue(set(TOOL_NAMES) <= {tool['name'] for tool in main[0]['tools']})
+        self.assertIn('ModelPilot coordinates this session', json.dumps(main[0]['messages'][0]))
+        self.assertEqual((record['routing']['tools']['enabled'], record['routing']['channel_declared']), (True, True))
         holding = [i for i, b in enumerate(main) if 'synthetic output' in json.dumps(b['messages'])]
         self.assertEqual(holding, list(range(holding[0], len(main))))  # from delivery on, every request carries it
         self.assertEqual(len(main) - holding[0], 2)  # the continuation and the agent's one more step
@@ -375,7 +380,8 @@ class ToolTrialTests(unittest.TestCase):
 
     def test_a_stuck_task_with_nothing_stronger_is_stopped_unfinished(self):
         script = self.STALLED + [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 9 + [{'text': 'Done.'}]
-        record = self.advised_trial('stuck', script, 'claude-opus-5-5', 'max', max_turns=20, rates=self.OPUS_RATES)
+        record = self.advised_trial('stuck', script, 'claude-opus-5-5', 'max', max_turns=20, tools=True,
+                                    rates=self.OPUS_RATES)
         self.assertFalse(record['passed'])
         self.assertEqual(record['sessions'][0]['stop'], 'policy_stop', record['sessions'])
         self.assertEqual(self.main_loop(), [('claude-opus-5-5', 'max')]*4)
@@ -385,7 +391,8 @@ class ToolTrialTests(unittest.TestCase):
 
     def test_without_a_typesafe_key_the_arm_stays_at_its_start_and_is_ineligible(self):
         script = [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
-                  {'tool': 'mcp__modelpilot__run_tests', 'input': {}}, {'text': 'Done.'}]
+                  {'tool': 'Bash', 'input': {'command': 'python3 -m unittest 2>&1 | tail -3', 'description': 'tests'}},
+                  {'text': 'Done.'}]
         with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
             record = self.modelpilot_trial('no-key', script, bench.arm_adapter('modelpilot', 1, 1))
         self.assertTrue(record['passed'], record['grade'])
@@ -394,6 +401,16 @@ class ToolTrialTests(unittest.TestCase):
         self.assertTrue(record['prompt_check']['applied'], record['prompt_check'])
         self.assertEqual((record['routing']['benchmark_eligible'], record['routing']['ineligible_reason']),
                          (False, 'no_advisor'))
+        # Delegation off (October 6, plan item 3): no R5 tools and no channel, in the prompt or the ledger.
+        main = [json.loads(b) for b in self.upstream.bodies if b'"tools"' in b]
+        self.assertFalse({tool['name'] for b in main for tool in b['tools']} & set(TOOL_NAMES))
+        sent = json.dumps([b['messages'] for b in main])
+        self.assertNotIn('ModelPilot coordinates this session', sent)
+        self.assertNotIn('ModelPilot tools:', sent)
+        routing = record['routing']
+        self.assertEqual((routing['tools']['enabled'], routing['channel_declared']), (False, False))
+        self.assertEqual(routing['tools']['calls'], [])
+        self.assertGreater(routing['hook_events'], 0)  # the hooks still observe
 
     def test_policy_refuses_a_live_upstream(self):
         with self.assertRaises(ValueError):
