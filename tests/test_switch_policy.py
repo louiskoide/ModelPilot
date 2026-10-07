@@ -443,6 +443,62 @@ class JevGateTests(unittest.TestCase):
         self.assertGreater(moved, 0)
 
 
+class BreakEvenTests(unittest.TestCase):
+    """Plan item 7: what an unnoticed miss would have to cost for a stronger setting to pay. Shown, never priced."""
+    def setUp(self):
+        self.cfg, self.rates = sp.load(), bench.rates()
+
+    def named(self, setting):
+        return {'model': {'choice': setting[0], 'confidence': 1.0, 'probabilities': {setting[0]: 1.0}},
+                'effort': {'choice': setting[1], 'confidence': 1.0, 'probabilities': {setting[1]: 1.0}}}
+
+    def test_each_break_even_is_where_the_decision_turns(self):
+        """Priced into the gate's own decision, a damage just under each figure stays and just over it moves there."""
+        measured = copy.deepcopy(self.cfg)
+        measured['calibration']['jev_weight'] = 0.0
+        checked = 0
+        for kb, warm, trigger, current in itertools.product(
+                (2, 11, 60), (False, True), ('turn_start', 'step'), ((S, 'low'), (S, 'medium'), (O, 'low'))):
+            prof = sp.profile(self.cfg, request(kb), warm)
+            shown = sp.break_even(self.cfg, self.rates, current, prof, trigger)
+            for move in shown['moves']:
+                damage = move['damage_usd']
+                if not damage:
+                    continue
+                target = tuple(move['setting'].split('/'))
+                below, above = (sp._decide(measured, self.rates, self.named(target), current, prof, trigger,
+                                           damage_usd=damage * f) for f in (.99, 1.01))
+                self.assertEqual(below['action'], 'stay', (kb, warm, trigger, current, move))
+                self.assertEqual((above['action'], above['target']), ('jump', list(target)), (kb, warm, trigger, move))
+                checked += 1
+        self.assertGreater(checked, 20)
+
+    def test_from_the_low_start_only_opus_at_medium_or_above_has_fewer_measured_misses(self):
+        prof = sp.profile(self.cfg, request(20), False)
+        start = sp.break_even(self.cfg, self.rates, (S, 'low'), prof, 'turn_start')
+        self.assertEqual(start['basis'], 'measured_pass_rates')
+        self.assertEqual(start['cheapest']['setting'], f'{O}/medium')
+        self.assertTrue(1 < start['cheapest']['damage_usd'] < 10, start['cheapest'])
+        by = {m['setting']: m for m in start['moves']}
+        self.assertIsNone(by[f'{O}/low']['damage_usd'])  # Opus low has only Sonnet low's measured rate
+        self.assertGreater(by[f'{S}/medium']['damage_usd'], start['cheapest']['damage_usd'])  # 0.4 points fewer misses
+        # Inside a turn the effort holds, and Opus at low has no fewer measured misses: no move can pay.
+        step = sp.break_even(self.cfg, self.rates, (S, 'low'), prof, 'step')
+        self.assertEqual([m['setting'] for m in step['moves']], [f'{O}/low'])
+        self.assertIsNone(step['cheapest'])
+
+    def test_it_is_shown_only_where_the_measured_rates_apply_and_changes_nothing(self):
+        prof = sp.profile(self.cfg, request(11), False)
+        self.assertIsNone(sp.break_even(self.cfg, self.rates, (S, 'low'), prof, 'stuck_evidence'))
+        self.assertIsNone(sp.break_even(jev_only(), self.rates, (S, 'low'), prof, 'turn_start'))
+        self.assertIsNone(sp.break_even(self.cfg, self.rates, (O, 'max'), prof, 'turn_start')['cheapest'])  # strongest
+        adv = advice(O, 'xhigh')
+        decision = sp.decide(self.cfg, self.rates, adv, (S, 'low'), prof, 'turn_start')
+        self.assertEqual(decision['break_even'], sp.break_even(self.cfg, self.rates, (S, 'low'), prof, 'turn_start'))
+        bare = sp._decide(self.cfg, self.rates, adv, (S, 'low'), prof, 'turn_start')
+        self.assertEqual({k: decision[k] for k in bare}, bare)
+
+
 if __name__ == '__main__':
     unittest.main()
 

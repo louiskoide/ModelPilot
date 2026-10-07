@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Updated October 6, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
+Updated October 7, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
 
 ## Objective
 
@@ -68,7 +68,7 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 ## Code map (`modelpilot/`; detail in `docs/code-map.md`)
 
 - Cache and proxy: `cache_probe`, `proxy`, `fixtures`, `soak`. Ledger and governor: `m2`, `m2_mcp`, `governor`, `hooks`, `governed_session` (`docs/governor.md`).
-- Benchmark: `bench`, `bench_tasks`, `bench_report`, `regrade`, `long_session` (`docs/m6-benchmark-plan.md`). Jev arms: `bench_jev`, `jev_*` (`docs/bench-adapters.md`).
+- Benchmark: `bench`, `bench_tasks`, `bench_report`, `regrade`, `long_session`, `late_fix` (`docs/m6-benchmark-plan.md`). Jev arms: `bench_jev`, `jev_*` (`docs/bench-adapters.md`).
 - ModelPilot arm: `active_policy`, `switch_policy`, `advisor`, `delegation`, `policy_replay`, `modelpilot_adapter`, `bench_tools`, `fixture_dispatch`, `policy_actions` (`docs/m6-modelpilot-policy.md`, `configs/modelpilot-policy.json`).
 
 ## Plan, in order
@@ -77,7 +77,7 @@ Built offline first; any live run needs the user's approval. 1–4 done October 
 
 5. Spec-written tests: the first probe caught 1 of 3 (parse), $0.13 a task; a 29-task run waits on 7.
 6. Long sessions: built offline; 1h TTL probe and sequence runs await approval.
-7. Price each miss, not one set price: the late fix (measured: repair from a host-written bug report) plus damage, unknown until real incidents; meanwhile exposure and per-task break-even damage.
+7. Price each miss: its late fix (repair from a host-written bug report) plus damage, unknown until real incidents. Exposure, break-even, late-fix harness done; its live run (about $2.5) next.
 8. 30 labelling tasks: built offline; runs await approval.
 9. Caveman: parked (user decision); its $0 pass found about 1% at most, all lossy.
 10. ModelPilot's own predictor, only if 8 shows misses predictable; never edit Jev.
