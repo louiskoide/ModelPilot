@@ -192,6 +192,30 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertEqual([(d['action'], d['reason']) for d in self.decisions()], [('stay', 'current_is_cheapest')])
         self.assertEqual(self.dispatches(), [])
 
+    def test_jev_is_asked_only_where_some_answer_could_move(self):
+        self.start(config=switch_policy.load())  # the shipped, calibrated policy
+        self.advisor.answer = {'model': {'choice': O, 'confidence': .99, 'probabilities': {O: 1}},
+                               'effort': {'choice': 'max', 'confidence': .99, 'probabilities': {'max': 1}}}
+        self.assertEqual(self.post()[0], 200)
+        self.assertEqual(self.advisor.calls, [])  # no answer moves this turn start at jev_weight 0.03
+        self.assertEqual(self.sent(), [(S, 'medium')])
+        gov = self.gov()
+        try:
+            decision, = [e['payload'] for e in gov.journal('advisor_decision')]
+        finally:
+            gov.close()
+        self.assertEqual((decision['action'], decision['reason'], decision['advice']), ('stay', 'jev_cannot_change', None))
+        self.assertEqual((decision['gate']['can_change'], decision['gate']['reason']), (False, 'every_answer_stays'))
+        self.assertGreater(decision['forecast_usd'], 0)  # a later step still compares spend against it
+
+    def test_with_the_gate_off_jev_is_asked_at_every_point(self):
+        cfg = switch_policy.load()
+        cfg['jev_gate']['enabled'] = False
+        self.start(config=cfg)
+        self.advisor.answer = {'model': {'choice': S, 'confidence': .9, 'probabilities': {S: 1}}}
+        self.assertEqual(self.post()[0], 200)
+        self.assertEqual(len(self.advisor.calls), 1)
+
     def test_no_advice_stays_and_never_blocks_the_request(self):
         self.start()
         self.advisor.answer = {'error': 'advice_failed: AbortError'}

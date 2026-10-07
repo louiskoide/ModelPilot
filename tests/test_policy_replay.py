@@ -72,6 +72,10 @@ class ReplayTests(unittest.TestCase):
         summary = pr.summarize(rows)
         self.assertEqual(summary['status'], {'changed': 1, 'path_diverged': 1, 'not_replayable': 1, 'same': 1})
         self.assertEqual(summary['moves'], {f'jump {S}/high -> stay {S}/medium': 1})
+        # The gate would have skipped Jev at all three replayable points, and none of them moves on its real answer.
+        self.assertEqual(summary['gate']['skipped'], {'turn_start': 2, 'step': 1})
+        self.assertEqual((summary['gate']['asked'], summary['gate']['skipped_but_moved']), ({}, 0))
+        self.assertTrue(jumped['replayed']['gate']['skip'])
 
     def test_an_arms_start_replaces_the_recorded_one_until_the_path_diverges(self):
         stay = dict(self.jump, action='stay', target=[S, 'medium'])

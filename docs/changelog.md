@@ -2,6 +2,15 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 6, 2026: plan item 1: Jev only where an answer could change the decision
+
+$0, offline, user's pick of the planned gate over dropping Jev at turn starts. `switch_policy.jev_gate` runs before each advisor call at a turn start or step: Jev's choices and confidences set the candidates (66 answer shapes), and with `recovery.wasted_fraction` 1 every expected cost falls as any P_ok rises, so staying at Jev's estimate 0 against each candidate at 1 bounds every answer. If nothing beats staying by the hysteresis even then, Jev isn't called and the decision is journaled as a stay, `jev_cannot_change`. Always asked on stuck evidence, where a consult is possible, and if `wasted_fraction` drops below 1. Config `jev_gate.enabled` (on); manifests record it; about 8 ms a point. Details: `docs/m6-modelpilot-policy.md`, "Jev only where an answer can matter".
+
+- **Replay first** (`runs/policy-replay-jev-gate-20261006.json`, the seven ModelPilot runs, `--arm modelpilot`): Jev skipped at all 180 recorded decisions (111 turn starts, 69 steps), none moving on the answer Jev gave; the closest comes $0.0116 short of the hysteresis. So the arm, as replayed, makes no Jev call on these runs: no TypeSafe spend, latency or advisor failures, and no prompt sent out.
+- **Not vacuous.** At `jev_weight` 0.06 every turn start asks; at 0.065, 0.09, 0.2 and 0.5, 12, 51, 88 and 99 replayed decisions move, every one where the gate asks. A unit test sweeps weights, prompt sizes, warmth, triggers and settings against random answers: every skipped point stays, and some asked points move.
+- **An approach dropped on the way.** A first version enumerated point-mass answers and kept a second-order margin (12 × jev_weight² × the recovery cost) for answers between them; at $0.015 that margin exceeded the $0.012 gap at every turn start, so it would never skip. The monotone bound needs no margin.
+- Tests: 609 offline tests pass on Python 3.12 with the pinned 2.1.284 client first on PATH (`runs/jev-gate-regression-py312.log`).
+
 ## October 6, 2026: plan item 3: no R5 tools or channel while delegation is off
 
 $0, offline. The `modelpilot` arm now sends the client's prompt and tools unchanged: the R5 tools (`run_tests`, `search`, `expand_output`) and the channel declaration come only while delegation is on (`switch_policy.delegating`, `bench.arm_tools`). The channel is then not declared in the ledger either, so a hook never delivers under a marker the agent wasn't told about. `modelpilot-delegate` keeps both, as measured. Manifests record `r5_tools` and `channel_declared` per arm; trial records `channel_declared`. Details: `docs/m6-modelpilot-policy.md`, "No R5 tools or channel while delegation is off".

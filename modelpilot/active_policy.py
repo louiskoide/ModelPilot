@@ -67,6 +67,7 @@ def parameters(model, effort, config=None, overrides=None):
             'per_message_effort': {k: cfg['per_message_effort'][k] for k in ('enabled', 'placement', 'beta')},
             'calibration': dict({k: cfg['calibration'][k] for k in ('enabled', 'jev_weight', 'applies_at')},
                                 outcomes=cfg['calibration']['outcomes']),
+            'jev_gate': {'enabled': switch_policy.gate(cfg)['enabled']},
             'cost_model': {k: cfg[k] for k in ('defaults', 'effort_output_factor', 'effort_request_factor',
                                                'bytes_per_token')},
             'delegation': {kind: {k: v for k, v in switch_policy.delegation(cfg, kind).items() if k != 'about'}
@@ -237,16 +238,18 @@ class ActivePolicy(ProxyPolicy):
         earlier = [e['payload'] for e in gov.journal('advisor_decision') if e['task'] == task and e['payload']['point'] == key]
         if earlier:
             return earlier[-1]
-        advice = None
-        if self.advisor is not None:
-            evidence = self.evidence(gov, task, setting, trigger, facts) if trigger != 'turn_start' else None
-            advice = self.advisor.ask(request, setting[0], self.catalog, self.config['effort_order'],
-                                      self.prompt_prefix, evidence)
-        usable = advice if advice and not advice.get('error') else None
         reach = switch_policy.content_positions(current.get('messages') or [])
         prof = switch_policy.profile(self.config, current, self.warm(task, setting, now),
                                      entries=self.entries(task, now, reach))
         prof['history'] = any(m.get('role') == 'assistant' for m in request.get('messages') or [])
+        advice, gate = None, None
+        if self.advisor is not None and switch_policy.gate(self.config)['enabled']:
+            gate = switch_policy.jev_gate(self.config, rates, setting, prof, trigger)
+        if self.advisor is not None and (gate is None or gate['can_change']):
+            evidence = self.evidence(gov, task, setting, trigger, facts) if trigger != 'turn_start' else None
+            advice = self.advisor.ask(request, setting[0], self.catalog, self.config['effort_order'],
+                                      self.prompt_prefix, evidence)
+        usable = advice if advice and not advice.get('error') else None
         consult = switch_policy.delegation(self.config, 'consult')
         if consult['enabled'] and trigger in consult['at']:
             done = sum(e['payload']['kind'] == 'consult' for e in gov.journal('delegation')
@@ -258,6 +261,10 @@ class ActivePolicy(ProxyPolicy):
                         force_consult=bool(facts) and (facts['cause'] in consult['force'] or
                                                        bool(facts.get('first_pass')) and 'tests_pass' in consult['force']))
         decision = switch_policy.decide(self.config, rates, usable, setting, prof, trigger)
+        if gate is not None:
+            decision['gate'] = gate
+            if not gate['can_change']:  # Jev wasn't asked: no answer it could give moves this point
+                decision['reason'] = 'jev_cannot_change'
         if decision['action'] != 'consult':
             self.briefs.pop(key, None)
         suite = gov.state.observations(task, revision, 'failures', 1)
