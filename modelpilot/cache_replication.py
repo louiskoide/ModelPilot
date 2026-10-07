@@ -26,7 +26,7 @@ RATES[OPUS_5_5] = dict(input=4, output=20, write_5m=5, write_1h=8, read=.2)
 # Sonnet 5.5: Sonnet 5's prices, as stated at launch (configs/sonnet-5-5-rates.json).
 RATES[SONNET_5_5] = dict(input=2, output=10, write_5m=2.5, write_1h=4, read=.2)
 SOURCE = 'https://platform.claude.com/docs/en/build-with-claude/prompt-caching'
-SUITES = ('three-model', 'opus-5-5', 'ttl-1h')
+SUITES = ('three-model', 'opus-5-5', 'ttl-1h', 'ttl-1h-long')
 # ttl-1h: each kind is an independent prefix, touched at these (lifetime marked, seconds after the previous request
 # started) steps. The first request writes; the question is whether the last one reads.
 TTL_1H_KINDS = {
@@ -42,6 +42,9 @@ TTL_1H_KINDS = {
     'downgrade': [('1h', 0), ('5m', 60), ('5m', 600)],
 }
 TTL_1H_MODELS = (SONNET_5_5, OPUS_5_5)
+# ttl-1h-long: the three kinds that wait most of an hour, alone. The October 6 ttl-1h run measured the others; its
+# long kinds were lost when the computer slept mid-wait (runs/m0-replication-ttl-1h-20261006-215100).
+TTL_1H_LONG = ('before', 'after', 'refresh')
 
 
 def plan(run_id, suite='three-model'):
@@ -57,10 +60,11 @@ def plan(run_id, suite='three-model'):
                 p.pop('output_config')
             requests.append((label, delay, p))
         groups.append(dict(name=name, steps=requests))
-    if suite == 'ttl-1h':
+    if suite in ('ttl-1h', 'ttl-1h-long'):
+        kinds = {k: v for k, v in TTL_1H_KINDS.items() if suite == 'ttl-1h' or k in TTL_1H_LONG}
         for repeat in range(3):
             for model in TTL_1H_MODELS:
-                for kind, steps in TTL_1H_KINDS.items():
+                for kind, steps in kinds.items():
                     name = f'ttl/1h/{repeat}/{model}/{kind}'
                     requests = [(f'touch_{i}_{ttl}', delay,
                                  probe.payload({'prefix_lines': 260, 'max_tokens': 32}, run_id+'/'+name, model, 'low',
@@ -115,6 +119,9 @@ class Budget:
             raise RuntimeError('Budget admission stopped the run')
 
 
+LATE_SECONDS = 60
+
+
 def marked_ttl(p):
     """The lifetime a probe request's one breakpoint asks for."""
     block = (p.get('system') or p['messages'][0]['content'])[0]
@@ -134,11 +141,13 @@ def ttl_summary(rows):
         cell = out.setdefault(model, {}).setdefault(kind, {'repeats': {}})
         cell['repeats'].setdefault(repeat, []).append(
             [r.get('ttl'), None if r.get('since_previous_start_seconds') is None else round(r['since_previous_start_seconds']),
-             r.get('observation'), split.get('ephemeral_5m_input_tokens'), split.get('ephemeral_1h_input_tokens')])
+             r.get('observation'), split.get('ephemeral_5m_input_tokens'), split.get('ephemeral_1h_input_tokens'),
+             bool(r.get('late'))])
     for kinds in out.values():
         for kind, cell in kinds.items():
-            complete = [steps for steps in cell['repeats'].values() if len(steps) == len(TTL_1H_KINDS[kind])]
-            cell.update(complete=len(complete), last_read=sum(steps[-1][2] in ('hit', 'partial_hit_and_write')
+            whole = [steps for steps in cell['repeats'].values() if len(steps) == len(TTL_1H_KINDS[kind])]
+            complete = [steps for steps in whole if not any(step[5] for step in steps)]
+            cell.update(complete=len(complete), late=len(whole) - len(complete), last_read=sum(steps[-1][2] in ('hit', 'partial_hit_and_write')
                                                               for steps in complete))
     return out
 
@@ -146,14 +155,17 @@ def ttl_summary(rows):
 def execute(groups, out, budget, transport=probe.send):
     """Interleave independent prefixes, serialize HTTP calls; no retries or background threads."""
     rows, queue = [], []
-    started = time.monotonic()
+    # Waits are scheduled on the wall clock: on macOS the monotonic clock stops while the computer sleeps, and a
+    # wait counted on it then ends hours late in real time (the October 6 ttl-1h run). A step that starts more than
+    # LATE_SECONDS after its planned gap is marked late, and ttl_summary leaves its repeat out.
+    started = time.time()
     status, error = 'complete', None
     for i in range(len(groups)):
         heapq.heappush(queue, (started, i, 0, None))
     def summary():
         result = dict(status=status, calls=len(rows), planned_calls=sum(len(g['steps']) for g in groups),
                       known_cost_usd=budget.spent, cost_complete=all(r.get('cost_usd') is not None for r in rows),
-                      wall_seconds=time.monotonic()-started, error=error,
+                      wall_seconds=time.time()-started, error=error,
                       scope='Direct API cache observations; no Claude Code integration or savings claim.',
                       observations=[{k:r.get(k) for k in ('group','step','observation','since_previous_start_seconds')} for r in rows])
         tmp = out/'summary.tmp'
@@ -164,8 +176,8 @@ def execute(groups, out, budget, transport=probe.send):
         try:
             while queue:
                 due, i, step, previous = heapq.heappop(queue)
-                while due > time.monotonic():
-                    time.sleep(min(30, due-time.monotonic()))
+                while due > time.time():
+                    time.sleep(min(30, due-time.time()))
                 group = groups[i]
                 label, delay, p = group['steps'][step]
                 rate = RATES[p['model']]
@@ -173,10 +185,12 @@ def execute(groups, out, budget, transport=probe.send):
                 # Estimated, not a provider-enforced billing ceiling.
                 estimate = ((len(json.dumps(p).encode())+1024)*rate['write_5m'] + p['max_tokens']*rate['output'])/1e6
                 budget.reserve(estimate)
-                now = time.monotonic()
+                now, clock = time.time(), time.monotonic()
                 row = dict(group=group['name'], step=label, model=p['model'], ttl=marked_ttl(p),
                            effort=p.get('output_config',{}).get('effort'), started_unix=time.time(),
-                           since_previous_start_seconds=None if previous is None else now-previous)
+                           since_previous_start_seconds=None if previous is None else now-previous,
+                           planned_gap_seconds=None if previous is None else delay,
+                           late=previous is not None and group['name'].startswith('ttl/') and now-previous > delay+LATE_SECONDS)
                 try:
                     response, rid = transport(p, {})
                     usage = response['usage']
@@ -191,14 +205,14 @@ def execute(groups, out, budget, transport=probe.send):
                     row.update(status='error', error_type=type(exc).__name__, **probe.error_details(exc))
                     raise
                 finally:
-                    row['wall_seconds'] = time.monotonic()-now
+                    row['wall_seconds'] = time.monotonic()-clock
                     rows.append(row)
                     log.write(json.dumps(row)+'\n'); log.flush()
                     print(group['name'], label, row['status'], row.get('observation',''), flush=True)
                 if step+1 < len(group['steps']):
                     gap = group['steps'][step+1][1]
                     # TTL is measured from request start; record actual gaps, including scheduler delay.
-                    due_next = max(time.monotonic(), now+gap) if group['name'].startswith('ttl/') else float('-inf')
+                    due_next = max(time.time(), now+gap) if group['name'].startswith('ttl/') else float('-inf')
                     heapq.heappush(queue, (due_next, i, step+1, now))
                 status = 'running'
                 summary()
@@ -233,7 +247,9 @@ def main():
           f'results: {out}', flush=True)
     if not args.live:
         print('Dry-run only. Add --live to send paid requests. Allow roughly ' +
-              ('90 minutes (the longest prefix waits 80 minutes; others run meanwhile).' if args.suite == 'ttl-1h'
+              ('90 minutes (the longest prefix waits 80 minutes; others run meanwhile). Keep the computer awake '
+               '(caffeinate -i; a closed laptop lid still sleeps): a step that starts late is marked and left out.'
+               if args.suite in ('ttl-1h', 'ttl-1h-long')
                else '10–20 minutes.'))
         return
     if not os.environ.get('ANTHROPIC_API_KEY'):
@@ -243,7 +259,7 @@ def main():
     if problem:
         raise SystemExit(problem)
     result = execute(groups, out, budget)
-    if args.suite == 'ttl-1h':
+    if args.suite in ('ttl-1h', 'ttl-1h-long'):
         rows = [json.loads(line) for line in (out/'observations.jsonl').read_text().splitlines() if line.strip()]
         (out/'ttl-summary.json').write_text(json.dumps(ttl_summary(rows), indent=2)+'\n')
     print(json.dumps({k:v for k,v in result.items() if k != 'observations'}, indent=2))

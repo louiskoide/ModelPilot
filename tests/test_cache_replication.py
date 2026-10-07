@@ -86,4 +86,40 @@ class OneHourSuiteTests(unittest.TestCase):
                 row(2, 'before', None, 'write', hour=5000)]  # stopped before its last step
         cell = r.ttl_summary(rows)[r.SONNET_5_5]['before']
         self.assertEqual((cell['complete'], cell['last_read']), (2, 1))
-        self.assertEqual(cell['repeats']['0'], [['1h', None, 'write', 0, 5000], ['1h', 3001, 'hit', 0, 0]])
+        self.assertEqual(cell['repeats']['0'], [['1h', None, 'write', 0, 5000, False], ['1h', 3001, 'hit', 0, 0, False]])
+
+    def test_a_repeat_with_a_late_step_is_left_out(self):
+        rows = [{'group': f'ttl/1h/0/{r.SONNET_5_5}/before', 'ttl': '1h', 'since_previous_start_seconds': None,
+                 'observation': 'write', 'usage': {}},
+                {'group': f'ttl/1h/0/{r.SONNET_5_5}/before', 'ttl': '1h', 'since_previous_start_seconds': 38000,
+                 'observation': 'write', 'usage': {}, 'late': True}]
+        cell = r.ttl_summary(rows)[r.SONNET_5_5]['before']
+        self.assertEqual((cell['complete'], cell['late'], cell['last_read']), (0, 1, 0))
+
+    def test_waits_follow_the_wall_clock_and_a_sleep_marks_the_step_late(self):
+        import json, tempfile
+        from pathlib import Path
+        from unittest import mock
+        clock = {'now': 1000.0}
+        group = [g for g in r.plan('run', 'ttl-1h') if g['name'].endswith('/past_5m')][0]
+
+        def fake(payload, config):
+            return {'model': payload['model'], 'usage': {
+                'input_tokens': 1, 'output_tokens': 1, 'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 5000,
+                'cache_creation': {'ephemeral_5m_input_tokens': 0, 'ephemeral_1h_input_tokens': 5000}}}, 'id'
+
+        def sleep(seconds):  # the computer sleeps for ten hours during the first wait
+            clock['now'] += seconds + (36000 if clock['now'] < 1100 else 0)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(r.time, 'time', lambda: clock['now']), \
+                mock.patch.object(r.time, 'sleep', sleep):
+            r.execute([group], Path(tmp), r.Budget(5), transport=fake)
+            rows = [json.loads(l) for l in (Path(tmp)/'observations.jsonl').read_text().splitlines()]
+        self.assertEqual(rows[1]['planned_gap_seconds'], 600)
+        self.assertGreater(rows[1]['since_previous_start_seconds'], 36000)
+        self.assertTrue(rows[1]['late'])
+        self.assertFalse(rows[0]['late'])
+
+    def test_the_long_suite_has_only_the_hour_long_kinds(self):
+        groups = r.plan('run', 'ttl-1h-long')
+        self.assertEqual({g['name'].split('/')[-1] for g in groups}, set(r.TTL_1H_LONG))
+        self.assertEqual(len(groups), 3 * len(r.TTL_1H_MODELS) * len(r.TTL_1H_LONG))
