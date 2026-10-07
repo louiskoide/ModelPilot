@@ -1,0 +1,40 @@
+{
+ "id": "nx-tree-centroid",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/algorithms/tree/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/tree/tests"
+ ],
+ "type": "feature",
+ "base": "6f5d4d2f3cb383e2a338ac1f9b93aec422bd71ab",
+ "reference": "6fad2d34112d5d860ef9f3dd997936c77d454b09",
+ "hidden_tests": [
+  "networkx/algorithms/tree/tests/test_distance_measures.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/tree/tests/test_distance_measures.py"
+ ],
+ "source": "https://github.com/networkx/networkx/commit/6fad2d34112d5d860ef9f3dd997936c77d454b09",
+ "instruction": "Add centroid(G) to networkx's tree distance measures (networkx/algorithms/tree/distance_measures.py, available as nx.tree.centroid): the centroid of an unweighted tree, the node or nodes whose removal leaves no subtree with more than N/2 of the tree's N nodes. It has one node, or two adjacent nodes when removing the edge between them leaves two halves of exactly N/2. Return a list; with two nodes, the one nearer to the first node of G comes first (for nx.full_rary_tree(2, 8) the result is [0, 1], for nx.path_graph(4) it is [1, 2]). It runs in linear time and can differ from the tree center: for nx.star_graph(6) with the path 6-7-8-9-10 added, the centroid is [0] while the center is [7]. A graph that isn't a tree raises nx.NotATree (message containing 'not a tree'), an empty graph raises nx.NetworkXPointlessConcept, and a directed graph raises NetworkXNotImplemented. Add tests.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

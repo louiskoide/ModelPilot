@@ -1,0 +1,40 @@
+{
+ "id": "nx-hyper-wiener-index",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/algorithms/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/tests"
+ ],
+ "type": "feature",
+ "base": "50d0e03e1252cdb8da491c820286f228bff265f3",
+ "reference": "cbc117da86247dc5c15ced7d48f378cd5ab10d35",
+ "hidden_tests": [
+  "networkx/algorithms/tests/test_wiener.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/tests/test_wiener.py"
+ ],
+ "source": "https://github.com/networkx/networkx/commit/cbc117da86247dc5c15ced7d48f378cd5ab10d35",
+ "instruction": "Add hyper_wiener_index(G, weight=None) to networkx/algorithms/wiener.py, available as nx.hyper_wiener_index: the Hyper-Wiener index WW(G) = 1/2 * sum over ordered pairs of distinct nodes (u, v) of d(u, v) + d(u, v)**2, where d is the shortest-path distance (edge lengths from the weight attribute when weight is given, else 1). It returns float('inf') for a graph that isn't connected and raises NetworkXNotImplemented for directed graphs and multigraphs. Examples: nx.path_graph(4) gives 30.0, nx.cycle_graph(4) 20.0, nx.complete_graph(5) 20, and nx.path_graph(3) with edge (0, 1) of weight 2 gives 20.0 with weight='weight'. Add tests.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

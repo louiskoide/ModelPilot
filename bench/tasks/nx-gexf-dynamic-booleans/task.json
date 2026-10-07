@@ -1,0 +1,40 @@
+{
+ "id": "nx-gexf-dynamic-booleans",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/readwrite/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/readwrite/tests"
+ ],
+ "type": "bug_fix",
+ "base": "4ba50db2d08c828f1cfcb06394b895aac8bfeecf",
+ "reference": "bc2ba5f087d291ead6c05568c12dc3551baada16",
+ "hidden_tests": [
+  "networkx/readwrite/tests/test_gexf.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/readwrite/tests/test_gexf.py"
+ ],
+ "source": "https://github.com/networkx/networkx/commit/bc2ba5f087d291ead6c05568c12dc3551baada16",
+ "instruction": "nx.write_gexf writes boolean values of dynamic attributes as Python's 'True'/'False': for G = nx.Graph(mode='dynamic') with G.add_node('n', flag=[(True, 0, 1), (False, 1, 2)]), the attvalue elements say value=\"True\" and value=\"False\". GEXF uses xsd:boolean, so write them as 'true' and 'false', as static boolean attributes already are. Reading the file back with nx.read_gexf must still give [(True, 0, 1), (False, 1, 2)]. Other dynamic values, including the INF, -INF and NaN spellings of float values, are written as before.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

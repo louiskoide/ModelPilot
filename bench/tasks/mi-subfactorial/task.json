@@ -1,0 +1,38 @@
+{
+ "id": "mi-subfactorial",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "feature",
+ "base": "0c48044a70bae53fed919526bb1229d459a3e496",
+ "reference": "842a2b17a8e3f78462fe20cd4a88abd32085c111",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "source": "https://github.com/more-itertools/more-itertools/commit/842a2b17a8e3f78462fe20cd4a88abd32085c111",
+ "instruction": "Add more_itertools.subfactorial(n), exported from the package like the other functions: the number of permutations of n elements with no fixed points, which is the number of items derangements() yields for n elements (OEIS A000166: 1, 0, 1, 2, 9, 44, 265, 1854, 14833, ...). It must be exact for large n (subfactorial(23) == 9510425471055777937262), return an int, raise ValueError for a negative n and TypeError for a non-integer such as 5.0 or '5'.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

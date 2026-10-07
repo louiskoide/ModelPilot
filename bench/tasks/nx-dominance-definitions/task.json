@@ -1,0 +1,40 @@
+{
+ "id": "nx-dominance-definitions",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/algorithms/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/tests"
+ ],
+ "type": "bug_fix",
+ "base": "c6782d83d92fefa5730401faf76626ed35c65acd",
+ "reference": "2087413b6ce74de66fc03b654687caaca693966a",
+ "hidden_tests": [
+  "networkx/algorithms/tests/test_dominance.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/tests/test_dominance.py"
+ ],
+ "source": "https://github.com/networkx/networkx/commit/2087413b6ce74de66fc03b654687caaca693966a",
+ "instruction": "Make networkx's dominance functions (networkx/algorithms/dominance.py) follow the textbook definitions. immediate_dominators(G, start) currently maps start to itself; start has no immediate dominator, so it must be left out: the result maps every other node reachable from start to its immediate dominator. For DiGraph([(1, 2), (1, 3), (2, 5), (3, 4), (4, 5)]) from 1 that is {2: 1, 3: 1, 4: 3, 5: 1}, and a graph of one node (with or without a self-loop) gives {}. dominance_frontiers(G, start) mishandles edges back into start: the dominance frontier of x is the set of nodes y such that x dominates a predecessor of y but does not strictly dominate y, and that includes y = start. So on a directed cycle 0 -> 1 -> ... -> n-1 -> 0 from 0 every node's frontier is {0}, a single node with a self-loop has frontier {0: {0}}, and DiGraph([('a', 'b'), ('b', 'c'), ('b', 'a')]) from 'a' gives {'a': {'a'}, 'b': {'a'}, 'c': set()}. Nodes unreachable from start stay out of both results. dominance_frontiers must also raise NetworkXNotImplemented for undirected graphs, as immediate_dominators does (message containing 'not implemented for undirected'), and both still raise NetworkXError ('start is not in G') for a start that isn't in the graph. Update the tests.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

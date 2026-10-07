@@ -1,0 +1,40 @@
+{
+ "id": "nx-dominating-set-greedy-cost",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/algorithms/approximation/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/approximation/tests"
+ ],
+ "type": "bug_fix",
+ "base": "6bf5e809983be340c28540198786e706b11f944f",
+ "reference": "a9c8113b857f66f951800a42862d64db2538ab87",
+ "hidden_tests": [
+  "networkx/algorithms/approximation/tests/test_dominating_set.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/approximation/tests/test_dominating_set.py"
+ ],
+ "source": "https://github.com/networkx/networkx/commit/a9c8113b857f66f951800a42862d64db2538ab87",
+ "instruction": "nx.approximation.min_weighted_dominating_set(G, weight=None) uses the wrong cost in its greedy step. The greedy algorithm repeatedly adds the node whose weight (the node attribute named by weight, 1 if missing or weight is None) divided by the number of not-yet-dominated nodes in its closed neighborhood is smallest, until every node is dominated (in the set or adjacent to it). The current code divides by the number of closed-neighborhood nodes not in the set, so it counts nodes that a neighbor in the set already dominates and picks too many nodes. Fix the cost; a node that would dominate nothing new must never be chosen, and ties go to the earliest node in G's node order. For K5 (nodes 0-4) plus the path 4-5-6 the result must be a dominating set of 2 nodes, and for nx.Graph([(0, 1), (0, 4), (1, 4), (1, 2), (2, 3), (3, 4), (2, 5)]) it is {1, 2} (it used to be {1, 2, 4}).",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

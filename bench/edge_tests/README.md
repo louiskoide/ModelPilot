@@ -84,6 +84,47 @@ The reference fix passes every test. A base that passes some tests is expected: 
 fixes (for example, a key evicted while it is being updated), not the original bug. `cachetools-setitem-evict`'s
 growth test was changed before freezing, because the buggy base happened to end in the same state.
 
+Plan item 8's labelling batch (added October 6, 2026, before any trial ran on them; same rules). Each was written
+with its task, from the instruction, the reference fix and the hidden tests, and run on reference and base before
+freezing. Where they can, they compare against a brute-force or by-definition computation on small random inputs
+(dominators and frontiers, perfection, k-components, centroids, triangles, sampled edge betweenness, Floyd-Warshall
+against Bellman-Ford). Four tests were corrected before freezing, all test bugs found by running them on the
+reference: an assertion on a module-level `__all__` more-itertools doesn't have, a wrong expected `argmax`, periodic
+lattice sizes the generators refuse, and a TLRU test of behaviour the instruction doesn't specify (dropped).
+
+| Task | Tests | Base passes |
+| --- | --- | --- |
+| cachetools-cached-none-deprecated | 4 | 2 |
+| cachetools-tlru-expire-pairs | 3 | 0 |
+| mi-argmin-argmax | 5 | 0 |
+| mi-bucket-phantom-keys | 5 | 2 |
+| mi-exactly-n-negative | 4 | 3 |
+| mi-extract-monotonic | 5 | 0 |
+| mi-nth-permutation-r-too-large | 3 | 2 |
+| mi-numeric-range-eq-hash | 5 | 2 |
+| mi-numeric-range-reversed-values | 5 | 3 |
+| mi-seekable-getitem | 3 | 0 |
+| mi-serialize | 3 | 0 |
+| mi-split-maxsplit-zero-empty | 4 | 2 |
+| mi-subfactorial | 5 | 0 |
+| mi-zip-broadcast-single-open | 5 | 3 |
+| nx-all-triangles | 4 | 0 |
+| nx-dominance-definitions | 4 | 0 |
+| nx-dominating-set-greedy-cost | 4 | 1 |
+| nx-edge-betweenness-k-scaling | 4 | 3 |
+| nx-floyd-warshall-negative-cycle | 4 | 0 |
+| nx-generalized-petersen | 4 | 0 |
+| nx-gexf-dynamic-booleans | 3 | 2 |
+| nx-hyper-wiener-index | 4 | 0 |
+| nx-is-perfect-graph | 5 | 0 |
+| nx-k-components-lost | 4 | 3 |
+| nx-lattice-node-attributes | 4 | 2 |
+| nx-nonisomorphic-trees-small-orders | 4 | 0 |
+| nx-planar-embedding-faces | 4 | 0 |
+| nx-tree-centroid | 5 | 0 |
+| tomli-key-parts-limit | 3 | 0 |
+| tomli-parse-float-illegal-types | 4 | 1 |
+
 Known label caveat (user decision, October 6, 2026: noted, suite unchanged):
 
 - `tomli-decode-error-attrs`, `test_line_starts_and_keywords`: it requires keyword construction,

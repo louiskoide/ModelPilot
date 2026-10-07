@@ -1,0 +1,40 @@
+{
+ "id": "nx-lattice-node-attributes",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/generators/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/generators/tests"
+ ],
+ "type": "bug_fix",
+ "base": "a8fd55567a60bec133665cdb585cae0fe1fef107",
+ "reference": "36d7ba36a46e88dec16fca0a2640d479d2c4f833",
+ "hidden_tests": [
+  "networkx/generators/tests/test_lattice.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/generators/tests/test_lattice.py"
+ ],
+ "source": "https://github.com/networkx/networkx/commit/36d7ba36a46e88dec16fca0a2640d479d2c4f833",
+ "instruction": "networkx's lattice generators leave stray attributes (networkx/generators/lattice.py). nx.hexagonal_lattice_graph(m, n, periodic=False, with_positions=True, create_using=None) stores a 'pos' attribute on every node even with with_positions=False; it must store positions only when with_positions is True. And with periodic=True both hexagonal_lattice_graph and triangular_lattice_graph leave 'contraction' attributes behind on nodes and edges from identifying the boundary nodes; the returned graph must carry no such leftovers, so with with_positions=False every node and edge has empty data. The graphs' nodes and edges, and the positions when requested, stay as they are.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

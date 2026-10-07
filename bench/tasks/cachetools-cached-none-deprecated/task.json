@@ -1,0 +1,40 @@
+{
+ "id": "cachetools-cached-none-deprecated",
+ "repo": "cachetools",
+ "url": "https://github.com/tkem/cachetools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "feature",
+ "base": "72adda62f911ff3fb635c4817635bf9c92b87289",
+ "reference": "9b7fe6ca659382158897723205882f0b4126241e",
+ "hidden_tests": [
+  "tests/test_cached.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_cached.py"
+ ],
+ "source": "https://github.com/tkem/cachetools/commit/9b7fe6ca659382158897723205882f0b4126241e",
+ "instruction": "Deprecate passing None as the cache of the cachetools.cached decorator: cachetools.cached(None)(func), with or without info=True, must emit a DeprecationWarning (message '@cachetools.cached(cache=None) is deprecated') when the function is decorated, attributed to the code doing the decorating. The decorated function keeps working exactly as before: it calls func every time, its cache attribute is None, cache_key and cache_lock are as before, cache_clear() is a no-op and cache_info() counts every call as a miss. Decorating with a real cache emits no warning.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

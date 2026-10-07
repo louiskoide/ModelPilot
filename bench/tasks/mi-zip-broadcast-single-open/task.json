@@ -1,0 +1,38 @@
+{
+ "id": "mi-zip-broadcast-single-open",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "bug_fix",
+ "base": "9ed3dbb0ae527230cd156d91d0af305478558fba",
+ "reference": "e426d256b90bcef9aa4509ea345fca68ff21ae0c",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "source": "https://github.com/more-itertools/more-itertools/commit/e426d256b90bcef9aa4509ea345fca68ff21ae0c",
+ "instruction": "more_itertools.zip_broadcast opens each iterable argument twice: it calls iter() once to decide whether the argument is iterable and again to iterate it. An input whose __iter__ may run only once (for example one that raises RuntimeError when opened a second time) therefore fails, with or without strict=True. Make zip_broadcast call iter() on each argument once and iterate that iterator. Everything else stays as it is: str and bytes (or the given scalar_types) and objects that aren't iterable are repeated as scalars, scalar_types=None treats strings as iterables, and strict=True still raises when the iterables have different lengths. For example zip_broadcast('label', source) with a single-use source of [1, 2] gives [('label', 1), ('label', 2)], and an empty single-use source gives [].",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

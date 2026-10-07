@@ -1,0 +1,40 @@
+{
+ "id": "nx-is-perfect-graph",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/algorithms/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/tests"
+ ],
+ "type": "feature",
+ "base": "9c89eb0a4d65931178a8581b2e33488be576dd6a",
+ "reference": "1660ac379a1c10e3d413760785dbc5cd2186a125",
+ "hidden_tests": [
+  "networkx/algorithms/tests/test_perfect_graph.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/tests/test_perfect_graph.py"
+ ],
+ "source": "https://github.com/networkx/networkx/commit/1660ac379a1c10e3d413760785dbc5cd2186a125",
+ "instruction": "Add is_perfect_graph(G) to networkx, in a new module networkx/algorithms/perfect_graph.py and available as nx.is_perfect_graph: return True if G is perfect, that is, every induced subgraph has chromatic number equal to the size of its largest clique, else False. By the Strong Perfect Graph Theorem a graph is perfect exactly when neither it nor its complement has an induced (chordless) cycle of odd length at least five. So complete graphs, even cycles, bipartite graphs, chordal graphs and disjoint unions of cliques are perfect, while the 5-cycle and the complement of the 7-cycle are not. It takes simple undirected graphs: a directed graph or a multigraph raises NetworkXNotImplemented. Add tests.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

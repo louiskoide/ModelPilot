@@ -1,0 +1,40 @@
+{
+ "id": "nx-planar-embedding-faces",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/algorithms/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/tests"
+ ],
+ "type": "feature",
+ "base": "620c37ef6ffe37b0bdc45c802b7a7287ee59eb91",
+ "reference": "6f0fa509fbf8c6e6f41e8e890ca4e0774e145332",
+ "hidden_tests": [
+  "networkx/algorithms/tests/test_planarity.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/tests/test_planarity.py"
+ ],
+ "source": "https://github.com/networkx/networkx/commit/6f0fa509fbf8c6e6f41e8e890ca4e0774e145332",
+ "instruction": "Add a faces() method to networkx's PlanarEmbedding (networkx/algorithms/planarity.py): a generator of the embedding's facial boundary walks, each a list of nodes in cyclic order as traverse_face would return it. Every directed half-edge (u, v) of the embedding (v in neighbors_cw_order(u)) must lie on exactly one generated face, where a face [x0, x1, ..., xk] uses the half-edges (x0, x1), ..., (xk, x0). Walks need not be simple: around bridges and articulation points nodes repeat, so a path on 4 nodes has a single face of length 6. Each connected component is walked separately (no shared outer face), so two disjoint triangles give 4 faces, a 4-cycle gives 2, K4 gives 4 triangles, and isolated nodes give no faces at all. Add tests.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

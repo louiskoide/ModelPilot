@@ -1,0 +1,38 @@
+{
+ "id": "mi-split-maxsplit-zero-empty",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "bug_fix",
+ "base": "d92f081a089714e0aa92434c797fdd1a06da1290",
+ "reference": "ce676d24136e6efa932df8a4f3bf4801b89e1dd0",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "source": "https://github.com/more-itertools/more-itertools/commit/ce676d24136e6efa932df8a4f3bf4801b89e1dd0",
+ "instruction": "more_itertools.split_before, split_after and split_when disagree with themselves on an empty iterable: with maxsplit=0 they yield one empty list ([[]]), while with any other maxsplit (including the default -1) they yield nothing ([]). Make maxsplit=0 also yield nothing for an empty iterable in these three functions; a non-empty iterable with maxsplit=0 still gives a single list holding all of it. split_at is not affected and must keep following str.split: for an empty iterable it yields one empty list for every maxsplit, as ''.split(',', 0) == [''].",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

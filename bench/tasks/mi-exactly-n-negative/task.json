@@ -1,0 +1,38 @@
+{
+ "id": "mi-exactly-n-negative",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "bug_fix",
+ "base": "f75535b5ed95394a3a24c1495e1f8508a06d56ab",
+ "reference": "adeda34bd11ff636f5f19238cf422a73e1455483",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "source": "https://github.com/more-itertools/more-itertools/commit/adeda34bd11ff636f5f19238cf422a73e1455483",
+ "instruction": "more_itertools.exactly_n(iterable, n, predicate=bool) mishandles negative n: exactly_n([True], -10) raises ValueError instead of answering. No iterable has a negative number of true items, so a negative n must return False (exactly_n([], -1), exactly_n([], -10) and exactly_n([True], -10) are all False). The rest stays as it is: exactly_n([True], 0) is False, exactly_n([False, False], 0) is True, it stops reading once more than n items satisfy the predicate (so exactly_n(itertools.repeat(True), 100) returns False), and exactly_n(itertools.repeat(False, 100), 100, predicate=operator.not_) is True.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}
