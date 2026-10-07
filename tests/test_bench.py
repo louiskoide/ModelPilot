@@ -42,7 +42,10 @@ class ScheduleTests(unittest.TestCase):
     def test_the_modelpilot_arm_gets_the_active_policy_jev_as_advisor_and_the_same_limit_per_session(self):
         self.assertIsNone(bench.arm_adapter('sonnet-5', 1.5, 1))
         adapter = bench.arm_adapter('modelpilot', 1.5, 2, jev_key='ts-key')
-        self.assertEqual((adapter.policy.mode, adapter.tools, adapter.limit), ('active', True, 3.0))
+        self.assertEqual((adapter.policy.mode, adapter.tools, adapter.channel, adapter.limit), ('active', False, False, 3.0))
+        delegate = bench.arm_adapter('modelpilot-delegate', 1.5, 2, jev_key='ts-key')  # tools and channel with delegation
+        self.assertEqual((delegate.tools, delegate.channel), (True, True))
+        self.assertTrue(bench.arm_adapter('modelpilot', 1, 1, tools=True).tools)  # offline tests' host test runs
         self.assertEqual((adapter.arm_id, adapter.model, adapter.effort), ('modelpilot', 'claude-sonnet-5-5', 'low'))
         self.assertIs(adapter.policy.advisor, adapter.advisor)
         self.assertEqual((adapter.advisor.live, adapter.advisor.key, adapter.advisor.checkout),
@@ -56,7 +59,10 @@ class ScheduleTests(unittest.TestCase):
         with self.assertRaises(ValueError):  # Haiku targets are not implemented
             from modelpilot.modelpilot_adapter import ModelPilotAdapter
             ModelPilotAdapter(mode='active', tools=True, model='claude-haiku-4-5-20251001', effort=None)
-        parameters = bench.modelpilot_manifest(['sonnet-5', 'modelpilot'], 1.0, 1)['modelpilot']['parameters']
+        manifest = bench.modelpilot_manifest(['sonnet-5', 'modelpilot', 'modelpilot-delegate'], 1.0, 1)
+        self.assertEqual([(manifest[a]['r5_tools'], manifest[a]['channel_declared'])
+                          for a in ('modelpilot', 'modelpilot-delegate')], [(False, False), (True, True)])
+        parameters = manifest['modelpilot']['parameters']
         self.assertEqual(parameters['decision_points'], ['turn_start', 'stuck_evidence', 'step'])
         self.assertEqual((parameters['step']['enabled'], parameters['return_reuse']),
                          (True, {'enabled': True, 'max_positions': 25}))

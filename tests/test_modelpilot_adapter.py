@@ -20,12 +20,22 @@ class AdmissionTests(unittest.TestCase):
         self.assertEqual(d['action'],'would_switch')
         self.assertFalse(d['applied'])
 
-    def test_active_mode_needs_the_tools_and_its_own_policy(self):
-        with self.assertRaises(ValueError): ModelPilotAdapter(mode='active')  # R5 tools are part of the arm
+    def test_active_mode_runs_its_own_policy(self):
         with self.assertRaises(ValueError): ModelPilotAdapter(mode='enforce', tools=True)
         with self.assertRaises(ValueError): ModelPilotAdapter(mode='active', tools=True, fixture_policy=object())
-        adapter = ModelPilotAdapter(mode='active', tools=True)
+        adapter = ModelPilotAdapter(mode='active')  # the R5 tools are optional since October 6 (plan item 3)
         self.assertEqual((adapter.policy.mode, adapter.policy.gate), ('active', 'spent'))
+
+    def test_the_active_arm_declares_the_channel_only_while_delegating(self):
+        adapter = ModelPilotAdapter(mode='active')
+        adapter.task, adapter.code = 'T1', None
+        self.assertFalse(adapter.channel)
+        self.assertEqual(adapter.prefix(), '')
+        adapter = ModelPilotAdapter(mode='active', overrides={'delegation': {'handoff_note': {'enabled': True}}})
+        adapter.task, adapter.code = 'T1', 'abc123'
+        self.assertTrue(adapter.channel)
+        self.assertTrue(adapter.prefix().startswith('ModelPilot coordinates this session for ledger task T1.'))
+        self.assertTrue(ModelPilotAdapter().channel)  # the observer keeps it
 
 class IntegrationTests(unittest.TestCase):
     def test_real_client_hooks_and_governor_reconcile_offline(self):

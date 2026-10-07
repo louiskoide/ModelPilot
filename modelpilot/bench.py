@@ -147,16 +147,25 @@ def model_eligibility(routing, models, catalog):
     return routing
 
 
-def arm_adapter(arm, budget_usd, sessions, jev_key=None, advisor_stub=None):
-    """The ModelPilot arm's adapter: active policy with Jev as advisor, R5 tools, and the per-session limit for
-    each session. Without a TypeSafe key (or an offline stub) there is no advisor and the trial is ineligible."""
+def arm_tools(arm):
+    """Whether the arm gets the R5 tools: only while delegation is on (October 6, plan item 3). Without it they were
+    called in 3 of 28 trials and, with the channel declaration, cost about $0.0024 a task in the first request."""
+    config = switch_policy.with_overrides(switch_policy.load(), ARMS[arm].get('policy_overrides'))
+    return switch_policy.delegating(config)
+
+
+def arm_adapter(arm, budget_usd, sessions, jev_key=None, advisor_stub=None, tools=None):
+    """The ModelPilot arm's adapter: active policy with Jev as advisor, the R5 tools while delegation is on, and the
+    per-session limit for each session. Without a TypeSafe key (or an offline stub) there is no advisor and the trial
+    is ineligible. tools overrides arm_tools for offline tests that drive the policy through host test runs."""
     if ARMS[arm]['kind'] != 'modelpilot':
         return None
     from .advisor import JevAdvisor
     from .modelpilot_adapter import ModelPilotAdapter
     advisor = (JevAdvisor(ROOT/ARMS[arm]['checkout'], key=jev_key, stub=advisor_stub)
                if jev_key or advisor_stub is not None else None)
-    return ModelPilotAdapter(limit_usd=budget_usd * sessions, mode='active', tools=True, arm_id=arm,
+    return ModelPilotAdapter(limit_usd=budget_usd * sessions, mode='active',
+                             tools=arm_tools(arm) if tools is None else tools, arm_id=arm,
                              model=ARMS[arm]['model'], effort=ARMS[arm]['effort'], advisor=advisor,
                              models=ARMS[arm].get('models'), overrides=ARMS[arm].get('policy_overrides'))
 
@@ -832,6 +841,7 @@ def modelpilot_manifest(arms, budget_usd, sessions):
     return {a: {'mode': 'active (user-approved September 26, benchmark arm only)',
                 'parameters': parameters(ARMS[a]['model'], ARMS[a]['effort'], overrides=ARMS[a].get('policy_overrides')),
                 'policy_sha256': hashlib.sha256((ROOT/ARMS[a]['policy']).read_bytes()).hexdigest(),
+                'r5_tools': arm_tools(a), 'channel_declared': arm_tools(a),  # both only while delegation is on
                 'governor_limit_usd': budget_usd * sessions,
                 'limit_basis': 'wire cost, admitted while measured spend is below the limit (the client budget-stop '
                                'rule); the client threshold also applies, priced by Claude Code as the start model it '
