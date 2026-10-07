@@ -187,6 +187,22 @@ class BriefTests(unittest.TestCase):
         # A here-string isn't a here-document: the lines after it are still commands.
         self.assertEqual(delegation.shell_lines('cat <<<EOF\npytest -q'), ['cat <<<EOF', 'pytest -q'])
 
+    def test_each_runs_outcome_is_read_from_its_summary(self):
+        """Plan item 2: steps read these. A run without a summary, or that ran no test, gives no outcome."""
+        cases = {'1 failed, 18 passed in 0.61s': 1, '....\n97 passed, 1 skipped in 0.51s': 0, '2 errors in 0.2s': 2,
+                 '\x1b[31m3 failed\x1b[0m, 2 passed in 1.0s': 3,
+                 'Ran 5 tests in 0.004s\n\nFAILED (failures=1, errors=1)': 2, 'Ran 5 tests in 0.004s\n\nOK': 0,
+                 'Ran 5 tests in 0.004s\n\nOK (skipped=1)': 0,
+                 'ERROR: usage: pytest [options]\n  rootdir: /w': None, '5 deselected in 0.10s': None,
+                 'Ran 0 tests in 0.000s\n\nOK': None, 'Ran 5 tests in 0.004s': None, '': None}
+        for output, expected in cases.items():
+            self.assertEqual(delegation.failures(output), expected, output)
+        messages = (bash('a', 'python3 -m pytest -q', '1 failed, 4 passed in 0.1s') +
+                    bash('g', 'grep -rn pytest setup.cfg', '5 passed in 0.1s') +  # not a test run
+                    bash('u', 'python3 -m pytest -q', 'ERROR: file or directory not found') +  # no outcome
+                    bash('b', 'cd src && python -m unittest discover', 'Ran 3 tests in 0.01s\n\nOK'))
+        self.assertEqual(delegation.agent_test_results(messages), [{'id': 'a', 'failures': 1}, {'id': 'b', 'failures': 0}])
+
     def test_many_runs_keep_the_newest_and_drop_the_oldest(self):
         messages = []
         for i in range(40):

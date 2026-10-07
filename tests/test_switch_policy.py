@@ -388,5 +388,60 @@ class CalibrationTests(unittest.TestCase):
         self.assertEqual(calibrated['target'], [O, 'medium'])  # the safety net: a stronger model at the turn's effort
 
 
+class JevGateTests(unittest.TestCase):
+    """Plan item 1 (October 6): Jev is asked only where some answer it could give changes the decision."""
+
+    def setUp(self):
+        self.cfg, self.rates = sp.load(), bench.rates()
+
+    def gate(self, cfg=None, current=(S, 'low'), kb=11, warm=False, trigger='turn_start'):
+        cfg = cfg or self.cfg
+        return sp.jev_gate(cfg, self.rates, current, sp.profile(cfg, request(kb), warm), trigger)
+
+    def test_at_the_shipped_weight_no_answer_moves_a_turn_start_or_a_step(self):
+        for trigger in ('turn_start', 'step'):
+            gate = self.gate(trigger=trigger)
+            self.assertEqual((gate['can_change'], gate['reason']), (False, 'every_answer_stays'), trigger)
+            self.assertLess(gate['closest_usd'], 0)
+            self.assertEqual(gate['shapes'], 3 * 2 * (1 + 5 * 2))
+
+    def test_where_jevs_answer_is_the_whole_estimate_it_is_always_asked(self):
+        self.assertEqual(self.gate(cfg=jev_only())['reason'], 'uncalibrated')
+        self.assertEqual(self.gate(trigger='stuck_evidence')['reason'], 'uncalibrated')
+        delegate = sp.with_overrides(self.cfg, bench.ARMS['modelpilot-delegate']['policy_overrides'])
+        self.assertEqual(self.gate(cfg=delegate, trigger='step')['reason'], 'consult_possible')  # its target is Jev's
+        self.assertFalse(self.gate(cfg=delegate)['can_change'])  # no consult at a turn start
+        partial = copy.deepcopy(self.cfg)
+        partial['recovery']['wasted_fraction'] = .5
+        self.assertEqual(self.gate(cfg=partial)['reason'], 'not_monotone')
+        self.assertEqual(sp.gate({}), {'enabled': False})
+
+    def test_a_skipped_point_stays_on_any_answer(self):
+        """Soundness against arbitrary answers, at weights where moves happen; the sweep must also find points where
+        the gate asks and an answer does move, so it isn't vacuous."""
+        rng = __import__('random').Random(6)
+
+        def answer():
+            def dist(labels):
+                x = [rng.random() ** 4 for _ in labels]
+                return {k: v / sum(x) for k, v in zip(labels, x)}
+            return {'model': {'choice': rng.choice(MODELS), 'confidence': rng.random(), 'probabilities': dist(MODELS)},
+                    'effort': {'choice': rng.choice(EFFORTS), 'confidence': rng.random(), 'probabilities': dist(EFFORTS)}}
+        skipped = moved = 0
+        for w, kb, warm, trigger, current in itertools.product(
+                (.03, .06, .2, .5), (2, 11, 60), (False, True), ('turn_start', 'step'), ((S, 'low'), (S, 'medium'), (O, 'medium'))):
+            cfg = copy.deepcopy(self.cfg)
+            cfg['calibration']['jev_weight'] = w
+            prof = sp.profile(cfg, request(kb), warm)
+            gate = sp.jev_gate(cfg, self.rates, current, prof, trigger)
+            actions = {sp.decide(cfg, self.rates, answer(), current, prof, trigger)['action'] for _ in range(40)}
+            if not gate['can_change']:
+                skipped += 1
+                self.assertEqual(actions, {'stay'}, (w, kb, warm, trigger, current))
+            moved += actions != {'stay'}
+        self.assertGreater(skipped, 0)
+        self.assertGreater(moved, 0)
+
+
 if __name__ == '__main__':
     unittest.main()

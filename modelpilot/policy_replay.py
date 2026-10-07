@@ -19,6 +19,10 @@ the current value. Before October 6 every trial was replayed at 4, which put the
 
 A decision after one whose replay differs is marked path_diverged: the trial would not have reached it the same way.
 Databases are opened read-only; nothing is called.
+
+With the config's jev_gate on, each replayed decision also says whether the gate would have skipped Jev there
+(replayed.gate); the decision itself is still replayed on the answer Jev gave. A skipped point whose recorded answer
+replays to anything but a stay would mean the gate is wrong: summary gate.skipped_but_moved counts them.
 """
 import argparse
 from collections import Counter
@@ -63,7 +67,10 @@ def replay(payload, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_TOKE
         prof['brief_tokens'] = profile['brief_tokens']
     advice = payload.get('advice')
     usable = advice if advice and not advice.get('error') else None  # as active_policy.decide
-    return switch_policy.decide(cfg, rates, usable, current, prof, payload['trigger'])
+    decision = switch_policy.decide(cfg, rates, usable, current, prof, payload['trigger'])
+    if switch_policy.gate(cfg)['enabled']:
+        decision['gate'] = switch_policy.jev_gate(cfg, rates, current, prof, payload['trigger'])
+    return decision
 
 
 def _setting(decision):
@@ -120,6 +127,8 @@ def replay_run(run_dir, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_
                 row['replayed'] = {'action': new['action'], 'target': _setting(new), 'reason': new.get('reason'),
                                    'p_ok_current': _p_current(new), 'forecast_usd': new['forecast_usd'],
                                    'candidates': new.get('candidates')}
+                if 'gate' in new:
+                    row['replayed']['gate'] = dict(new['gate'], skip=not new['gate']['can_change'])
                 changed = (new['action'], _setting(new)) != (baseline['action'], baseline['target'])
                 row['status'] = 'path_diverged' if diverged else 'changed' if changed else 'same'
                 diverged = diverged or changed
@@ -128,7 +137,16 @@ def replay_run(run_dir, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_
 
 
 def summarize(rows):
+    gated = [r for r in rows if (r['replayed'] or {}).get('gate')]
+    gate = {'decisions': len(gated),
+            'skipped': dict(Counter(r['trigger'] for r in gated if r['replayed']['gate']['skip'])),
+            'asked': dict(Counter(f"{r['trigger']}:{r['replayed']['gate']['reason']}" for r in gated
+                                  if not r['replayed']['gate']['skip'])),
+            'skipped_but_moved': sum(r['replayed']['gate']['skip'] and r['replayed']['action'] != 'stay' for r in gated),
+            'closest_skipped_usd': max((r['replayed']['gate']['closest_usd'] for r in gated if r['replayed']['gate']['skip']
+                                        and r['replayed']['gate']['closest_usd'] is not None), default=None)}
     return {'decisions': len(rows), 'status': dict(Counter(r['status'] for r in rows)),
+            **({'gate': gate} if gated else {}),
             'by_trigger': {t: dict(Counter(r['status'] for r in rows if r['trigger'] == t))
                            for t in sorted({r['trigger'] for r in rows if r['trigger']})},
             'rebased': sum('baseline' in r for r in rows),

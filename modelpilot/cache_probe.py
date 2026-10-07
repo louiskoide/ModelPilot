@@ -191,7 +191,7 @@ def account_problem(error):
             bool(ACCOUNT_MESSAGE.search(getattr(error, 'safe_api_message', '') or '')))
 
 
-def send(p, c):
+def send(p, c, timeout=120):
     headers = {'x-api-key': os.environ['ANTHROPIC_API_KEY'],
                'anthropic-version': '2023-06-01', 'content-type': 'application/json'}
     if c.get('anthropic_beta'):
@@ -200,7 +200,7 @@ def send(p, c):
                                  data=json.dumps(p).encode(), headers=headers)
     # No automatic retries: retries change both billing and cache state.
     try:
-        with urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(context=tls_context())).open(req, timeout=120) as response:
+        with urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(context=tls_context())).open(req, timeout=timeout) as response:
             return json.load(response), response.headers.get('request-id')
     except urllib.error.HTTPError as error:
         try:
