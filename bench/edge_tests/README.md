@@ -83,3 +83,14 @@ condition built on a different lock. `cachetools-cached-condition`'s threaded te
 The reference fix passes every test. A base that passes some tests is expected: those tests target incomplete
 fixes (for example, a key evicted while it is being updated), not the original bug. `cachetools-setitem-evict`'s
 growth test was changed before freezing, because the buggy base happened to end in the same state.
+
+Known label caveat (user decision, October 6, 2026: noted, suite unchanged):
+
+- `tomli-decode-error-attrs`, `test_line_starts_and_keywords`: it requires keyword construction,
+  `TOMLDecodeError(msg='m', doc='ab', pos=0)`, to take the new path without a `DeprecationWarning`, as the reference
+  fix does. The instruction names the parameters (`TOMLDecodeError(msg, doc, pos)`) but lists the deprecated calls
+  only as "no arguments, fewer or more than three, or arguments that are not (str, str, int)", so it neither asks
+  for keywords nor rules them out. A fix taking `*args` only reads the instruction one defensible way and fails this
+  test; every Sonnet 5.5 miss on the task and both Opus 5.5 misses are this test alone. Strict results on the task
+  stand as recorded; read them as partly the instruction's ambiguity, not only the model's
+  (`runs/miss-predictability-20261006.json`).
