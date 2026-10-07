@@ -31,7 +31,7 @@ import time
 from . import delegation, switch_policy
 from .fixture_dispatch import Dispatcher, ProxyPolicy
 from .policy_actions import effort_anchor, effort_message, escalation_proposal, transform_request
-from .proxy import request_effort
+from .proxy import cache_ttls, request_effort
 
 SIGNALS = {'repeated_error': 'the same error keeps repeating', 'edit_oscillation': 'edits keep going back and forth',
            'stalled_tests': 'the test suite stopped improving', 'retry_language': 'the agent keeps retrying'}
@@ -107,6 +107,12 @@ def user_turns(request):
     return sum(starts(m) for m in messages), bool(last and starts(last))
 
 
+def write_ttl(request):
+    """'1h' when the client's breakpoints ask for an hour (a subscription, or CLAUDE_CODE_PROMPT_CACHE_TTL=1h), else
+    None (the configured cache_write_ttl)."""
+    return '1h' if '1h' in cache_ttls(request) else None
+
+
 class ActiveDispatcher(Dispatcher):
     gate, reserve_output = 'spent', False
 
@@ -133,10 +139,14 @@ class ActivePolicy(ProxyPolicy):
     def dispatcher(self, gov, rates):
         return ActiveDispatcher(gov, rates)
 
+    def lifetime(self, ttl):
+        """Seconds an entry written with this lifetime counts as warm: cache_lifetime_seconds, else cache_ttl_seconds."""
+        return (self.config.get('cache_lifetime_seconds') or {}).get(ttl, self.config['cache_ttl_seconds'])
+
     def warm(self, task, setting, now):
         with self.lock:
             entry = self.last_sent.get(task, {}).get(tuple(setting))
-        return bool(entry) and now - entry[0] <= self.config['cache_ttl_seconds']
+        return bool(entry) and now - entry[0] <= self.lifetime(entry[3] if len(entry) > 3 else None)
 
     def entries(self, task, now, positions):
         """{'model/effort': prefix tokens} for this task's settings whose cache entry should still be warm and be
@@ -146,7 +156,8 @@ class ActivePolicy(ProxyPolicy):
         with self.lock:
             sent = dict(self.last_sent.get(task, {}))
         reach = self.config['return_reuse']['max_positions']
-        live = sorted(((at, s, tokens) for s, (at, tokens, then) in sent.items()
+        # Returns count only within cache_ttl_seconds whatever the entry's lifetime: measured for 5m entries only.
+        live = sorted(((at, s, tokens) for s, (at, tokens, then, *_) in sent.items()
                        if now - at <= self.config['cache_ttl_seconds'] and positions - then <= reach), key=lambda e: e[0])
         out = {switch_policy._label(s): tokens for _, s, tokens in live}
         for _, s, tokens in live:  # per-message effort: a model's cache doesn't depend on its effort ('model/*')
@@ -154,9 +165,10 @@ class ActivePolicy(ProxyPolicy):
                 out[f'{s[0]}/*'] = tokens  # the newest entry for that model wins
         return out
 
-    def sent(self, task, setting, now, tokens, positions):
+    def sent(self, task, setting, now, tokens, positions, ttl=None):
+        """ttl: the lifetime the request's cache breakpoints asked for ('5m' or '1h'; None: cache_write_ttl)."""
         with self.lock:
-            self.last_sent.setdefault(task, {})[tuple(setting)] = (now, tokens, positions)
+            self.last_sent.setdefault(task, {})[tuple(setting)] = (now, tokens, positions, ttl or self.config['cache_write_ttl'])
 
     def decision_point(self, gov, task, request, revision, proposal):
         """(trigger, key, step facts or None), or None. The key journals the decision once per point."""
@@ -258,7 +270,7 @@ class ActivePolicy(ProxyPolicy):
             return earlier[-1]
         reach = switch_policy.content_positions(current.get('messages') or [])
         prof = switch_policy.profile(self.config, current, self.warm(task, setting, now),
-                                     entries=self.entries(task, now, reach))
+                                     entries=self.entries(task, now, reach), write_ttl=write_ttl(current))
         prof['history'] = any(m.get('role') == 'assistant' for m in request.get('messages') or [])
         advice, gate = None, None
         if self.advisor is not None and switch_policy.gate(self.config)['enabled']:
@@ -492,8 +504,8 @@ class ActivePolicy(ProxyPolicy):
                 ticket = {'status': 'deferred', 'reason': 'refused:' + str(exc)}
             if ticket['status'] == 'admitted':
                 self.handoff_note(gov, task, revision, point, request, current, setting, tuple(decision['target']), side)
-                self.sent(task, decision['target'], now, tokens, positions)
+                self.sent(task, decision['target'], now, tokens, positions, write_ttl(current))
                 return dict(ticket, kind='escalation')
             deferral = ticket
-        self.sent(task, setting, now, tokens, positions)
+        self.sent(task, setting, now, tokens, positions, write_ttl(current))
         return self.keep(gov, rates, task, revision, client, setting, current, deferral)

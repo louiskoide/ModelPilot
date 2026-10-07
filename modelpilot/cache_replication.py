@@ -1,6 +1,8 @@
 """M0 replication on current models. Planning is free; --live prompts for a local key.
 
-Suites: three-model (Haiku 4.5, Sonnet 5, Opus 5; run September 24) and opus-5-5.
+Suites: three-model (Haiku 4.5, Sonnet 5, Opus 5; run September 24), opus-5-5, and ttl-1h (plan item 6): the
+one-hour lifetime on Sonnet 5.5 and Opus 5.5, and what a request marked with one lifetime does to an entry written
+with the other (TTL_1H_KINDS).
 """
 import argparse
 import getpass
@@ -24,7 +26,22 @@ RATES[OPUS_5_5] = dict(input=4, output=20, write_5m=5, write_1h=8, read=.2)
 # Sonnet 5.5: Sonnet 5's prices, as stated at launch (configs/sonnet-5-5-rates.json).
 RATES[SONNET_5_5] = dict(input=2, output=10, write_5m=2.5, write_1h=4, read=.2)
 SOURCE = 'https://platform.claude.com/docs/en/build-with-claude/prompt-caching'
-SUITES = ('three-model', 'opus-5-5')
+SUITES = ('three-model', 'opus-5-5', 'ttl-1h')
+# ttl-1h: each kind is an independent prefix, touched at these (lifetime marked, seconds after the previous request
+# started) steps. The first request writes; the question is whether the last one reads.
+TTL_1H_KINDS = {
+    'past_5m': [('1h', 0), ('1h', 600)],  # an hour entry outlives five minutes: expect a read
+    'before': [('1h', 0), ('1h', 3000)],  # 50 minutes: expect a read
+    'after': [('1h', 0), ('1h', 3630)],  # 60.5 minutes: expect a write
+    'refresh': [('1h', 0), ('1h', 2400), ('1h', 2400)],  # a read at 40 minutes keeps it to 80: expect reads
+    'five_control': [('5m', 0), ('5m', 600)],  # a five-minute entry after 10 minutes: expect a write (M0: 330 s wrote)
+    # Can a request marked 1h move a warm five-minute entry to the hour (a turn-end upgrade), and is that billed as a
+    # read or as a write? Then 10 minutes idle, read with the default marker.
+    'upgrade': [('5m', 0), ('1h', 60), ('5m', 600)],
+    # Does a request marked 5m shorten an hour entry? Read at 60 s with the default marker, then 10 minutes idle.
+    'downgrade': [('1h', 0), ('5m', 60), ('5m', 600)],
+}
+TTL_1H_MODELS = (SONNET_5_5, OPUS_5_5)
 
 
 def plan(run_id, suite='three-model'):
@@ -40,6 +57,17 @@ def plan(run_id, suite='three-model'):
                 p.pop('output_config')
             requests.append((label, delay, p))
         groups.append(dict(name=name, steps=requests))
+    if suite == 'ttl-1h':
+        for repeat in range(3):
+            for model in TTL_1H_MODELS:
+                for kind, steps in TTL_1H_KINDS.items():
+                    name = f'ttl/1h/{repeat}/{model}/{kind}'
+                    requests = [(f'touch_{i}_{ttl}', delay,
+                                 probe.payload({'prefix_lines': 260, 'max_tokens': 32}, run_id+'/'+name, model, 'low',
+                                               layer='messages', ttl=ttl))
+                                for i, (ttl, delay) in enumerate(steps)]
+                    groups.append(dict(name=name, steps=requests))
+        return groups
     if suite == 'opus-5-5':
         # Opus 5.5 is always "a", so every model group tests a return to Opus, which the
         # three-model order never did. `thinking` is omitted, as in the three-model suite.
@@ -87,6 +115,34 @@ class Budget:
             raise RuntimeError('Budget admission stopped the run')
 
 
+def marked_ttl(p):
+    """The lifetime a probe request's one breakpoint asks for."""
+    block = (p.get('system') or p['messages'][0]['content'])[0]
+    return block['cache_control'].get('ttl', '5m')
+
+
+def ttl_summary(rows):
+    """ttl-1h: per model and kind, each repeat's steps as (lifetime marked, seconds since the previous start,
+    observation, 5m and 1h tokens written), and how many repeats read at their last step."""
+    out = {}
+    for r in rows:
+        parts = r['group'].split('/')
+        if parts[:2] != ['ttl', '1h']:
+            continue
+        repeat, model, kind = parts[2], parts[3], parts[4]
+        split = (r.get('usage') or {}).get('cache_creation') or {}
+        cell = out.setdefault(model, {}).setdefault(kind, {'repeats': {}})
+        cell['repeats'].setdefault(repeat, []).append(
+            [r.get('ttl'), None if r.get('since_previous_start_seconds') is None else round(r['since_previous_start_seconds']),
+             r.get('observation'), split.get('ephemeral_5m_input_tokens'), split.get('ephemeral_1h_input_tokens')])
+    for kinds in out.values():
+        for kind, cell in kinds.items():
+            complete = [steps for steps in cell['repeats'].values() if len(steps) == len(TTL_1H_KINDS[kind])]
+            cell.update(complete=len(complete), last_read=sum(steps[-1][2] in ('hit', 'partial_hit_and_write')
+                                                              for steps in complete))
+    return out
+
+
 def execute(groups, out, budget, transport=probe.send):
     """Interleave independent prefixes, serialize HTTP calls; no retries or background threads."""
     rows, queue = [], []
@@ -118,7 +174,7 @@ def execute(groups, out, budget, transport=probe.send):
                 estimate = ((len(json.dumps(p).encode())+1024)*rate['write_5m'] + p['max_tokens']*rate['output'])/1e6
                 budget.reserve(estimate)
                 now = time.monotonic()
-                row = dict(group=group['name'], step=label, model=p['model'],
+                row = dict(group=group['name'], step=label, model=p['model'], ttl=marked_ttl(p),
                            effort=p.get('output_config',{}).get('effort'), started_unix=time.time(),
                            since_previous_start_seconds=None if previous is None else now-previous)
                 try:
@@ -176,7 +232,9 @@ def main():
     print(f'Plan ({args.suite}): {calls} requests, three repeats, ${args.budget:g} admission budget; '
           f'results: {out}', flush=True)
     if not args.live:
-        print('Dry-run only. Add --live to send paid requests. Allow roughly 10–20 minutes.')
+        print('Dry-run only. Add --live to send paid requests. Allow roughly ' +
+              ('90 minutes (the longest prefix waits 80 minutes; others run meanwhile).' if args.suite == 'ttl-1h'
+               else '10–20 minutes.'))
         return
     if not os.environ.get('ANTHROPIC_API_KEY'):
         os.environ['ANTHROPIC_API_KEY'] = getpass.getpass('Anthropic API key (hidden): ').strip()
@@ -185,6 +243,9 @@ def main():
     if problem:
         raise SystemExit(problem)
     result = execute(groups, out, budget)
+    if args.suite == 'ttl-1h':
+        rows = [json.loads(line) for line in (out/'observations.jsonl').read_text().splitlines() if line.strip()]
+        (out/'ttl-summary.json').write_text(json.dumps(ttl_summary(rows), indent=2)+'\n')
     print(json.dumps({k:v for k,v in result.items() if k != 'observations'}, indent=2))
     if result['status'] != 'complete':
         raise SystemExit(1)

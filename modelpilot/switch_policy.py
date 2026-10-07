@@ -226,16 +226,23 @@ def content_positions(messages):
     return count
 
 
-def profile(cfg, request, warm, observed=None, entries=None):
+def profile(cfg, request, warm, observed=None, entries=None, write_ttl=None):
     """What the cost model needs about the conversation. Token counts from request bytes, as Jev estimates
     context; per-request input and output from observed usage when given, else the configured defaults.
-    entries: {'model/effort': prefix tokens its still-warm, reachable cache entry covers}, for return_reuse."""
+    entries: {'model/effort': prefix tokens its still-warm, reachable cache entry covers}, for return_reuse.
+    write_ttl: the cache lifetime the client's breakpoints ask for ('5m' or '1h'), which sets the write rate;
+    cache_write_ttl when not given."""
     per = cfg['bytes_per_token']
     out = dict(cfg['defaults'], **(observed or {}))
     out.update(prefix_tokens=len(json.dumps(request)) / per,
                messages_tokens=len(json.dumps(request.get('messages') or [])) / per, warm=bool(warm),
-               warm_entries=dict(entries or {}))
+               warm_entries=dict(entries or {}), write_ttl=write_ttl or cfg['cache_write_ttl'])
     return out
+
+
+def write_rate(cfg, prof):
+    """The rate key a cache write is billed at: the lifetime the client asks for (1h writes cost 2x input, 5m 1.25x)."""
+    return 'write_' + (prof.get('write_ttl') or cfg['cache_write_ttl'])
 
 
 def _scale(cfg, setting, prof):
@@ -261,7 +268,7 @@ def run_cost(cfg, rates, setting, prof):
     reply = prof['output_tokens'] * output
     growth = prof['new_input_tokens'] + reply  # written to the cache by the next request
     prefix = prof['prefix_tokens'] + (horizon - 1) / 2 * growth  # average prefix over the remaining requests
-    write = rate['write_' + cfg['cache_write_ttl']]
+    write = rate[write_rate(cfg, prof)]
     cold = 0.0 if prof['warm'] else prof['prefix_tokens'] * (write - rate['read'])  # the first request writes it
     return (horizon * (prefix * rate['read'] + growth * write + reply * rate['output']) + cold) / 1e6
 
@@ -274,7 +281,7 @@ def switch_cost(cfg, rates, current, target, prof, warm=None, reuse=False):
     if not warm or tuple(current) == tuple(target):
         return 0.0
     rate = rates[target[0]]
-    extra = rate['write_' + cfg['cache_write_ttl']] - rate['read']
+    extra = rate[write_rate(cfg, prof)] - rate['read']
     if current[0] != target[0]:
         tokens = prof['prefix_tokens']
     else:
@@ -298,7 +305,7 @@ def _horizon(cfg, setting, prof):
 def consult_cost(cfg, rates, current, target, prof):
     """One consult: the brief at the target's uncached input price, its output (thinking included) at the target's
     output price, scaled by effort, and the advice written into the main conversation once and read after."""
-    spec, write = delegation(cfg, 'consult'), 'write_' + cfg['cache_write_ttl']
+    spec, write = delegation(cfg, 'consult'), write_rate(cfg, prof)
     brief = prof.get('brief_tokens') or spec['brief_max_bytes'] / cfg['bytes_per_token']
     base = prof.get('output_effort')
     output = spec['output_tokens'] * (cfg['effort_output_factor'][target[1]] / cfg['effort_output_factor'][base]
@@ -315,7 +322,7 @@ def note_cost(cfg, rates, current, target, prof):
     spec = delegation(cfg, 'handoff_note')
     if not spec['enabled'] or current[0] == target[0] or not prof.get('history'):
         return 0.0
-    rc, rt, write = rates[current[0]], rates[target[0]], 'write_' + cfg['cache_write_ttl']
+    rc, rt, write = rates[current[0]], rates[target[0]], write_rate(cfg, prof)
     return (prof['prefix_tokens'] * rc['read'] + spec['output_tokens'] * rc['output'] +
             spec['note_tokens'] * (rt[write] + (_horizon(cfg, target, prof) - 1) * rt['read'])) / 1e6
 

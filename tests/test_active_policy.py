@@ -771,8 +771,6 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertEqual(self.side_bodies(), [])
 
 
-if __name__ == '__main__':
-    unittest.main()
 
 
 class WarmEntryReachTests(unittest.TestCase):
@@ -788,3 +786,40 @@ class WarmEntryReachTests(unittest.TestCase):
         self.assertEqual(policy.entries('t', 1020.0, 41 + reach), {f'{O}/xhigh': 9500, f'{O}/*': 9500})  # too far
         self.assertEqual(policy.entries('t', 1000.0 + ttl + 1, 50), {f'{O}/xhigh': 9500, f'{O}/*': 9500})  # expired
         self.assertEqual(policy.entries('other', 1020.0, 40), {})
+
+
+class CacheLifetimeTests(unittest.TestCase):
+    """Warmth and the write rate follow the lifetime the client's breakpoints ask for (plan item 6)."""
+    def request(self, ttl=None):
+        control = {'type': 'ephemeral', **({'ttl': ttl} if ttl else {})}
+        return {'model': S, 'system': [{'type': 'text', 'text': 'x' * 2800, 'cache_control': control}],
+                'tools': [{'name': 'Read'}], 'messages': [{'role': 'user', 'content': 'Fix it.'}]}
+
+    def test_an_hour_entry_stays_warm_past_five_minutes_but_returns_still_count_within_five(self):
+        policy = ActivePolicy(S, OWNER)
+        five, hour = policy.config['cache_lifetime_seconds']['5m'], policy.config['cache_lifetime_seconds']['1h']
+        self.assertEqual((five, hour), (300, 3600))
+        policy.sent('a', (S, 'low'), 1000.0, 9000, 10, '1h')
+        policy.sent('b', (S, 'low'), 1000.0, 9000, 10)  # no marker: the configured 5m
+        self.assertTrue(policy.warm('a', (S, 'low'), 1000.0 + 600))
+        self.assertFalse(policy.warm('b', (S, 'low'), 1000.0 + 600))
+        self.assertFalse(policy.warm('a', (S, 'low'), 1000.0 + hour + 1))
+        self.assertEqual(policy.entries('a', 1000.0 + 600, 10), {})  # returns: measured for 5m entries only
+
+    def test_hour_writes_are_priced_at_the_hour_rate(self):
+        from modelpilot.active_policy import write_ttl
+        cfg = switch_policy.load()
+        self.assertEqual((write_ttl(self.request('1h')), write_ttl(self.request())), ('1h', None))
+        hour = switch_policy.profile(cfg, self.request('1h'), False, write_ttl='1h')
+        five = switch_policy.profile(cfg, self.request(), False)
+        self.assertEqual((hour['write_ttl'], five['write_ttl']), ('1h', '5m'))
+        rates = {S: RATES[S]}
+        self.assertGreater(switch_policy.run_cost(cfg, rates, (S, 'low'), hour),
+                           switch_policy.run_cost(cfg, rates, (S, 'low'), five))
+        warm = dict(hour, warm=True)
+        self.assertAlmostEqual(switch_policy.switch_cost(cfg, {O: RATES[O]}, (S, 'low'), (O, 'low'), warm),
+                               warm['prefix_tokens'] * (RATES[O]['write_1h'] - RATES[O]['read']) / 1e6)
+
+
+if __name__ == '__main__':
+    unittest.main()

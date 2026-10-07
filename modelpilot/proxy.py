@@ -171,6 +171,42 @@ def system_text(request):
         if isinstance(system, list) else ''
 
 
+def cache_ttls(request):
+    """The cache lifetimes a request's breakpoints ask for, sorted ('5m' where a breakpoint names none, the API's
+    default). Claude Code marks every breakpoint alike: 1h on a subscription or with CLAUDE_CODE_PROMPT_CACHE_TTL=1h,
+    else 5m; its compaction request keeps the default whatever the setting (2.1.284, checked at $0)."""
+    found = set()
+    def walk(node):
+        if isinstance(node, dict):
+            control = node.get('cache_control')
+            if isinstance(control, dict):
+                ttl = control.get('ttl', '5m')
+                found.add(ttl if ttl in ('5m', '1h') else 'other')
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk({k: request.get(k) for k in ('system', 'tools', 'messages')})
+    return sorted(found)
+
+
+# The instruction Claude Code 2.1.284 appends to the last user message of its compaction request (/compact, or auto
+# compaction), which asks the model for a summary that replaces the conversation (checked at $0 against the fixture).
+COMPACTION_MARKER = 'CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.'
+
+
+def compaction_request(request):
+    """Whether this is the client's compaction request: the compaction instruction is its last user message (after an
+    assistant reply) or that message's last text block (appended to a tool result)."""
+    last = next((m for m in reversed(request.get('messages') or []) if isinstance(m, dict) and m.get('role') == 'user'),
+                None)
+    content = last.get('content') if last else None
+    blocks = content if isinstance(content, list) else [{'text': content}]
+    return any(isinstance(b, dict) and isinstance(b.get('text'), str) and b['text'].startswith(COMPACTION_MARKER)
+               for b in blocks)
+
+
 def request_effort(request):
     """Requested effort, logged because cache entries are separate per model and effort."""
     config = request.get('output_config')
@@ -631,6 +667,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                'status': 'transport_error', 'cost_usd': None}
         if self.server.system_marker is not None:
             row['system_marker'] = self.server.system_marker in system_text(request)
+        ttls = cache_ttls(request)
+        if ttls:
+            row['cache_ttl'] = ttls  # what the breakpoints asked for; usage says what was written
+        if compaction_request(request):
+            row['compaction'] = True
         effective = effective_effort(request)
         if effective != row['effort'] and (effective is None or isinstance(effective, str) and len(effective) <= 16):
             row['effective_effort'] = effective  # set by an effort-only system message (per-message effort)
