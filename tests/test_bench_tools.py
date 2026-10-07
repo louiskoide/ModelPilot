@@ -208,6 +208,43 @@ class ToolTrialTests(unittest.TestCase):
             with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
                 return self.modelpilot_trial(name, script, adapter, **kwargs)
 
+    def explore_trial(self, name, probability):
+        """The exploration arm with a draw that always (or never) switches, at the second main-loop request."""
+        config = switch_policy.with_overrides(switch_policy.load(), {'exploration': {
+            'enabled': True, 'probability': probability, 'first_request': 2, 'last_request': 2}})
+        script = [{'tool': 'Read', 'input': {'file_path': 'pkg/__init__.py'}},
+                  {'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
+                  {'tool': 'Bash', 'input': {'command': 'python3 -m unittest -q', 'description': 'tests'}},
+                  {'text': 'Done.'}]
+        with mock.patch.object(switch_policy, 'load', return_value=config):
+            adapter = bench.arm_adapter('modelpilot-explore', 1, 1, jev_key='not-used-by-this-arm')
+            self.assertIsNone(adapter.advisor)  # the arm never asks Jev, even when a run has a TypeSafe key
+            with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
+                return self.modelpilot_trial(name, script, adapter, rates=self.OPUS_RATES)
+
+    def test_the_exploration_arm_switches_to_opus_at_its_drawn_request_and_stays_eligible(self):
+        record = self.explore_trial('explore', 1.0)
+        self.assertTrue(record['passed'], record['grade'])
+        # Request 1 on the client's Sonnet 5.5 low; from the drawn request on, Opus 5.5 at the turn's effort.
+        self.assertEqual(self.main_loop(), [('claude-sonnet-5-5', 'low')] + [('claude-opus-5-5', 'low')] * 3)
+        routing = record['routing']
+        self.assertEqual((routing['benchmark_eligible'], routing.get('ineligible_reason')), (True, None))
+        (entry,) = routing['policy']['exploration']
+        self.assertEqual((entry['request'], entry['status'], entry['source'], entry['target']),
+                         (2, 'admitted', ['claude-sonnet-5-5', 'low'], ['claude-opus-5-5', 'low']))
+        self.assertGreater(entry['predicted_switch_usd'], 0)  # the conversation was warm: a rewrite is predicted
+        self.assertTrue(entry['plan']['key'].endswith('/modelpilot-explore/0'))
+        self.assertEqual([(e['trigger'], e['status']) for e in routing['policy']['escalations']],
+                         [('exploration', 'confirmed')])
+        self.assertTrue(record['accounting']['tokens_match'], record['accounting'])
+
+    def test_an_exploration_trial_drawn_not_to_switch_stays_on_low_concise(self):
+        record = self.explore_trial('explore-stay', 0.0)
+        self.assertTrue(record['passed'], record['grade'])
+        self.assertEqual(set(self.main_loop()), {('claude-sonnet-5-5', 'low')})
+        self.assertEqual(record['routing']['policy']['exploration'], [])
+        self.assertTrue(record['routing']['benchmark_eligible'])
+
     STALLED = ([{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': BROKEN}}] +
                [{'tool': 'mcp__modelpilot__run_tests', 'input': {}}] * 3)
 

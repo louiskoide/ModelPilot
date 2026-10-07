@@ -49,6 +49,7 @@ rewrite and enough confidence. Models, efforts, cache behaviour and the cost
 model come from configs/modelpilot-policy.json and prices from the rate table; nothing here names
 a model.
 """
+import hashlib
 import itertools
 import json
 from pathlib import Path
@@ -149,7 +150,36 @@ def with_overrides(cfg, overrides):
                 into[k] = v
     merge(out, overrides or {}, '')
     _check_delegation(out)
+    _check_exploration(out)
     return out
+
+
+def exploration(cfg):
+    """The randomized-switch settings (modelpilot-explore); a config without them has exploration off."""
+    return cfg.get('exploration') or {'enabled': False}
+
+
+def exploration_plan(cfg, key):
+    """Whether a trial switches and at which main-loop request, drawn from a hash of key (its task, arm and trial),
+    so a trial's draw is reproducible and independent of what happens in it."""
+    spec = exploration(cfg)
+    digest = hashlib.sha256(str(key).encode()).digest()
+    u1, u2 = (int.from_bytes(digest[i:i + 8], 'big') / 2 ** 64 for i in (0, 8))
+    span = spec['last_request'] - spec['first_request'] + 1
+    return {'key': str(key), 'switch': u1 < spec['probability'],
+            'at_request': spec['first_request'] + min(span - 1, int(u2 * span))}
+
+
+def _check_exploration(cfg):
+    spec = exploration(cfg)
+    if not spec['enabled']:
+        return
+    ok = (0 <= spec.get('probability', -1) <= 1 and isinstance(spec.get('first_request'), int)
+          and isinstance(spec.get('last_request'), int) and 2 <= spec['first_request'] <= spec['last_request']
+          and spec.get('target_model') in cfg['models'] and cfg['models'][spec['target_model']].get('candidate'))
+    if not ok:
+        raise ValueError('exploration: probability in [0, 1], 2 <= first_request <= last_request (requests after the '
+                         'turn start), and a candidate target_model')
 
 
 def delegation(cfg, kind):

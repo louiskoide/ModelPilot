@@ -110,6 +110,14 @@ ARMS = {
                             'policy': 'docs/m6-modelpilot-policy.md',
                             'policy_overrides': {'delegation': {'consult': {'enabled': True, 'force': ['agent_finish']},
                                                                 'handoff_note': {'enabled': True}}}},
+    # Randomized mid-task switches, for measurement (user request, October 7; config exploration): low concise with no
+    # advisor and no gate moves; about half the trials, by a draw from their task, arm and trial number, switch to
+    # Opus 5.5 at the turn's effort at a random main-loop request from 2 to 5. Needs no TypeSafe key.
+    'modelpilot-explore': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'low', 'advisor': None,
+                           'append_system_prompt': 'bench/prompts/concise.md', 'models': POLICY_TIERS,
+                           'served_models': ['claude-opus-5-5', 'claude-sonnet-5-5'],
+                           'policy': 'docs/m6-modelpilot-policy.md',
+                           'policy_overrides': {'exploration': {'enabled': True}}},
 }
 RUNNABLE = ('fixed', 'jev')
 AUTHS = ('api_key', 'subscription')
@@ -170,7 +178,7 @@ def arm_adapter(arm, budget_usd, sessions, jev_key=None, advisor_stub=None, tool
     from .advisor import JevAdvisor
     from .modelpilot_adapter import ModelPilotAdapter
     advisor = (JevAdvisor(ROOT/ARMS[arm]['checkout'], key=jev_key, stub=advisor_stub)
-               if jev_key or advisor_stub is not None else None)
+               if ARMS[arm].get('advisor') == 'jev' and (jev_key or advisor_stub is not None) else None)
     return ModelPilotAdapter(limit_usd=budget_usd * sessions, mode='active',
                              tools=arm_tools(arm) if tools is None else tools, arm_id=arm,
                              model=ARMS[arm]['model'], effort=ARMS[arm]['effort'], advisor=advisor,
@@ -1141,7 +1149,11 @@ def main():
                   '(hidden prompt with --live) and asks for 1h cache writes; their dollars are reported API-key '
                   'equivalent (1h writes at the 5m rate), as-sent alongside, and do not count toward the run budget. '
                   'A usage or rate limit (HTTP 429) excludes the trial and stops the run.')
-        for arm in (a for a in arms if ARMS[a]['kind'] == 'modelpilot'):
+        for arm in (a for a in arms if ARMS[a]['kind'] == 'modelpilot' and ARMS[a].get('advisor') != 'jev'):
+            print(f'ModelPilot exploration arm {arm}: low concise with no advisor; each trial\'s draw from its task, arm '
+                  'and trial number decides whether it switches to Opus 5.5 at the turn\'s effort and at which main-loop '
+                  'request (configs/modelpilot-policy.json, exploration). Measurement only; no TypeSafe key needed.')
+        for arm in (a for a in arms if ARMS[a]['kind'] == 'modelpilot' and ARMS[a].get('advisor') == 'jev'):
             print(f'ModelPilot arm {arm}: active policy (benchmark arm only). Jev (compat checkout, advice only) predicts '
                   'the model and effort at each turn start and on stuck evidence; ModelPilot jumps straight there when '
                   'the expected total cost says it pays, else stays (configs/modelpilot-policy.json). Stuck with nothing '

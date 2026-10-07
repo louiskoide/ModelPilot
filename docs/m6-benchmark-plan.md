@@ -607,8 +607,15 @@ Single-prompt tasks never idle and never compact, so the cache-aware design has 
 
 For comparison, the same 28 tasks as single prompts come to $2.30. Contexts end at 28–47k tokens, under the client's 100k auto-compaction minimum, so `--autocompact` won't fire on these sequences; only `/compact` turns compact. So in this estimate the lifetime is a real lever: 1h saves about 16% when users pause 5–60 minutes, and costs about 17% when they don't pause and 30% when they pause longer than an hour. Compaction is not forecast, because its summary size is unknown until measured.
 
-**Proposed live runs (each needs the user's go; none run yet).**
-1. **One-hour TTL probe** (API key; direct API, as the TTL probes are): `python3 -m modelpilot.cache_replication --suite ttl-1h --live --budget 4`. 102 requests on Sonnet 5.5 and Opus 5.5, 3 repeats of seven kinds (`TTL_1H_KINDS`): 1h entries read after 10 and 50 minutes, expired at 60.5, a read at 40 minutes refreshing to 80, a 5m control after 10 minutes, and two cross-lifetime questions. Can a request marked 1h move a warm 5m entry to the hour, and is it billed as a read? Does a request marked 5m shorten a 1h entry? About 90 minutes. At most $2.82 if every request wrote; about half that if the reads hit. `ttl-summary.json` gives each kind's outcome.
+**One-hour cache test, first run (October 6–7; `runs/m0-replication-ttl-1h-20261006-215100`, $2.0937, 78 of 102 calls).**
+- **Valid**, with real-time gaps matching the plan (six repeats over Sonnet 5.5 and Opus 5.5):
+  - A 1h entry is still read after 10 minutes, 6/6; a 5m entry is rewritten, 6/6. So at a 10-minute pause 1h writes do what the sequence comparison assumes.
+  - A request marked 1h that reads a warm 5m entry costs only a read (7.6k tokens read, nothing written). But it doesn't extend the entry: 10 minutes later it was rewritten, 6/6. **An entry's lifetime is set when it is written, so the turn-end upgrade idea doesn't work.** Getting an hour means writing at 1h in the first place.
+  - A request marked 5m that reads a 1h entry doesn't shorten it (hit 10 minutes later, 6/6).
+- **Not measured**: whether a 1h entry lasts the full hour. The computer slept during those waits, and the harness counted them on a clock that stops in sleep, so they would have ended hours late. The run was stopped by hand. Waits now follow the wall clock, and a late step is marked and left out. The long kinds alone can be rerun with `python3 -m modelpilot.cache_replication --suite ttl-1h-long --live --budget 3`: 42 requests, at most $1.34, about 90 minutes with the computer kept awake (`caffeinate -i`). The policy's 3600 s for 1h entries stays nominal until then.
+
+**Proposed live runs (each needs the user's go).**
+1. **One-hour TTL probe** (first run done, see above; its hour-long kinds still to run) (API key; direct API, as the TTL probes are): `python3 -m modelpilot.cache_replication --suite ttl-1h --live --budget 4`. 102 requests on Sonnet 5.5 and Opus 5.5, 3 repeats of seven kinds (`TTL_1H_KINDS`): 1h entries read after 10 and 50 minutes, expired at 60.5, a read at 40 minutes refreshing to 80, a 5m control after 10 minutes, and two cross-lifetime questions. Can a request marked 1h move a warm 5m entry to the hour, and is it billed as a read? Does a request marked 5m shorten a 1h entry? About 90 minutes. At most $2.82 if every request wrote; about half that if the reads hit. `ttl-summary.json` gives each kind's outcome.
 2. **Lifetime at a mid gap** (subscription, $0 API): `python3 -m modelpilot.bench --shape sequence --sequences all --arms sonnet-5.5-low-concise-5m,sonnet-5.5-low-concise-1h --subscription-arms sonnet-5.5-low-concise-5m,sonnet-5.5-low-concise-1h --gap 600 --run-budget 1 --live`. 16 trials. About $6 as sent, by the forecast; roughly 2–3 hours, with gaps overlapping other trials' work. A 429 stops the run.
 3. **Compaction** (subscription): the same with `--compact warm`, about $5–7 (summary size unknown).
 4. Optional controls: `--gap 0` (about $5) and `--gap 3900` (about $7.6, at least 4.5 hours of wall time).
@@ -680,6 +687,13 @@ The rule under "4a design" (proposed September 27) still waits on the user's con
 - **The rule's answer.** Assuming the ModelPilot arm's run-to-run spread equals low concise's, the projected 95% half-width over the 24 final tasks is $0.0095 for n = 1 ($0.0067 for 2, $0.0055 for 3), against a target of 15% × $0.077 = $0.0116. So the rule gives n = 1. It stays 1 while the ModelPilot arm's spread is at most 1.4× low concise's ($0.0235), and becomes 2 up to 2.2×.
 - **What would settle the assumption.** A second `modelpilot` trial on the tuning tasks: about $2.4 API plus unpriced TypeSafe calls for 29 tasks, or about $0.35 for the four tasks the variance check originally named, too few to estimate a spread well.
 - **What 4b would compare now.** On the tuning tasks the ModelPilot arm never left low concise, so a 4b run today mostly measures its overhead against low concise. Its arm set and timing are the user's decision. **User decision, October 6: 4b is held.** At n = 1, five arms (low concise, ModelPilot, Sonnet 5.5 medium, Opus 5.5, `jev-compat-o55`) on 24 final tasks cost roughly $14 at tuning-task means; final tasks are smaller, so probably less.
+
+### Exploration runs (October 7; built offline, $0; live runs need the user's go)
+
+The arm and its reading are described in `docs/m6-modelpilot-policy.md`, "Exploration arm". Two runs, both on the API key: ModelPilot arms run through the adapter, which the subscription can't serve.
+
+1. **Broad** (switch costs, breakage): `python3 -m modelpilot.bench --tasks <the 59 tuning tasks> --arms modelpilot-explore --run-budget 12 --live`. Estimate: about half the trials stay on low concise (about $0.08) and half finish on Opus after the switch (about $0.12–0.18), so about $7–9 for 59 trials, plus a few hours of wall time. Afterwards: `python3 -m modelpilot.exploration runs/bench-<ts>`. Recommended after the item 8 labelling run, so the tasks' low concise outcomes are on record next to it.
+2. **Targeted** (rescue): `modelpilot-explore` with more trials on the tasks the labelling run finds miss-prone, about 10 trials each. About $10–15 for three tasks. Its trial count is set once those tasks are known.
 
 ## Harness (`modelpilot/bench.py`, new)
 

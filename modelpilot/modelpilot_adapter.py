@@ -135,6 +135,8 @@ class ModelPilotAdapter:
                                                       self.threshold),indent=2)+'\n')
         if self.policy is not None and hasattr(self.policy,'prompt_prefix'):
             self.policy.prompt_prefix=self.prefix()
+        if self.policy is not None and hasattr(self.policy,'exploration_key'):  # the trial's own exploration draw
+            self.policy.exploration_key=f"{trial.record.get('task')}/{self.arm_id}/{trial.record.get('trial')}"
         if self.policy is not None and hasattr(self.policy,'workspace'):  # consult briefs diff against the base commit
             self.policy.workspace,self.policy.base=trial.work,getattr(trial,'base_commit',None)
         self.binding={'MODELPILOT_DB':str(self.db),'MODELPILOT_SESSION':self.session,
@@ -193,6 +195,7 @@ class ModelPilotAdapter:
                                                         'stop_reason','cost_usd','delivered','brief_bytes')}
                        for e in gov.journal('delegation')]
             stops=[e['payload'] for e in gov.journal('policy_stop')]
+            explored=[e['payload'] for e in gov.journal('exploration')]
             held=len(gov.journal('review_block'))  # finishes the Stop hook held for a review
             from .policy_actions import escalation_proposal
             try:
@@ -217,14 +220,17 @@ class ModelPilotAdapter:
         from .active_policy import parameters
         live=self.advisor is not None and self.advisor.live
         catalog_ok=bool(self.catalog) and self.catalog.get('status')==200 and set(self.catalog.get('models') or [])==set(self.models or ())
-        eligible=active and live and catalog_ok
+        from . import switch_policy
+        exploring=bool(active and hasattr(self.policy,'config') and switch_policy.exploration(self.policy.config)['enabled'])
+        # The exploration arm has no advisor by design: its moves are drawn at random, not advised.
+        eligible=active and (live or exploring) and catalog_ok
         out={'kind':'modelpilot_policy','mode':mode,'applied':any(r.get('applied') for r in messages),
              'active_policy_implemented':active,'benchmark_eligible':eligible,
              'tools':{'enabled':self.tools,'threshold_bytes':self.threshold,'calls':tool_calls},
              'channel_declared':self.channel,
              'fixture_policy':None if active else fixture,
              'policy':dict(fixture,stops=stops,refusals=[r.get('refusal') for r in refused],decisions=decisions,
-                           delegation=delegated,held_finishes=held,
+                           delegation=delegated,held_finishes=held,exploration=explored if exploring else None,
                            parameters=parameters(self.model,self.effort,overrides=self.overrides))
                  if active else None,
              'advisor':{'live':live,'calls':sum(bool(a) for a in advice),'failures':sum(bool(a.get('error')) for a in advice),

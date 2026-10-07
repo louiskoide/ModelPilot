@@ -2,6 +2,27 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 7, 2026: exploration arm for randomized mid-task switches (offline)
+
+$0, user request: more evidence on what switches do, since only 11 were on record (all at a turn start, all upward, all passing, none since October 3). Details: `docs/m6-modelpilot-policy.md`, "Exploration arm".
+
+- **The arm.** `modelpilot-explore` is low concise with no advisor. Each trial draws, reproducibly from its task, arm and trial number, whether it switches (probability 0.5) and at which main-loop request (2–5). At that request it moves to Opus 5.5 at the turn's effort through the usual dispatcher, journaling kind `exploration` with the predicted switch cost. Config `exploration` is off by default. The arm's trials are eligible without an advisor and need no TypeSafe key. `bench.arm_adapter` now gives an advisor only to arms that name Jev.
+- **Reading.** `python3 -m modelpilot.exploration <runs>` compares switched with unswitched trials and predicted with measured switch costs.
+- **Proposed runs.** Broad: 59 tuning tasks, about $7–9 API, after the labelling run. Targeted: miss-prone tasks, about $10–15. Neither has run.
+- Tests: two real-client trials (`tests/test_bench_tools.py`: a switch at request 2 onto Opus 5.5 low, and a trial drawn not to switch), the draw and its validation (`tests/test_switch_policy.py`), and the report (`tests/test_exploration.py`).
+
+## October 7, 2026: plan item 6, one-hour cache test: partly measured
+
+The user-approved live run `runs/m0-replication-ttl-1h-20261006-215100`, from code on `long-session`, API key, no retries: 78 of 102 calls, $2.0937, cost complete. Stopped by hand. Details: `docs/m6-benchmark-plan.md`, "One-hour cache test, first run".
+
+- **Measured** (Sonnet 5.5 and Opus 5.5, three repeats each):
+  - A 1h entry survives 10 minutes (6/6) where a 5m entry doesn't (6/6 rewritten).
+  - A read marked 1h costs a read but doesn't extend a 5m entry: 6/6 rewritten 10 minutes later. So an entry's lifetime is fixed when it is written, and the turn-end upgrade lever is dropped.
+  - A read marked 5m doesn't shorten a 1h entry (6/6 hits).
+- **Not measured: the hour itself.** The computer slept during the 40–80 minute waits, which the harness counted on `time.monotonic`. That clock stops during sleep on macOS, so those requests would have gone out about 10 hours late. They were stopped instead of being paid for.
+- **Fixed.** `cache_replication.execute` schedules waits on the wall clock. Each step records `planned_gap_seconds` and is marked `late` when it starts more than 60 s after its gap, and `ttl_summary` leaves late repeats out. The new suite `ttl-1h-long` holds only the three hour-long kinds: 42 requests, at most $1.34. Rerunning it needs the user's go and an awake computer.
+- Tests: `tests/test_cache_replication.py` (12) pass; new tests for a simulated sleep and for the long suite.
+
 ## October 6, 2026: user decisions on items 6, 8, 9 and 11
 
 $0, no code changed.
