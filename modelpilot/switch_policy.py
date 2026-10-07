@@ -368,11 +368,49 @@ def _consult_target(cfg, current, model, effort, forced=False):
 
 def decide(cfg, rates, advice, current, prof, trigger):
     """Stay, jump straight to a target, or stop (stuck with nothing stronger). Returns the decision with every
-    candidate's numbers, so the journal shows why, and forecast_usd: run() on the setting it leaves the task on,
-    which a later step compares measured spend against."""
+    candidate's numbers, so the journal shows why, forecast_usd: run() on the setting it leaves the task on,
+    which a later step compares measured spend against, and break_even (see break_even), which changes nothing."""
     decision = _decide(cfg, rates, advice, current, prof, trigger)
     decision['forecast_usd'] = run_cost(cfg, rates, tuple(decision['target']), prof)
+    decision['break_even'] = break_even(cfg, rates, current, prof, trigger)
     return decision
+
+
+def break_even(cfg, rates, current, prof, trigger):
+    """Plan item 7: what an unnoticed miss would have to cost, beyond the redo already priced, for a move to a
+    stronger setting to pay here. A miss's damage has no measured price, so the gate shows this instead of assuming
+    one; nothing here changes a decision.
+
+    Each stronger setting the decision point can reach is weighed as if Jev had named it, on the measured pass rates
+    alone (jev_weight 0, its maximum likelihood), so the figure doesn't depend on whether Jev was asked. Damage counts
+    once, on the decision's own run: every setting's expected cost gains damage x (1 - P_ok), so a move pays when
+    damage > (its expected cost - staying's + the hysteresis) / (its P_ok - staying's). damage_usd 0: it pays without
+    any; None: no fewer misses measured. None at an uncalibrated point (Jev's estimate is the whole of P_ok there)."""
+    cal = cfg['calibration']
+    if not (cal['enabled'] and trigger in cal['applies_at']):
+        return None
+    measured = dict(cfg, calibration=dict(cal, jev_weight=0.0))
+    current = tuple(current)
+    effort_fixed = trigger not in cfg['effort_changes_at']
+    moves = []
+    for c in settings(cfg):
+        if c == current or not at_least(cfg, c, current) or (effort_fixed and c[1] != current[1]):
+            continue
+        named = {'model': {'choice': c[0], 'confidence': 1.0, 'probabilities': {c[0]: 1.0}}}
+        if c[1] is not None:
+            named['effort'] = {'choice': c[1], 'confidence': 1.0, 'probabilities': {c[1]: 1.0}}
+        rows = _decide(measured, rates, named, current, prof, trigger)['candidates']
+        stay, move = rows[0], next(r for r in rows if r['setting'] == _label(c))
+        if stay['p_measured'] is None or move['p_measured'] is None:
+            moves.append({'setting': _label(c), 'unmeasured': True, 'damage_usd': None})
+            continue
+        fewer = move['p_ok'] - stay['p_ok']
+        extra = move['expected_usd'] - stay['expected_usd'] + cfg['hysteresis_usd'] * stay['p_ok']
+        damage = 0.0 if extra <= 0 else extra / fewer if fewer > 0 else None
+        moves.append({'setting': _label(c), 'fewer_misses': fewer, 'extra_usd': extra, 'damage_usd': damage})
+    priced = [m for m in moves if m['damage_usd'] is not None]
+    return {'basis': 'measured_pass_rates', 'moves': moves,
+            'cheapest': min(priced, key=lambda m: m['damage_usd']) if priced else None}
 
 
 def answer_shapes(cfg):
@@ -417,8 +455,10 @@ def jev_gate(cfg, rates, current, prof, trigger):
     return {'can_change': False, 'reason': 'every_answer_stays', 'shapes': shapes, 'closest_usd': closest}
 
 
-def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None):
-    """jev_estimate: Jev's estimate for every setting, in place of its probabilities (jev_gate's bounds)."""
+def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None, damage_usd=0.0):
+    """jev_estimate: Jev's estimate for every setting, in place of its probabilities (jev_gate's bounds). damage_usd:
+    a price per unnoticed miss of the decision's own run, beyond its redo; 0 everywhere until one is measured (plan
+    item 7), so only the tests set it, to check break_even against the decisions it describes."""
     if trigger not in TRIGGERS:
         raise ValueError(f'Unknown decision point {trigger!r}')
     current = tuple(current)
@@ -520,7 +560,7 @@ def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None):
         p, switch = probability(c), switch_cost(cfg, rates, current, c, prof, reuse=True)
         note = note_cost(cfg, rates, current, c, prof)  # the handoff note the model being left writes, if on
         row = {'setting': _label(c), 'p_ok': p, 'switch_usd': switch + note, 'run_usd': run, 'recover_usd': recover,
-               'expected_usd': switch + note + p * run + (1 - p) * recover, '_setting': c}
+               'expected_usd': switch + note + p * run + (1 - p) * (recover + damage_usd), '_setting': c}
         if note:
             row['note_usd'] = note
         if calibrated:
@@ -537,7 +577,8 @@ def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None):
         cost = consult_cost(cfg, rates, current, adviser, prof)
         rows.append({'setting': 'consult:' + _label(adviser), 'p_ok': p, 'switch_usd': 0.0, 'consult_usd': cost,
                      'run_usd': stay['run_usd'], 'recover_usd': stay['recover_usd'],
-                     'expected_usd': cost + p * stay['run_usd'] + (1 - p) * stay['recover_usd'], '_setting': current})
+                     'expected_usd': cost + p * stay['run_usd'] + (1 - p) * (stay['recover_usd'] + damage_usd),
+                     '_setting': current})
     out['candidates'] = [{k: v for k, v in r.items() if k != '_setting'} for r in rows]
     if forced and adviser:  # measurement only: consult.force names this step's cause
         return dict(out, action='consult', consult=list(adviser), reason='forced')

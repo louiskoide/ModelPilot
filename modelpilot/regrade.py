@@ -35,8 +35,9 @@ def edge_files(task_id, root=EDGE):
     return sorted((root/task_id).glob('test_*.py'))
 
 
-def run_edge(task, tree, python, scratch, root=EDGE):
-    """The task's edge tests against a tree, with the grader's isolation (no credentials, own HOME/TMPDIR)."""
+def run_edge(task, tree, python, scratch, root=EDGE, keep_output=False):
+    """The task's edge tests against a tree, with the grader's isolation (no credentials, own HOME/TMPDIR).
+    keep_output keeps the run's whole output."""
     target = Path(tree)/EDGE_DIR
     if target.exists():
         shutil.rmtree(target)
@@ -44,9 +45,10 @@ def run_edge(task, tree, python, scratch, root=EDGE):
     for path in edge_files(task['id'], root):
         shutil.copy2(path, target/path.name)
     home, tmp = bench_tasks.isolated_dirs(scratch)
-    result = bench_tasks.run_tests(EDGE_COMMAND, tree, python, task.get('pythonpath'), home=home, tmp=tmp)
+    result = bench_tasks.run_tests(EDGE_COMMAND, tree, python, task.get('pythonpath'), home=home, tmp=tmp,
+                                   keep_output=keep_output)
     return {k: result[k] for k in ('exit_code', 'tests_run', 'tests_passed', 'tests_skipped', 'failing_tests',
-                                   'output_tail')}
+                                   'output_tail', 'output') if k in result}
 
 
 def edge_all_passed(result):

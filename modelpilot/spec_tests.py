@@ -114,8 +114,9 @@ def write(tasks, out, rates, live=False, limit_usd=1.0, transport=None):
     return plan
 
 
-def saved_fixes(task_ids, rates):
-    """Every complete, eligible, strictly graded trial of these tasks on record: (trial directory, strict pass)."""
+def saved_fixes(task_ids, rates, with_records=False):
+    """Every complete, eligible, strictly graded trial of these tasks on record: (trial directory, strict pass), and
+    with_records its record as bench_report loads it (cost repriced from its proxy log)."""
     from .bench_report import ineligible_reason, load_run
     out = []
     for run in sorted((ROOT/'runs').glob('bench-2026*')):
@@ -124,7 +125,7 @@ def saved_fixes(task_ids, rates):
         for r in load_run(run, rates)[1]:
             if (r['task'] in task_ids and r.get('pass_rule') == 'hidden_and_edge' and r.get('complete', True)
                     and not ineligible_reason(r)):
-                out.append((run/r['task']/r['arm']/str(r['trial']), bool(r['passed'])))
+                out.append((run/r['task']/r['arm']/str(r['trial']), bool(r['passed'])) + ((r,) if with_records else ()))
     return out
 
 
