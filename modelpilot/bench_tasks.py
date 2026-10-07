@@ -118,12 +118,15 @@ def test_env_paths(task, tree):
     return [os.path.abspath(Path(tree)/task['pythonpath'])] if task.get('pythonpath') else []
 
 
+GIT_IDENTITY = {'GIT_AUTHOR_NAME': 'bench', 'GIT_AUTHOR_EMAIL': 'bench@localhost', 'GIT_COMMITTER_NAME': 'bench',
+                'GIT_COMMITTER_EMAIL': 'bench@localhost', 'GIT_AUTHOR_DATE': '2000-01-01T00:00:00Z',
+                'GIT_COMMITTER_DATE': '2000-01-01T00:00:00Z'}
+
+
 def workspace(task, repo, destination):
     """Agent checkout: base tree as a fresh one-commit repository, so history cannot leak the fix."""
     task_tree(task, repo, task['base'], destination)
-    env = dict(clean_env(), GIT_AUTHOR_NAME='bench', GIT_AUTHOR_EMAIL='bench@localhost',
-               GIT_COMMITTER_NAME='bench', GIT_COMMITTER_EMAIL='bench@localhost',
-               GIT_AUTHOR_DATE='2000-01-01T00:00:00Z', GIT_COMMITTER_DATE='2000-01-01T00:00:00Z')
+    env = dict(clean_env(), **GIT_IDENTITY)
     for args in (['init', '-q'], ['add', '-A'], ['commit', '-q', '-m', 'Task base']):
         subprocess.run(['git', *args], cwd=destination, env=env, check=True, capture_output=True)
     return destination
@@ -294,12 +297,12 @@ def grade_reason(hidden, suite, expected_hidden_passed=None):
     return 'passed'
 
 
-def grade(task, tree, repo, python, scratch, expected_hidden_passed=None):
+def grade(task, tree, repo, python, scratch, expected_hidden_passed=None, keep_output=False):
     """Hidden grader: agent's tree with the whole test directory replaced by the reference version.
 
     Tests run with their own HOME/TMPDIR and no user site-packages. With expected_hidden_passed
     (the reference's count from a preflight), the tree must pass as many hidden tests as the
-    reference did: a skipped hidden test was not passed.
+    reference did: a skipped hidden test was not passed. keep_output keeps each run's whole output.
     """
     scratch = Path(scratch)
     graded = scratch/'graded'
@@ -313,8 +316,10 @@ def grade(task, tree, repo, python, scratch, expected_hidden_passed=None):
     shutil.copytree(reference/task['test_dir'], test_dir)
     shutil.rmtree(reference)
     home, tmp = isolated_dirs(scratch)
-    hidden = run_tests(task['hidden_command'], graded, python, task.get('pythonpath'), home=home, tmp=tmp)
-    suite = run_tests(task['suite_command'], graded, python, task.get('pythonpath'), home=home, tmp=tmp)
+    hidden = run_tests(task['hidden_command'], graded, python, task.get('pythonpath'), home=home, tmp=tmp,
+                       keep_output=keep_output)
+    suite = run_tests(task['suite_command'], graded, python, task.get('pythonpath'), home=home, tmp=tmp,
+                      keep_output=keep_output)
     reason = grade_reason(hidden, suite, expected_hidden_passed)
     return {'passed': reason == 'passed', 'reason': reason, 'hidden': hidden, 'suite': suite,
             'expected_hidden_passed': expected_hidden_passed}
