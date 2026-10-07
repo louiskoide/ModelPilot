@@ -16,7 +16,7 @@ Switching model OR effort wrote a new cache prefix in tested M0 conditions. Retu
 
 - M0 cache harness and M1 pass-through proxy: verified, including an 8-hour soak. Missing: one-hour TTL, other request shapes, broad proxy compatibility.
 - M2 ledger, M3 workers, M4 verifier, M5 controls: bounded harnesses, small live checks; not integrated.
-- M6 benchmark: fixed, Jev and ModelPilot arms run live on 29 tuning tasks; the final split (`bench/splits.json`) is locked, not yet run.
+- M6 benchmark: fixed, Jev and ModelPilot arms run live on 29 tuning tasks; the final split is locked, not yet run.
 - ModelPilot arm: starts at low concise; Jev advises, `switch_policy` decides; delegation (consults, handoff notes) is off.
 - Governor: dry-run surface wired into the proxy and hooks; one live governed session passed. Missing: live turn-end delivery, observed rebuilds, fallback, active mode.
 
@@ -68,7 +68,7 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 ## Code map (`modelpilot/`; detail in `docs/code-map.md`)
 
 - Cache and proxy: `cache_probe`, `proxy`, `fixtures`, `soak`. Ledger and governor: `m2`, `m2_mcp`, `governor`, `hooks`, `governed_session` (`docs/governor.md`).
-- Benchmark: `bench`, `bench_tasks`, `bench_report`, `regrade` (`docs/m6-benchmark-plan.md`). Jev arms: `bench_jev`, `jev_*` (`docs/bench-adapters.md`).
+- Benchmark: `bench`, `bench_tasks`, `bench_report`, `regrade`, `long_session` (`docs/m6-benchmark-plan.md`). Jev arms: `bench_jev`, `jev_*` (`docs/bench-adapters.md`).
 - ModelPilot arm: `active_policy`, `switch_policy`, `advisor`, `delegation`, `policy_replay`, `modelpilot_adapter`, `bench_tools`, `fixture_dispatch`, `policy_actions` (`docs/m6-modelpilot-policy.md`, `configs/modelpilot-policy.json`).
 
 ## Plan, in order
@@ -76,11 +76,11 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 Built offline first; any live run needs the user's approval. 1–4 done October 6 (`docs/changelog.md`); 4 found no pre-run miss signal.
 
 5. Spec-written tests: the first probe caught 1 of 3 (parse), $0.13 a task; a 29-task run waits on 7.
-6. Long-session benchmark: idle gaps, compaction, a one-hour TTL probe.
+6. Long sessions: built offline; 1h TTL probe and sequence runs await approval.
 7. Price each miss, not one set price: the late fix (measured: repair from a host-written bug report) plus damage, unknown until real incidents; meanwhile exposure and per-task break-even damage.
-8. 30 more labelled tasks before any predictor.
-9. Caveman's proxy (user decision): $0 pass over recorded tool results, then low concise behind it; strict passes decide.
+8. 30 labelling tasks: built offline; runs await approval.
+9. Caveman: parked (user decision); its $0 pass found about 1% at most, all lossy.
 10. ModelPilot's own predictor, only if 8 shows misses predictable; never edit Jev.
-11. Variance check, then 4b on the final split once the user confirms its trial-count rule.
+11. 4b held (user decision); on record its trial-count rule gives n=1.
 12. Governor: live evidence for turn-end delivery and observed rebuilds; dry-run meanwhile.
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.

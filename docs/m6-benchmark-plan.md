@@ -581,6 +581,106 @@ Offline checks with the real client (2.1.281):
 
 While a trial waits out its gap, other trials run. Only one client runs at a time, and the harness sleeps only when nothing else can run. Each trial records the actual gap (at least the requested one) and whether the follow-up's first request found warm cache (`physically_warm`). Interleaved trials on the same model can re-warm the shared system prompt during the gap. Cold-equivalent cost reprices those reads, but the latency of such a follow-up is slightly warm.
 
+### Long sessions (plan item 6; built offline October 6, $0)
+
+Single-prompt tasks never idle and never compact, so the cache-aware design has been unmeasured where it should matter. The shape below is kept as built (user decision, October 6). The `sequence` shape (`modelpilot/long_session.py`) runs several tuning tasks of one repository as the turns of one Claude Code session.
+
+**Shape.** `bench/sequences.json` (rule in the file; a test keeps it in step with the split): each tuning repository's tasks in base-commit order, in sequences of 3–5. That gives 8 sequences over 28 of the 29 tuning tasks; toolz has one task and no sequence. Every task is in exactly one sequence, so each can be set against its single-prompt results. Each task has its own checkout under the trial's workspace (`task1/`, `task2/`, …). Turn k is that task's instruction, prefixed "The task below is in the directory taskk/, a repository of its own: work only there", with the grader's `PYTHONPATH` for that checkout. `--gap` seconds of idle time separate task turns, and other trials run meanwhile (`bench.interleave` now parks each trial for its own next gap). `--compact warm` adds a `/compact` turn right after each task but the last, before the gap, while the entry is warm; `--compact cold` adds it after the gap. `--autocompact N` passes the client's own window. A turn that doesn't end in success ends the sequence, as in the follow-up shape. Each subtask is graded at the end like a single task (hidden grader plus edge suite). Its diff is also hashed right after its turn, and a later change is flagged (`changed_after_turn`). The trial passes when every subtask does. `modelpilot` runs in sequences, deciding at each task turn's start; `modelpilot-delegate` is refused, since its briefs read one checkout's diff.
+
+**Cache lifetime as an arm.** The client marks every breakpoint 5m with an API key and 1h on a subscription. `CLAUDE_CODE_PROMPT_CACHE_TTL` sets it either way (2.1.284, checked at $0 on both logins). `sonnet-5.5-low-concise-5m` and `-1h` are low concise with the lifetime set. Because the lifetime is what they compare, their subscription trials are priced as sent, not repriced to 5m. The proxy now logs each request's breakpoint lifetimes (`cache_ttl`) and flags the client's compaction request (`compaction`). Trials of these arms record `ttl_check`. The compaction request keeps the default 5m whatever the setting, so it is counted apart.
+
+**Offline checks with the pinned client ($0).**
+- `/compact` works on a resumed `-p` session (`compact_boundary`). The compaction request is the conversation so far with the summary instruction appended, so it reads the warm entry.
+- The request after compaction rewrites everything: the first system block, a billing header, changes with the new first message.
+- `--autocompact 100000` compacts when usage reports a larger context, and those requests are flagged too.
+- A three-task sequence through the real client passes all three subtasks, with exact token accounting across the three invocations. The ModelPilot arm, with a stub advisor, makes one turn-start decision per task turn.
+
+**Policy.** The policy's warmth and write prices now follow the lifetime the request asks for. `cache_lifetime_seconds` is 300 for 5m. For 1h it is 3600, the nominal hour, unmeasured until the probe below; counting an expired entry warm only makes moves look dearer. Writes are priced at `write_1h` when the client marks 1h. Returns to an earlier setting's entry still count only within 300 s.
+
+**Forecast, not a measurement** (`runs/long-session-forecast-20261006.py` → `.json`). Each task's median low concise trial on record, replayed as one conversation: every request also reads the earlier tasks' context, and a return writes the conversation again once its entry has expired. Totals over the 8 sequences:
+
+| Gaps between task turns | 5m writes | 1h writes |
+| --- | --- | --- |
+| under 5 minutes | $2.37 | $2.77 |
+| 5 minutes to an hour | $3.29 | $2.77 |
+| over an hour | $3.29 | $4.29 |
+
+For comparison, the same 28 tasks as single prompts come to $2.30. Contexts end at 28–47k tokens, under the client's 100k auto-compaction minimum, so `--autocompact` won't fire on these sequences; only `/compact` turns compact. So in this estimate the lifetime is a real lever: 1h saves about 16% when users pause 5–60 minutes, and costs about 17% when they don't pause and 30% when they pause longer than an hour. Compaction is not forecast, because its summary size is unknown until measured.
+
+**Proposed live runs (each needs the user's go; none run yet).**
+1. **One-hour TTL probe** (API key; direct API, as the TTL probes are): `python3 -m modelpilot.cache_replication --suite ttl-1h --live --budget 4`. 102 requests on Sonnet 5.5 and Opus 5.5, 3 repeats of seven kinds (`TTL_1H_KINDS`): 1h entries read after 10 and 50 minutes, expired at 60.5, a read at 40 minutes refreshing to 80, a 5m control after 10 minutes, and two cross-lifetime questions. Can a request marked 1h move a warm 5m entry to the hour, and is it billed as a read? Does a request marked 5m shorten a 1h entry? About 90 minutes. At most $2.82 if every request wrote; about half that if the reads hit. `ttl-summary.json` gives each kind's outcome.
+2. **Lifetime at a mid gap** (subscription, $0 API): `python3 -m modelpilot.bench --shape sequence --sequences all --arms sonnet-5.5-low-concise-5m,sonnet-5.5-low-concise-1h --subscription-arms sonnet-5.5-low-concise-5m,sonnet-5.5-low-concise-1h --gap 600 --run-budget 1 --live`. 16 trials. About $6 as sent, by the forecast; roughly 2–3 hours, with gaps overlapping other trials' work. A 429 stops the run.
+3. **Compaction** (subscription): the same with `--compact warm`, about $5–7 (summary size unknown).
+4. Optional controls: `--gap 0` (about $5) and `--gap 3900` (about $7.6, at least 4.5 hours of wall time).
+
+Afterwards ($0): `python3 -m modelpilot.long_session report runs/bench-<ts> --out runs/long-session-report-<ts>.json`. Per arm it gives subtasks passed, dollars per sequence, how many returns read the conversation back (`return_read_fraction` ≥ 0.5) and compaction cost. It pairs arms per subtask (28 pairs; each subtask's turn plus the compaction turn that prepared it, cold-equivalent).
+
+**What the result would decide.** If the probe confirms the hour and a lifetime-tagged upgrade is billed as a read, a governor lever follows: at a turn's end, upgrade the conversation's entry to the hour for about a read, only when a pause is likely. That would be a new prewarm-like request, so it stays a proposal for the user, as shadow warming is off by default. If compaction holds strict passes, compacting before a pause is the other lever.
+
+### Labelling batch (plan item 8; built offline October 6, $0)
+
+Item 4 found nothing known before a run that separates Sonnet's three miss tasks, and three positives are too few to fit or test a predictor. This batch adds 30 tuning tasks so that item 10 can ask the question again with more labels. They are built and validated; no trial has run.
+
+**Where they come from.** Only repositories already in the tuning split were mined (`bench_tasks.candidates`, up to 400 source lines, 2021 onwards; networkx from its shallow clone, 2025-06 onwards). Adding a repository such as sqlglot is the user's decision, so none was added. The batch: networkx 14, more-itertools 12, cachetools 2, tomli 2; 15 bug fixes and 15 features; 28 of the 30 committed in 2025–2026. Each task spec carries `"batch": "item-8-labels"`, so the 29-task comparisons and the long-session sequences (`bench/sequences.json`) stay as they were. All are in `bench/splits.json` under `tuning`; the final split and its lock are unchanged.
+
+**Picked for labels, not ease.** A mix of hard algorithmic changes and controls:
+- Hard: k-components losing components, dominance definitions, perfect graphs, planar faces, sampled edge betweenness, tree centroid, Floyd–Warshall negative cycles, numeric_range equality and hashing, extract's lazy monotonic mode.
+- Easy: hyper-Wiener index, argmin/argmax, exactly_n with a negative n, GEXF booleans.
+
+Instructions state the behaviour and every exact value or message the hidden tests check, never the change. They were written from the commit message and the hidden tests; unlike earlier batches, the linked issues weren't read (`instruction_source`). Where a hidden test fixes an order or a tie-break, the instruction states it, for example the centroid's order and the dominating-set greedy's tie-break.
+
+**Checks ($0).**
+- `bench_tasks validate`: all 30 valid (`runs/bench-validate-20261006-211134.json`). Each base fails its hidden tests, each reference passes three times, each base suite passes. The slowest reference grade is 20 s.
+- Every task has an edge suite (3–5 tests) that its reference passes in full (`bench/edge_tests/README.md`).
+- The harness preflight passes for all 30, edge suites included.
+
+**Candidates dropped on the way:**
+- Group betweenness: all its hidden tests are skipped without numpy, a class-level `importorskip`. Its four fixes would also have needed a base other than the reference's parent, which `validate` refuses on purpose.
+- Steiner tree weights and `cachetools` `clear()`: their bases already pass their hidden tests.
+- The Louvain loop fix: its base hangs, and a timeout never counts as a failure.
+- cachetools' stampede fix: its test pins how many times the lock is taken.
+- A cachetools change that only removes tests.
+- `sized_iterator`: too trivial.
+- Two 2017–18 toolz commits: their bases don't run on Python 3.12.
+
+**Proposed labelling runs (each needs the user's go; subscription, $0 API).** Low concise ×3 and Opus 5.5 ×2 per task, as planned:
+
+```
+python3 -m modelpilot.bench --tasks cachetools-cached-none-deprecated,cachetools-tlru-expire-pairs,mi-argmin-argmax,mi-bucket-phantom-keys,mi-exactly-n-negative,mi-extract-monotonic,mi-nth-permutation-r-too-large,mi-numeric-range-eq-hash,mi-numeric-range-reversed-values,mi-seekable-getitem,mi-serialize,mi-split-maxsplit-zero-empty,mi-subfactorial,mi-zip-broadcast-single-open,nx-all-triangles,nx-dominance-definitions,nx-dominating-set-greedy-cost,nx-edge-betweenness-k-scaling,nx-floyd-warshall-negative-cycle,nx-generalized-petersen,nx-gexf-dynamic-booleans,nx-hyper-wiener-index,nx-is-perfect-graph,nx-k-components-lost,nx-lattice-node-attributes,nx-nonisomorphic-trees-small-orders,nx-planar-embedding-faces,nx-tree-centroid,tomli-key-parts-limit,tomli-parse-float-illegal-types --arms sonnet-5.5-low-concise --trials 3 --subscription-arms sonnet-5.5-low-concise --run-budget 1 --live
+python3 -m modelpilot.bench --tasks cachetools-cached-none-deprecated,cachetools-tlru-expire-pairs,mi-argmin-argmax,mi-bucket-phantom-keys,mi-exactly-n-negative,mi-extract-monotonic,mi-nth-permutation-r-too-large,mi-numeric-range-eq-hash,mi-numeric-range-reversed-values,mi-seekable-getitem,mi-serialize,mi-split-maxsplit-zero-empty,mi-subfactorial,mi-zip-broadcast-single-open,nx-all-triangles,nx-dominance-definitions,nx-dominating-set-greedy-cost,nx-edge-betweenness-k-scaling,nx-floyd-warshall-negative-cycle,nx-generalized-petersen,nx-gexf-dynamic-booleans,nx-hyper-wiener-index,nx-is-perfect-graph,nx-k-components-lost,nx-lattice-node-attributes,nx-nonisomorphic-trees-small-orders,nx-planar-embedding-faces,nx-tree-centroid,tomli-key-parts-limit,tomli-parse-float-illegal-types --arms opus-5.5 --trials 2 --subscription-arms opus-5.5 --run-budget 1 --live
+```
+
+150 trials. Estimate from the tuning split's per-task means: about $7–9 for low concise and $15 for Opus, so about $22–25 API-key equivalent, a little more as sent. That is about 3–4 hours. A 429 stops a run; rerunning the missing trials in a new run keeps the evidence apart. Afterwards ($0) the label is item 4's: a miss task is one where any complete, strictly graded low concise trial failed. Item 4's feature script, `runs/miss-predictability-20261006.py`, can then be re-run over 59 tasks.
+
+### Caveman's engine over recorded tool results (plan item 9, first step; October 6, $0)
+
+Item 9's first step is a $0 pass of caveman's engine over tool results our agents actually received. A live arm (low concise behind caveman's proxy) was to follow only if this pass showed a real cut.
+
+**Setup.**
+- caveman: https://github.com/JuliusBrussee/caveman at commit `6571943` (Apache-2.0), cloned into ignored `work/caveman-src/repo`.
+- Its engine is built with the official Go 1.26.8 toolchain, checksum verified and unpacked into `work/caveman-src/toolchain`, with every Go cache under `work/caveman-src/gohome`. Nothing was installed globally.
+- It runs with an empty environment, its recovery store in a temporary `CAVEMAN_HOME`, and no network.
+- Its proxy compresses a tool result once, when it first arrives in the uncached tail, and resends the same bytes afterwards (`proxy/providers/anthropic/content_compress.go`). So each result is compressed once here, with automatic type detection (`runs/caveman-pass-20261006.py` → `.json`).
+
+**Result.** Over the 60 complete low concise trials on record (409 tool results):
+- **Cut.** 9% of tool-result tokens (o200k estimate, 152k to 138k).
+- **What changed.** Only 23 results, every one lossy (`lossless_to_model: false`). Most were source the agent had just read: a 1,266-token `sed -n` listing became 134 tokens of signatures, and Read results lost 39% of their tokens. Test output (117 results) and Grep (61) were left almost untouched.
+- **Dollars (estimate).** At most about $0.0008 a trial, 1.0% of low concise's $0.082, before any `caveman_retrieve` call the agent would need to see the elided bodies it was about to edit. Only 21 of 60 trials would save anything at all, at most $0.010.
+
+**Reading.** Our agents' tool results are small (median 7.9 KB a trial) and mostly partial source listings, which the engine either leaves alone or elides. The earlier split (`runs/tool-result-split-20261005.txt`) said the bytes are source reads, and caveman's lossless compressors (logs, JSON, tables, test output) have little to work on here. The plan's condition for the live arm, a real cut, isn't met. Building that arm means caveman's proxy in the chain behind ModelPilot's accounting proxy, its MCP retrieve tool and an egress check, about $2–3 as sent. Whether to drop or still run it is the user's decision.
+
+**Parked (user decision, October 6).** No live arm for now. Revisit if long sessions (item 6) turn out to be dominated by re-read tool output.
+
+### The 4b trial-count rule on the record (plan item 11; October 6, $0)
+
+The rule under "4a design" (proposed September 27) still waits on the user's confirmation; nothing here confirms it. This evaluates it on the trials already recorded (`runs/trial-count-rule-20261006.py` → `.json`), with today's arms: the cheapest fixed arm is `sonnet-5.5-low-concise`, and the ModelPilot arm is `modelpilot` from low concise. Costs are the recorded cold-equivalent dollars, API-key equivalent for subscription trials.
+
+- **Within-task spread, from the variance-check side.** Repeated trials across runs give each arm's run-to-run standard deviation per task: low concise $0.017 (26 tasks with repeats, 29 degrees of freedom), Sonnet 5.5 medium $0.018 (24 tasks), Opus 5.5 $0.040 (4 tasks only). So the fixed arms' variance no longer needs the 4a-style variance run. The ModelPilot arm has no repeats on record.
+- **Paired difference** (`bench-20261006-134508`, 24 tasks): mean +$0.0045, SD $0.0133. That is less than two arms' run-to-run noise alone, so the between-task component estimates as 0.
+- **The rule's answer.** Assuming the ModelPilot arm's run-to-run spread equals low concise's, the projected 95% half-width over the 24 final tasks is $0.0095 for n = 1 ($0.0067 for 2, $0.0055 for 3), against a target of 15% × $0.077 = $0.0116. So the rule gives n = 1. It stays 1 while the ModelPilot arm's spread is at most 1.4× low concise's ($0.0235), and becomes 2 up to 2.2×.
+- **What would settle the assumption.** A second `modelpilot` trial on the tuning tasks: about $2.4 API plus unpriced TypeSafe calls for 29 tasks, or about $0.35 for the four tasks the variance check originally named, too few to estimate a spread well.
+- **What 4b would compare now.** On the tuning tasks the ModelPilot arm never left low concise, so a 4b run today mostly measures its overhead against low concise. Its arm set and timing are the user's decision. **User decision, October 6: 4b is held.** At n = 1, five arms (low concise, ModelPilot, Sonnet 5.5 medium, Opus 5.5, `jev-compat-o55`) on 24 final tasks cost roughly $14 at tuning-task means; final tasks are smaller, so probably less.
+
 ## Harness (`modelpilot/bench.py`, new)
 
 - **Isolation per trial:** fresh checkout copy under `runs/bench-<ts>/<task>/<arm>/<trial>/`, isolated HOME, TMPDIR and `CLAUDE_CONFIG_DIR`, `--setting-sources ''`, strict empty MCP config (except ModelPilot's tools in its own arm), `CLAUDE_CODE_MAX_RETRIES=0`, no automatic retries.
