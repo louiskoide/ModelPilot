@@ -59,7 +59,7 @@ python3 -m modelpilot.m5 --out runs/m5-new-report.json
 python3 -m modelpilot.governor --out runs/governor-demo.json
 ```
 
-- Latest: 609 offline tests pass on Python 3.12 (`runs/jev-gate-regression-py312.log`); record counts in `docs/changelog.md`.
+- Latest: 616 offline tests pass on Python 3.12 (`runs/agent-test-steps-regression-py312.log`); record counts in `docs/changelog.md`.
 - Put the pinned client 2.1.284 (`work/claude-client/node_modules/.bin`) first on PATH: 2.1.289 retries refused requests. System Python 3.9 has two known `test_transport` errors.
 - Real-client, bench and Jev tests need `work/` and node; CI (3.10, 3.14) skips them. With `work/` symlinked into a worktree, the Jev launcher's checkout-path test fails.
 - Paid, all behind `--live` (inspect each plan first): `cache_probe`, `claude_check`, `worker_check`, `cascade_check`, `evaluate`, `jev_check`, `jev_route_check`, `governed_session`, `bench`, `thinking_probe`. Limits are stopping thresholds, not billing caps.
@@ -75,7 +75,7 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 Built offline first; any live run needs the user's approval. Reviewed October 6 (`docs/changelog.md`).
 
 1. Done October 6: Jev only where an answer could change the decision (none of 180 replayed).
-2. Steps read the agent's Bash test runs (`modelpilot/delegation.py` parses them), not only `run_tests`.
+2. Done October 6: steps read the agent's Bash test runs; 66 of 80 would fire at the finish.
 3. Done October 6: no R5 tools or channel paragraph while delegation is off.
 4. Done October 6: nothing known before a run separates the 3 misses.
 5. Catch misses after a run: Opus writes edge tests from the spec; the host runs them; a failure escalates.

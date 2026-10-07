@@ -17,6 +17,7 @@ import copy
 from pathlib import Path
 import re
 import subprocess
+from .bench_tasks import pytest_counts, uncolored, unittest_counts
 
 CONSULT_SYSTEM = ('You are a senior software engineer consulted about another engineer\'s work in progress on a Python '
                   'repository. You see the task, its test runs so far and the current diff, collected by the build host. '
@@ -39,6 +40,14 @@ WHY = {'tests_now_pass': 'The test suite the host runs now passes. Review the ch
                        'does: every failure measured so far ended with the agent reporting success.',
        'spend_overrun': 'The work is taking longer than forecast.',
        'stuck_evidence': 'The host\'s progress check says the agent is stuck'}
+# The same causes from the agent's own test runs through Bash (plan item 2).
+AGENT_WHY = {'tests_now_pass': "The agent's own test run (a Bash call; the host ran it as the agent wrote it) now passes. "
+                               'Review the change against the task before the agent finishes: every failure measured so '
+                               'far ended with the agent reporting success.',
+             'tests_pass': "The agent's own test run (a Bash call; the host ran it as the agent wrote it) passes. Review "
+                           'the change against the task before the agent finishes: every failure measured so far ended '
+                           'with the agent reporting success.',
+             'tests_now_fail': "The agent's own test run passed before and now fails."}
 # Agents run their tests through Bash, often after a here-document edit in the same call (bench-20261005-153506: every
 # trial, before any run_tests call).
 SEPARATORS = re.compile(r'&&|\|\||\$\(|[;&|()`]')
@@ -138,11 +147,9 @@ def _result_text(content):
     return '\n'.join(b['text'] for b in content or [] if isinstance(b, dict) and isinstance(b.get('text'), str))
 
 
-def agent_test_runs(messages, limit):
-    """The agent's own test runs in the conversation, as text within limit bytes; None when there are none. A run is
-    a Bash call with a shell line that runs a test runner, shown by those lines and the output the client returned
-    for the call: the newest with its output's tail, earlier ones (oldest first) by their last summary line, the
-    oldest left out when they take more than half the room. Ad hoc check scripts aren't recognized."""
+def test_calls(messages):
+    """The agent's Bash calls that run a test runner, oldest first: (tool_use id, the shell lines that run it, the output
+    the client returned, whether the client reported the call as failed). Ad hoc check scripts aren't recognized."""
     calls, runs = {}, []
     for message in messages or []:
         content = message.get('content') if isinstance(message, dict) else None
@@ -155,7 +162,43 @@ def agent_test_runs(messages, limit):
                 if lines:
                     calls[block.get('id')] = lines
             elif block.get('type') == 'tool_result' and block.get('tool_use_id') in calls:
-                runs.append((calls.pop(block['tool_use_id']), _result_text(block.get('content')), bool(block.get('is_error'))))
+                runs.append((block['tool_use_id'], calls.pop(block['tool_use_id']), _result_text(block.get('content')),
+                             bool(block.get('is_error'))))
+    return runs
+
+
+def failures(output):
+    """Failed and erroring tests in a test run's output, read from its pytest summary or unittest outcome; None when
+    it has neither or ran no test (a usage error, a cut-off output, only deselected tests)."""
+    text = uncolored(output)
+    counts = pytest_counts(text)
+    if counts:
+        failed = sum(n for kind, n in counts.items() if kind in ('failed', 'error', 'errors'))
+        return failed if failed or counts.get('passed') else None
+    if re.search(r'^Ran \d+ tests?', text, re.M) and re.search(r'^(?:OK|FAILED)\b', text, re.M):
+        ran = unittest_counts(text)
+        return ran['run'] - ran['passed'] if ran['run'] else None
+    return None
+
+
+def agent_test_results(messages):
+    """The agent's test runs whose output gives an outcome, oldest first: {'id': tool_use id, 'failures': n}. The
+    commands are the agent's and the output is what the client returned: evidence for a decision point, never a
+    verdict on the work."""
+    out = []
+    for call, _, output, _ in test_calls(messages):
+        failed = failures(output)
+        if failed is not None:
+            out.append({'id': call, 'failures': failed})
+    return out
+
+
+def agent_test_runs(messages, limit):
+    """The agent's own test runs in the conversation, as text within limit bytes; None when there are none. A run is
+    a Bash call with a shell line that runs a test runner, shown by those lines and the output the client returned
+    for the call: the newest with its output's tail, earlier ones (oldest first) by their last summary line, the
+    oldest left out when they take more than half the room."""
+    runs = [run[1:] for run in test_calls(messages)]
     if not runs:
         return None
     command = lambda lines: '\n'.join('$ ' + _cut(l, 300) for l in lines)

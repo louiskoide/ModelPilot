@@ -38,6 +38,10 @@ SIGNALS = {'repeated_error': 'the same error keeps repeating', 'edit_oscillation
 STEP_CAUSES = {'tests_now_pass': 'the test suite now passes', 'tests_now_fail': 'the test suite now fails',
                'spend_overrun': 'spending since the last decision has reached its forecast',
                'tests_pass': 'the test suite passes', 'agent_finish': 'the agent ended its turn'}
+# The same causes read from the agent's own test runs through Bash (plan item 2): its commands, the client's output.
+AGENT_STEP_CAUSES = {'tests_now_pass': "the agent's own test run now passes",
+                     'tests_now_fail': "the agent's own test run now fails",
+                     'tests_pass': "the agent's own test run passes"}
 
 
 def reviews_at_finish(config):
@@ -164,7 +168,7 @@ class ActivePolicy(ProxyPolicy):
         turns, starting = user_turns(request)
         if starting:
             return 'turn_start', f'{revision}/turn/{turns}', None
-        return self.step(gov, task, revision)
+        return self.step(gov, task, revision, request)
 
     def since_last(self, gov, task, revision):
         """This revision's decisions, the step facts since the last one (the agent's requests, their measured spend and
@@ -193,9 +197,12 @@ class ActivePolicy(ProxyPolicy):
             return None
         return 'step', key, dict(self.since_last(gov, task, revision)[1], cause='agent_finish')
 
-    def step(self, gov, task, revision):
-        """A mid-task decision point, from host facts only: the test suite flipped between failing and passing
-        since the last decision, or the task's measured spend since then reached that decision's forecast."""
+    def step(self, gov, task, revision, request=None):
+        """A mid-task decision point: the host-run test suite flipped between failing and passing since the last
+        decision; else the agent's own test runs through Bash did (plan item 2: agents test through Bash, the host tool
+        ran in 2 of 28 trials); else the task's measured spend since then reached that decision's forecast. The agent's
+        runs are read from the request's conversation by their summary lines: evidence that a decision is due, never
+        a verdict on the work."""
         cfg = self.config['step']
         if not cfg['enabled'] or 'step' not in self.config['decision_points']:
             return None
@@ -213,9 +220,19 @@ class ActivePolicy(ProxyPolicy):
         if new and len(suite) >= 2 and (suite[0]['failures'] == 0) != (suite[1]['failures'] == 0):
             cause = 'tests_now_pass' if suite[0]['failures'] == 0 else 'tests_now_fail'
             return 'step', f"{revision}/step/tests/{suite[0]['seq']}", dict(facts, cause=cause, first_pass=first_pass)
+        runs = delegation.agent_test_results((request or {}).get('messages'))
+        fresh = len(runs) > last['payload'].get('agent_runs', 0)
+        agent_first = fresh and runs[-1]['failures'] == 0 and all(r['failures'] for r in runs[:-1])
+        if fresh and len(runs) >= 2 and (runs[-1]['failures'] == 0) != (runs[-2]['failures'] == 0):
+            cause = 'tests_now_pass' if runs[-1]['failures'] == 0 else 'tests_now_fail'
+            return 'step', f"{revision}/step/agent_tests/{len(runs)}", dict(facts, cause=cause, first_pass=agent_first,
+                                                                            source='agent')
         consult = switch_policy.delegation(self.config, 'consult')
         if first_pass and consult['enabled'] and 'tests_pass' in consult.get('force', ()):
             return 'step', f"{revision}/step/tests/{suite[0]['seq']}", dict(facts, cause='tests_pass', first_pass=True)
+        if agent_first and consult['enabled'] and 'tests_pass' in consult.get('force', ()):
+            return 'step', f"{revision}/step/agent_tests/{len(runs)}", dict(facts, cause='tests_pass', first_pass=True,
+                                                                            source='agent')
         forecast = facts['forecast_usd']
         if not unknown and forecast and facts['spent_usd'] >= cfg['overrun_factor'] * forecast:
             return 'step', f"{revision}/step/spend/{last['seq']}", dict(facts, cause='spend_overrun')
@@ -224,7 +241,8 @@ class ActivePolicy(ProxyPolicy):
     def evidence(self, gov, task, setting, trigger='stuck_evidence', facts=None):
         if trigger == 'step':
             forecast = facts['forecast_usd']
-            return (f"ModelPilot step check: {STEP_CAUSES[facts['cause']]}; on {setting[0]} at {setting[1]} effort, "
+            causes = AGENT_STEP_CAUSES if facts.get('source') == 'agent' else STEP_CAUSES
+            return (f"ModelPilot step check: {causes[facts['cause']]}; on {setting[0]} at {setting[1]} effort, "
                     f"{facts['requests']} requests and ${facts['spent_usd']:.4f} since the last decision" +
                     (f' (forecast ${forecast:.4f}).' if forecast else '.'))
         signals = gov.state.recommend(task).get('signals') or {}
@@ -269,6 +287,7 @@ class ActivePolicy(ProxyPolicy):
             self.briefs.pop(key, None)
         suite = gov.state.observations(task, revision, 'failures', 1)
         decision.update(point=key, suite_seq=suite[0]['seq'] if suite else 0, step=facts,
+                        agent_runs=len(delegation.agent_test_results(request.get('messages'))),
                         profile={k: prof[k] for k in ('prefix_tokens', 'messages_tokens', 'warm', 'warm_entries', 'history',
                                                       'consults_left', 'brief_tokens', 'force_consult') if k in prof},
                         advice=None if advice is None else
@@ -373,8 +392,8 @@ class ActivePolicy(ProxyPolicy):
             why = (delegation.WHY['stuck_evidence'] + ': ' +
                    ('; '.join(text for name, text in SIGNALS.items() if signals.get(name)) or 'progress has stalled') + '.')
         else:
-            why = delegation.WHY['tests_pass' if facts.get('first_pass') and facts['cause'] == 'tests_now_pass'
-                                 else facts['cause']]
+            texts = delegation.AGENT_WHY if facts.get('source') == 'agent' else delegation.WHY
+            why = texts['tests_pass' if facts.get('first_pass') and facts['cause'] == 'tests_now_pass' else facts['cause']]
         return delegation.brief(gov, task, why, setting, facts, self.workspace, self.base, spec, messages)
 
     def route_brief(self, text, setting, target):
