@@ -118,6 +118,27 @@ Status of the original design: proposal written September 22, 2026. The governor
 
 **Admission as built (September 26).** R6's limit is enforced on measured spend: a request is admitted while wire spend is below the per-task limit and cost is known, which is the rule of the client's own `--max-budget-usd` in the other arms. An R2 rung also needs the limit to cover its full rebuild (request bytes/3 tokens at the dearest write rate), but not its output allowance: Claude Code sends `max_tokens: 64000`, whose Opus 5.5 price alone exceeds the $1 default limit. When R2 says `re_diagnose` or `human_review`, the proxy refuses the next main-loop request, so the session ends and the trial is recorded as unfinished (`policy_stop`).
 
+### Exploration arm: randomized mid-task switches (October 7, offline)
+
+User request: more evidence on what switches do. On record, 117 ModelPilot trials made 11 switches, all at a turn start, all upward, and all 11 passed. None happened mid-task, and none since the October 3 calibration. Start-of-task switches amount to running the task on the stronger setting, which the fixed arms already measure. Mid-task switches have never been observed in a real trial: what their cache rewrite costs against the prediction, and whether they rescue or break the work.
+
+**Mechanism** (config `exploration`, off by default; arm `modelpilot-explore`, `policy_overrides: {exploration: {enabled: true}}`):
+- **Start.** The arm starts at low concise, like `modelpilot`, but has no advisor, so the gate never moves it and no TypeSafe key is needed.
+- **The draw.** Each trial draws from a SHA-256 of `task/arm/trial` (`switch_policy.exploration_plan`): whether it switches (`probability`, 0.5) and at which main-loop request (uniform over `first_request`–`last_request`, 2–5). The draw is reproducible and independent of what happens in the trial.
+- **The switch.** At that request `ActivePolicy.explore` moves to `target_model` (Opus 5.5) at the turn's effort; only the model can change inside a turn. It goes through the same dispatcher as any jump.
+- **The record.** Each switch is journaled as kind `exploration`, with the switch cost `switch_policy.switch_cost` predicted at that moment. Trials record `routing.policy.exploration`. A trial that ends before its drawn request never switches.
+- **Eligibility.** The trials are benchmark-eligible without an advisor (`ModelPilotAdapter.evidence`).
+
+**Reading** (`python3 -m modelpilot.exploration <runs>`, $0):
+- Switched against unswitched trials: strict passes and cold-equivalent dollars.
+- Predicted against measured switch cost. The measured cost is the first Opus request's cache writes at write less read, so it includes that request's own new tokens.
+
+Randomization makes the two groups comparable. Failures are rare (about 9%), so a broad run can measure switch costs well but can't show rescues. That needs a targeted run on miss-prone tasks.
+
+**Checked offline ($0, real client 2.1.284, fixture upstream):**
+- A trial drawn to switch at request 2 runs request 1 on Sonnet 5.5 low and every later request on Opus 5.5 low. The move is confirmed, journaled with a positive predicted rewrite, tokens match, and the trial is eligible.
+- A trial drawn not to switch stays on low concise throughout.
+
 ## Why a policy is needed
 
 Today the governor records decisions and never acts. A "ModelPilot arm" would therefore behave exactly like a fixed-model arm. The comparison in work item 4 (`docs/changelog.md`, "Next work, in order") only means something if ModelPilot does something different, so this document defines what it does.

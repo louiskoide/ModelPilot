@@ -1,0 +1,40 @@
+{
+ "id": "nx-floyd-warshall-negative-cycle",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/algorithms/shortest_paths/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/shortest_paths/tests"
+ ],
+ "type": "bug_fix",
+ "base": "d0ce2349367c7dff79d44dac9e160cafcbbc1a3c",
+ "reference": "d46d572a1ad5b9dc266c66eaa036175369ae88d9",
+ "hidden_tests": [
+  "networkx/algorithms/shortest_paths/tests/test_dense.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/shortest_paths/tests/test_dense.py"
+ ],
+ "source": "https://github.com/networkx/networkx/commit/d46d572a1ad5b9dc266c66eaa036175369ae88d9",
+ "instruction": "networkx's Floyd-Warshall functions (networkx/algorithms/shortest_paths/dense.py: floyd_warshall, floyd_warshall_predecessor_and_distance, floyd_warshall_tree and floyd_warshall_numpy) return meaningless distances, or fail with other errors, when the graph has a negative cycle. Make each of them raise nx.NetworkXUnbounded('Negative cycle detected.') instead whenever the graph (with the weight attribute in use) has a cycle of negative total weight: a directed cycle with a negative sum, a negative self-loop (also in a MultiDiGraph), or, in an undirected graph, any edge with negative weight, which is a negative cycle by itself. A cycle of total weight exactly zero is fine and must not raise (for example a directed 5-cycle with one edge's weight set to -4, while -4.0001 raises). Results on graphs without negative cycles don't change. Document the exception and add tests.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

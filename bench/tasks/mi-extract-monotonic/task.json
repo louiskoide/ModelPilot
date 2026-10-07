@@ -1,0 +1,38 @@
+{
+ "id": "mi-extract-monotonic",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "feature",
+ "base": "68a4c96b547378831f4ddffc6a5d1675715422cd",
+ "reference": "2af32e1202bd5f47563116cbceea4e6b36814afd",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "source": "https://github.com/more-itertools/more-itertools/commit/2af32e1202bd5f47563116cbceea4e6b36814afd",
+ "instruction": "Add a keyword-only monotonic=False parameter to more_itertools.extract(iterable, indices). With monotonic=True the indices are read lazily, one at a time, so they may be infinite, but they must be non-decreasing; the iterable is consumed only as far as the index being produced. For example, with collatz = more_itertools.iterate(lambda x: 3 * x + 1 if x % 2 else x // 2, 42) and indices = itertools.count(0, 2), taking three values gives [42, 64, 16], after which next(collatz) is 8 and next(indices) is 6. A repeated index yields the same value again. A negative index, or an index smaller than the one before it, raises ValueError; an index beyond the end of the iterable raises IndexError, each when that index is reached. Without monotonic, extract behaves as before (indices read eagerly and in any order).",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

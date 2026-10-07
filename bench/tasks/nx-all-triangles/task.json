@@ -1,0 +1,40 @@
+{
+ "id": "nx-all-triangles",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/algorithms/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/tests"
+ ],
+ "type": "feature",
+ "base": "544c3248c54339b405ef2742462a45747d14b4a4",
+ "reference": "eea6802b873113a3f952c68b74bef5935f6471c5",
+ "hidden_tests": [
+  "networkx/algorithms/tests/test_cluster.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/tests/test_cluster.py"
+ ],
+ "source": "https://github.com/networkx/networkx/commit/eea6802b873113a3f952c68b74bef5935f6471c5",
+ "instruction": "Add all_triangles(G, nbunch=None) to networkx's clustering module (networkx/algorithms/cluster.py, available as nx.all_triangles): a generator yielding every triangle of an undirected graph, a triangle being three distinct nodes each adjacent to the other two, as a tuple (u, v, w), each triangle exactly once. With nbunch (a node or an iterable of nodes) it yields only the triangles that include at least one of those nodes, still each once. In a multigraph a triangle is its set of nodes, whatever the number of parallel edges; self-loops are ignored. It should run in about O(m * d) time (m edges, d the maximum degree), not by checking every triple of nodes. A directed graph raises NetworkXNotImplemented. Examples: nx.complete_graph(4) has the four triangles {0,1,2}, {0,1,3}, {0,2,3}, {1,2,3}; a path has none; for edges 0-1, 1-2, 2-0, 2-3, 3-4, 4-2, nbunch=[0, 1] gives only {0, 1, 2}. Add tests.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

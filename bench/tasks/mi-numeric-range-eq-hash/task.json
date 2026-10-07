@@ -1,0 +1,38 @@
+{
+ "id": "mi-numeric-range-eq-hash",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "bug_fix",
+ "base": "da37f9de442b69fbcaa9f54fb042c2a6999473a6",
+ "reference": "069b30002a985c02f1ab18409290a699fd649376",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "source": "https://github.com/more-itertools/more-itertools/commit/069b30002a985c02f1ab18409290a699fd649376",
+ "instruction": "Make more_itertools.numeric_range equality and hashing follow the built-in range: two numeric_range objects are equal when they describe the same sequence, that is, they have the same length and, when non-empty, the same first value and, when longer than one, the same step. So numeric_range(2, 3, 1) == numeric_range(2, 3, 5) (both are just [2]), numeric_range(0, 5, 2) == numeric_range(0, 6, 2), every empty numeric_range equals every other, and numeric_range(0, 5, 2) != numeric_range(0, 7, 2). This holds for int, float, Decimal, Fraction and datetime/timedelta ranges. Equal ranges must have equal hashes, and the hash should still tell unequal ranges apart as a good hash does. A numeric_range is equal to itself and never equal to an object of another type (numeric_range(7.0) != 1, != 'abc').",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

@@ -1,0 +1,38 @@
+{
+ "id": "mi-serialize",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "feature",
+ "base": "130d1ac88eff33084b14759402a4f8ba1d02c6d7",
+ "reference": "4f399222d0b7953856db06d7f269bd3ede9e32e7",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "source": "https://github.com/more-itertools/more-itertools/commit/4f399222d0b7953856db06d7f269bd3ede9e32e7",
+ "instruction": "Add more_itertools.serialize(iterable), exported from the package: an iterator class that wraps an iterator or generator that isn't safe to share between threads and puts a (non-reentrant) lock around each __next__, so several consumer threads can draw from one shared generator. Every item is delivered exactly once in total across the threads, with no ValueError ('generator already executing') and no item lost or repeated; for example ten threads summing a shared serialize() of a generator over range(10**6) together get 10**6 * (10**6 - 1) // 2. It is its own iterator (iter(s) is s) and ends with StopIteration when the wrapped iterator does.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

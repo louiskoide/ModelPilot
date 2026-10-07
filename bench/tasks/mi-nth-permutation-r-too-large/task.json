@@ -1,0 +1,38 @@
+{
+ "id": "mi-nth-permutation-r-too-large",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "bug_fix",
+ "base": "6b32fbfba127d6b4aaf57d6b254b2ab5fc80ae76",
+ "reference": "def2d821c0a15ede86578660e7dc48e44bad9579",
+ "hidden_tests": [
+  "tests/test_recipes.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_recipes"
+ ],
+ "source": "https://github.com/more-itertools/more-itertools/commit/def2d821c0a15ede86578660e7dc48e44bad9579",
+ "instruction": "more_itertools.nth_permutation(iterable, r, index) raises ValueError when r is larger than the number of items, but then there are simply no permutations of length r, so every index is out of range: it must raise IndexError (nth_permutation('abc', 5, 0) raises IndexError). Only a negative r raises ValueError. Everything else is unchanged: r=None or r equal to the length means full permutations, a negative index counts from the end, and an index outside the range raises IndexError.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

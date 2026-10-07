@@ -1,0 +1,49 @@
+{
+ "rule": "Every tuning repository's tasks in base-commit order, as sequences of 3 to 5 tasks; a repository with more than 5 is split as evenly as possible (earlier tasks first). A repository with fewer than 3 tuning tasks has no sequence. Every other tuning task is in exactly one sequence, so each one can be set against its single-prompt results.",
+ "sequences": {
+  "cachetools-a": [
+   "cachetools-tlru-cache",
+   "cachetools-ttl-expire",
+   "cachetools-cached-condition"
+  ],
+  "cachetools-b": [
+   "cachetools-cache-key",
+   "cachetools-tlru-stale",
+   "cachetools-setitem-evict"
+  ],
+  "more-itertools-a": [
+   "mi-is-sorted-lt-only",
+   "mi-sample-strict-counts",
+   "mi-last-reversed-none",
+   "mi-reshape-multidim"
+  ],
+  "more-itertools-b": [
+   "mi-running-statistics",
+   "mi-running-minmax-stable",
+   "mi-numeric-range-consistent",
+   "mi-one-falsy-exception"
+  ],
+  "networkx-a": [
+   "nx-bipartite-butterflies",
+   "nx-dag-antichain-width",
+   "nx-ismags-monomorphism"
+  ],
+  "networkx-b": [
+   "nx-connectivity-digraph-cuts",
+   "nx-vf2-isolated-nodes",
+   "nx-classes-weak-views"
+  ],
+  "parse": [
+   "parse-strftime-directives",
+   "parse-hyphen-field",
+   "parse-decimal-grouping"
+  ],
+  "tomli": [
+   "tomli-loads-typeerror",
+   "tomli-decode-error-attrs",
+   "tomli-inline-table-newlines",
+   "tomli-hex-escape",
+   "tomli-optional-seconds"
+  ]
+ }
+}

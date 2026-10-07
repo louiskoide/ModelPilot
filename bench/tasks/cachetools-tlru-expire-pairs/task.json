@@ -1,0 +1,40 @@
+{
+ "id": "cachetools-tlru-expire-pairs",
+ "repo": "cachetools",
+ "url": "https://github.com/tkem/cachetools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests"
+ ],
+ "type": "feature",
+ "base": "bb4b37cfc76ba42707db59a90220bf724393d263",
+ "reference": "d7b24235f83aa97647d692fe1d7d7b37ddea1550",
+ "hidden_tests": [
+  "tests/test_tlru.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "tests/test_tlru.py"
+ ],
+ "source": "https://github.com/tkem/cachetools/commit/d7b24235f83aa97647d692fe1d7d7b37ddea1550",
+ "instruction": "cachetools.TLRUCache.expire(time=None) removes the expired items but returns nothing. Make it return an iterable of the (key, value) pairs it removed, as TTLCache.expire already does: an empty iterable when nothing has expired at that time, otherwise each removed item once with the value it held. Items deleted or replaced earlier aren't reported again, and the cache's contents after expire() stay as before.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

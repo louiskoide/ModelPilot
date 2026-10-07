@@ -70,6 +70,13 @@ ARMS = {
     # about 12% at equal quality on the 23 tuning tasks, by different routes, so this asks whether they add up.
     'sonnet-5.5-low-concise': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low',
                                'append_system_prompt': 'bench/prompts/concise.md'},
+    # Long sessions (plan item 6): low concise with the cache lifetime set rather than left to the login (the client
+    # writes 5m entries with an API key and 1h ones on a subscription; CLAUDE_CODE_PROMPT_CACHE_TTL sets it, 2.1.284,
+    # checked at $0). The lifetime is what these two compare, so their rows are priced as sent on either login.
+    'sonnet-5.5-low-concise-5m': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low',
+                                  'append_system_prompt': 'bench/prompts/concise.md', 'prompt_cache_ttl': '5m'},
+    'sonnet-5.5-low-concise-1h': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low',
+                                  'append_system_prompt': 'bench/prompts/concise.md', 'prompt_cache_ttl': '1h'},
     'haiku-4.5': {'kind': 'fixed', 'model': 'claude-haiku-4-5-20251001'},
     # Jev picks the served model per turn; the client only sends the sentinel.
     'jev-stock': {'kind': 'jev', 'variant': 'stock', 'model': 'jev-router', 'checkout': 'work/jev-router-baseline',
@@ -103,6 +110,14 @@ ARMS = {
                             'policy': 'docs/m6-modelpilot-policy.md',
                             'policy_overrides': {'delegation': {'consult': {'enabled': True, 'force': ['agent_finish']},
                                                                 'handoff_note': {'enabled': True}}}},
+    # Randomized mid-task switches, for measurement (user request, October 7; config exploration): low concise with no
+    # advisor and no gate moves; about half the trials, by a draw from their task, arm and trial number, switch to
+    # Opus 5.5 at the turn's effort at a random main-loop request from 2 to 5. Needs no TypeSafe key.
+    'modelpilot-explore': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'low', 'advisor': None,
+                           'append_system_prompt': 'bench/prompts/concise.md', 'models': POLICY_TIERS,
+                           'served_models': ['claude-opus-5-5', 'claude-sonnet-5-5'],
+                           'policy': 'docs/m6-modelpilot-policy.md',
+                           'policy_overrides': {'exploration': {'enabled': True}}},
 }
 RUNNABLE = ('fixed', 'jev')
 AUTHS = ('api_key', 'subscription')
@@ -163,7 +178,7 @@ def arm_adapter(arm, budget_usd, sessions, jev_key=None, advisor_stub=None, tool
     from .advisor import JevAdvisor
     from .modelpilot_adapter import ModelPilotAdapter
     advisor = (JevAdvisor(ROOT/ARMS[arm]['checkout'], key=jev_key, stub=advisor_stub)
-               if jev_key or advisor_stub is not None else None)
+               if ARMS[arm].get('advisor') == 'jev' and (jev_key or advisor_stub is not None) else None)
     return ModelPilotAdapter(limit_usd=budget_usd * sessions, mode='active',
                              tools=arm_tools(arm) if tools is None else tools, arm_id=arm,
                              model=ARMS[arm]['model'], effort=ARMS[arm]['effort'], advisor=advisor,
@@ -226,10 +241,15 @@ def accounting(rows, final, jev=False):
     return out
 
 
-def subscription_accounting(rows, final, price_table):
+def subscription_accounting(rows, final, price_table, ttl=None):
     """A subscription trial: dollars as an API key would have been billed for its tokens (1h cache writes at the
-    5m rate); the client comparison and the as-sent price use the rows as measured."""
+    5m rate); the client comparison and the as-sent price use the rows as measured. An arm that sets its cache
+    lifetime (ttl) gets the same writes with an API key, so its rows are priced as sent."""
     measured = accounting(rows, final)
+    if ttl:
+        fields = ('cost_usd', 'known_cost_usd', 'cost_if_rejected_free_usd')
+        return dict(measured, cost_scope='complete', billing='subscription', as_sent={k: measured[k] for k in fields},
+                    repricing=f'none: the arm sets {ttl} cache writes, which an API-key client sends alike')
     equivalent = accounting(bench_report.api_key_equivalent(rows, price_table), final)
     fields = ('cost_usd', 'known_cost_usd', 'cost_if_rejected_free_usd')
     return dict(measured, **{k: equivalent[k] for k in fields}, cost_scope='api_key_equivalent', billing='subscription',
@@ -295,6 +315,17 @@ def effort_check(rows, effort):
                    if r.get('kind') == 'messages' and r.get('tool_count'))
     return {'requested': effort, 'sent': {str(k): n for k, n in sorted(sent.items(), key=str)},
             'applied': set(sent) == {effort} if sent else None}
+
+
+def ttl_check(rows, ttl):
+    """Whether an arm that sets its cache lifetime got it: every main-loop request's breakpoints ask for that TTL,
+    apart from compaction requests, which the client marks with the default 5m whatever the setting (2.1.284).
+    None without any such request."""
+    main = [r for r in rows if r.get('kind') == 'messages' and r.get('tool_count') and r.get('cache_ttl')]
+    marked = Counter('/'.join(r['cache_ttl']) for r in main if not r.get('compaction'))
+    return {'requested': ttl, 'marked': dict(sorted(marked.items())),
+            'compaction_requests': sum(bool(r.get('compaction')) for r in main),
+            'applied': set(marked) == {ttl} if marked else None}
 
 
 def appended_prompt(arm):
@@ -499,8 +530,10 @@ class Trial:
         self.router = (router or bench_jev.JevRouter(arm)) if arm['kind'] == 'jev' else None
         self.jev_key, self.jev_stub = jev_key, jev_stub
         self.appended = appended_prompt(arm)
+        self.client_extra = []  # more client flags for every session (the sequence shape's --autocompact)
         self.record = {'task': task['id'], 'arm': arm_id, 'trial': trial, 'model': arm['model'], 'effort': arm.get('effort'),
                        'append_system_prompt': {k: self.appended[k] for k in ('path', 'sha256')} if self.appended else None,
+                       'prompt_cache_ttl': arm.get('prompt_cache_ttl'),
                        'spec_sha256': bench_tasks.spec_hash(task), 'shape': shape,
                        'gap_requested_seconds': gap if shape == 'followup' else None,
                        'expected_hidden_passed': expected_hidden_passed, 'limits': self.limits,
@@ -540,16 +573,16 @@ class Trial:
             self.finish()
         return due
 
+    def next_gap(self):
+        """Seconds to wait after the session that just ended before the next one starts."""
+        return self.gap
+
     def setup(self):
         if self.adapter:
             self.adapter.verify()
         self.started = True
         self.dir.mkdir(mode=0o700, parents=True)
-        self.repo = task_repo(self.task)
-        self.work = bench_tasks.workspace(self.task, self.repo, self.dir/'workspace')
-        # The agent may commit (Haiku did in 4a), so its fix is diffed against this commit, never against HEAD.
-        self.base_commit = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=self.work, capture_output=True, text=True,
-                                          check=True).stdout.strip()
+        paths = self.make_workspace()
         dirs = {name: self.dir/name for name in ('home', 'tmp', 'config')}
         for path in dirs.values():
             path.mkdir()
@@ -557,10 +590,11 @@ class Trial:
         if self.auth == 'subscription':  # the client's own login path for a subscription; no API key in its environment
             env.pop('ANTHROPIC_API_KEY')
             env['CLAUDE_CODE_OAUTH_TOKEN'] = self.oauth_token
+        if self.arm.get('prompt_cache_ttl'):  # the main conversation's cache lifetime, whatever the login
+            env['CLAUDE_CODE_PROMPT_CACHE_TTL'] = self.arm['prompt_cache_ttl']
         # The agent's python3/pip/pytest are the grader's interpreter, not whatever the system has.
         env['PATH'] = os.pathsep.join([str(Path(self.python).parent), env['PATH']])
         # Same import paths as the grader, as an editable install would give a developer.
-        paths = bench_tasks.test_env_paths(self.task, self.work)
         if paths:
             env['PYTHONPATH'] = os.pathsep.join(paths)
         self.record['python'] = python_version(self.python)
@@ -590,11 +624,21 @@ class Trial:
                 self.record['catalog'] = {k: v for k, v in catalog.items() if k != 'entries'}
         self.env = env
 
+    def make_workspace(self):
+        """The agent's checkout (self.work) and its base commit; returns the grader's import paths for it."""
+        self.repo = task_repo(self.task)
+        self.work = bench_tasks.workspace(self.task, self.repo, self.dir/'workspace')
+        # The agent may commit (Haiku did in 4a), so its fix is diffed against this commit, never against HEAD.
+        self.base_commit = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=self.work, capture_output=True, text=True,
+                                          check=True).stdout.strip()
+        return bench_tasks.test_env_paths(self.task, self.work)
+
     def run_session(self, index):
         first_row = len(read_rows(self.log))
         # Sessions persist only in the trial's own config dir, so the follow-up can resume them.
         session = ['--session-id', self.session_id] if index == 0 else ['--resume', self.session_id]
         model, extra = (None, ['--add-dir', self.route['add_dir']]) if self.router else (self.arm['model'], [])
+        extra = extra + self.client_extra
         fixed_effort = self.arm.get('effort') if self.arm['kind'] == 'fixed' else None  # the adapter sets its own
         command = client_command(self.cli, self.prompts[index], model, self.limits['max_turns'],
                                  self.limits['budget_usd'], session, extra, effort=fixed_effort,
@@ -657,7 +701,8 @@ class Trial:
             client={'subtype': self.final.get('subtype'), 'is_error': self.final.get('is_error'),
                     'num_turns': self.final.get('num_turns'), 'stop': last.get('stop')},
             accounting=self.adapter.accounting(rows, self.final) if self.adapter else
-            subscription_accounting(rows, self.final, self.rates) if self.auth == 'subscription' else
+            subscription_accounting(rows, self.final, self.rates, self.arm.get('prompt_cache_ttl'))
+            if self.auth == 'subscription' else
             accounting(rows, self.final, jev=bool(self.router)),
             cache=bench_report.cache_attribution(bench_report.priced_rows(self.record, rows, self.rates), self.rates),
             path=bench_report.setting_path(rows),
@@ -667,6 +712,8 @@ class Trial:
             self.record['effort_check'] = effort_check(rows, self.arm['effort'])
         if self.appended:
             self.record['prompt_check'] = prompt_check(rows, self.appended['sha256'])
+        if self.arm.get('prompt_cache_ttl'):
+            self.record['ttl_check'] = ttl_check(rows, self.arm['prompt_cache_ttl'])
         if self.auth == 'subscription':
             self.record['as_sent'] = {'cache': bench_report.cache_attribution(rows, self.rates),
                                       'cost_components': bench_report.cost_components(rows, self.rates)}
@@ -701,28 +748,8 @@ class Trial:
             self.record['stopped'] = stopped
         self.close()
         self.save('grading')
-        subprocess.run(['git', 'add', '-A', '-N'], cwd=self.work, capture_output=True)  # include new files in the diff
-        head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=self.work, capture_output=True, text=True).stdout.strip()
-        self.record['agent_moved_head'] = head != self.base_commit
-        (self.dir/'agent.diff').write_bytes(subprocess.run(['git', 'diff', '--binary', self.base_commit], cwd=self.work,
-                                                           capture_output=True).stdout)
-        changed = subprocess.run(['git', 'diff', '--name-only', self.base_commit], cwd=self.work, capture_output=True,
-                                 text=True).stdout.splitlines()
-        self.record['test_config_changed'] = test_config_changes(changed, self.task['test_dir'])
-        graded = bench_tasks.grade(self.task, self.work, self.repo, self.python, self.dir/'grade',
-                                   expected_hidden_passed=self.expected)
-        edge_passed = None
-        if regrade.edge_files(self.task['id'], EDGE_ROOT):
-            edge = regrade.run_edge(self.task, self.dir/'grade'/'graded', self.python, self.dir/'edge-env', EDGE_ROOT)
-            self.record['edge'] = edge
-            edge_passed = regrade.edge_all_passed(edge)
-        self.record['grade'] = {'passed': graded['passed'], 'reason': graded['reason'], 'edge_passed': edge_passed,
-                                'failing_tests': sorted(set(graded['hidden']['failing_tests'] + graded['suite']['failing_tests'])),
-                                'hidden_exit': graded['hidden']['exit_code'], 'suite_exit': graded['suite']['exit_code'],
-                                'hidden_passed': graded['hidden']['tests_passed'],
-                                'hidden_skipped': graded['hidden']['tests_skipped']}
-        self.record['passed'] = graded['passed'] and edge_passed is not False
-        self.record['pass_rule'] = 'hidden' if edge_passed is None else 'hidden_and_edge'
+        self.record.update(grade_checkout(self.task, self.work, self.base_commit, self.repo, self.python, self.dir,
+                                          self.expected))
         reap(self.dir)
         # Keep the diff and records; drop copies that only cost disk.
         for name in ('workspace', 'grade', 'edge-env', 'home', 'tmp'):
@@ -738,12 +765,43 @@ class Trial:
         return self.record
 
 
+def checkout_diff(work, base_commit):
+    """The agent's change against the task's base commit, new files included (the agent may commit, so never HEAD)."""
+    subprocess.run(['git', 'add', '-A', '-N'], cwd=work, capture_output=True)  # include new files in the diff
+    return subprocess.run(['git', 'diff', '--binary', base_commit], cwd=work, capture_output=True).stdout
+
+
+def grade_checkout(task, work, base_commit, repo, python, out, expected=None, name='agent.diff'):
+    """Grade one task's checkout as the agent left it: its diff (written to out/name), the hidden grader and the
+    task's edge suite where it has one. Scratch trees go under out/grade and out/edge-env. Returns the record fields."""
+    head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=work, capture_output=True, text=True).stdout.strip()
+    (Path(out)/name).write_bytes(checkout_diff(work, base_commit))
+    changed = subprocess.run(['git', 'diff', '--name-only', base_commit], cwd=work, capture_output=True,
+                             text=True).stdout.splitlines()
+    fields = {'agent_moved_head': head != base_commit,
+              'test_config_changed': test_config_changes(changed, task['test_dir'])}
+    graded = bench_tasks.grade(task, work, repo, python, Path(out)/'grade', expected_hidden_passed=expected)
+    edge_passed = None
+    if regrade.edge_files(task['id'], EDGE_ROOT):
+        edge = regrade.run_edge(task, Path(out)/'grade'/'graded', python, Path(out)/'edge-env', EDGE_ROOT)
+        fields['edge'] = edge
+        edge_passed = regrade.edge_all_passed(edge)
+    fields['grade'] = {'passed': graded['passed'], 'reason': graded['reason'], 'edge_passed': edge_passed,
+                       'failing_tests': sorted(set(graded['hidden']['failing_tests'] + graded['suite']['failing_tests'])),
+                       'hidden_exit': graded['hidden']['exit_code'], 'suite_exit': graded['suite']['exit_code'],
+                       'hidden_passed': graded['hidden']['tests_passed'],
+                       'hidden_skipped': graded['hidden']['tests_skipped']}
+    fields['passed'] = graded['passed'] and edge_passed is not False
+    fields['pass_rule'] = 'hidden' if edge_passed is None else 'hidden_and_edge'
+    return fields
+
+
 def run_trial(task, arm_id, trial_dir, cli, key, upstream, price_table, *, sleep=time.sleep, **options):
     """Run one trial start to finish, waiting out the follow-up gap."""
     trial = Trial(task, arm_id, trial_dir, cli, key, upstream, price_table, **options)
     try:
         while trial.step():
-            sleep(trial.gap)
+            sleep(trial.next_gap())
     finally:
         trial.close()
     return trial.record
@@ -769,7 +827,8 @@ def interleave(trials, gap, *, clock=time.monotonic, sleep=time.sleep, stop=lamb
             return reason
         trial = parked.pop(0)[2] if source is parked else pending.pop(0)
         if trial.step():
-            parked.append((clock() + gap, sequence, trial))
+            wait = trial.next_gap() if hasattr(trial, 'next_gap') else None  # a sequence's gaps differ by turn
+            parked.append((clock() + (gap if wait is None else wait), sequence, trial))
             sequence += 1
     return None
 
@@ -788,6 +847,10 @@ class LazyTrial:
             print(record.get('task'), record.get('arm'), record.get('trial'), 'PASS' if record.get('passed') else 'FAIL',
                   (record.get('cache') or {}).get('cold_equivalent_cost_usd'), flush=True)
         return more
+
+    def next_gap(self):
+        wait = getattr(self.trial, 'next_gap', None)
+        return wait() if wait else None
 
 
 def preflight(tasks, python, scratch):
@@ -851,20 +914,31 @@ def modelpilot_manifest(arms, budget_usd, sessions):
 
 def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *, client_version=None, shape='single',
               gap=0, run_budget=None, expected=None, jev_key=None, trial_factory=None, clock=time.monotonic,
-              sleep=time.sleep, subscription_arms=(), oauth_token=None, **limits):
+              sleep=time.sleep, subscription_arms=(), oauth_token=None, compact='none', autocompact=None, **limits):
     """subscription_arms: fixed arms whose client logs in with a Claude subscription token (oauth_token) instead of
-    the API key. Their tokens are not billed to the API account, so the run budget counts only API-key trials."""
+    the API key. Their tokens are not billed to the API account, so the run budget counts only API-key trials.
+    shape 'sequence' (long_session): tasks are sequences ({'id', 'tasks'}), each run as one session of task turns,
+    gap seconds apart, with compaction turns as compact says and the client's autocompact window."""
+    from . import long_session
+    sequences = tasks if shape == 'sequence' else None
+    if sequences:
+        tasks = [t for unit in sequences for t in unit['tasks']]
+        unsupported = [a for a in arms if a in long_session.UNSUPPORTED_ARMS]
+        if unsupported:
+            raise ValueError(f'Not supported in sequences: {unsupported}')
     subscription_arms = tuple(subscription_arms)
     wrong = [a for a in subscription_arms if a not in arms or ARMS[a]['kind'] not in SUBSCRIPTION_KINDS]
     if wrong or (subscription_arms and not oauth_token):
         raise ValueError(f'Subscription arms must be fixed arms of this run, with a token: {wrong or subscription_arms}')
     out = Path(out)
     out.mkdir(mode=0o700, parents=True)
-    order = schedule(tasks, arms, trials, seed)
-    by_id = {t['id']: t for t in tasks}
+    order = schedule(sequences or tasks, arms, trials, seed)
+    by_id = {t['id']: t for t in sequences or tasks}
     if client_version is None:
         cli, client_version = resolve_client(cli)
-    gap = gap if shape == 'followup' else 0
+    gap = gap if shape in ('followup', 'sequence') else 0
+    steps = len(long_session.plan(max(len(u['tasks']) for u in sequences), gap, compact)) if sequences else None
+    sessions = steps or (2 if shape == 'followup' else 1)  # the most any trial runs
     manifest = {'seed': seed, 'order': order, 'arms': {a: ARMS[a] for a in arms}, 'trials': trials,
                 'tasks': {t['id']: bench_tasks.spec_hash(t) for t in tasks}, 'client': str(cli),
                 'client_version': client_version, 'code': code_revision(),
@@ -881,14 +955,26 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
                                       'writes then (5m with an API key); dollars are API-key equivalent (1h writes at the 5m '
                                       'rate), as-sent alongside, and do not count toward the run budget.')
                 if subscription_arms else None,
-                'modelpilot': modelpilot_manifest(arms, limits.get('budget_usd', 1.0), 2 if shape == 'followup' else 1),
+                'modelpilot': modelpilot_manifest(arms, limits.get('budget_usd', 1.0), sessions),
+                'sequences': {u['id']: [t['id'] for t in u['tasks']] for u in sequences} if sequences else None,
+                'sequence_preamble': long_session.PREAMBLE if sequences else None,
+                'compact': compact if sequences else None, 'autocompact': autocompact if sequences else None,
+                'prompt_cache_ttl': {a: ARMS[a]['prompt_cache_ttl'] for a in arms if ARMS[a].get('prompt_cache_ttl')} or None,
                 'note': 'Stop thresholds are not billing caps: per session, and the run threshold between sessions. No retries.'}
     with (out/'manifest.json').open('x') as f:
         json.dump(manifest, f, indent=2)
 
     def default_factory(task, arm, trial_dir, n):
-        adapter = arm_adapter(arm, limits.get('budget_usd', 1.0), 2 if shape == 'followup' else 1, jev_key)
         subscription = arm in subscription_arms
+        if sequences:
+            count = len(long_session.plan(len(task['tasks']), gap, compact))
+            return long_session.SequenceTrial(
+                task, arm, trial_dir, cli, key, upstream, price_table, trial=n, gap=gap, compact=compact,
+                autocompact=autocompact, client_version=client_version, jev_key=jev_key,
+                adapter=arm_adapter(arm, limits.get('budget_usd', 1.0), count, jev_key),
+                auth='subscription' if subscription else 'api_key', oauth_token=oauth_token if subscription else None,
+                expected=expected, **limits)
+        adapter = arm_adapter(arm, limits.get('budget_usd', 1.0), 2 if shape == 'followup' else 1, jev_key)
         return Trial(task, arm, trial_dir, cli, key, upstream, price_table, trial=n, shape=shape, gap=gap,
                      client_version=client_version, jev_key=jev_key, adapter=adapter,
                      auth='subscription' if subscription else 'api_key', oauth_token=oauth_token if subscription else None,
@@ -938,14 +1024,22 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--tasks', required=True, help='Comma-separated task IDs from bench/tasks')
+    parser.add_argument('--tasks', help='Comma-separated task IDs from bench/tasks')
+    parser.add_argument('--sequences', help='Sequence shape: comma-separated IDs from bench/sequences.json, or "all"')
     parser.add_argument('--arms', required=True, help='Comma-separated arms: ' + ', '.join(ARMS))
     parser.add_argument('--trials', type=int, default=1)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--max-turns', type=int, default=30)
     parser.add_argument('--budget', type=float, default=1.0, help='Per-session client stop threshold, not a billing cap')
-    parser.add_argument('--shape', choices=SHAPES, default='single')
-    parser.add_argument('--gap', type=float, default=0, help='Seconds before the follow-up (followup shape): 0 warm, 330 cold')
+    parser.add_argument('--shape', choices=SHAPES + ('sequence',), default='single')
+    parser.add_argument('--gap', type=float, default=0,
+                        help='Seconds before the follow-up (followup shape: 0 warm, 330 cold), or between task turns '
+                             '(sequence shape)')
+    parser.add_argument('--compact', choices=('none', 'warm', 'cold'), default='none',
+                        help="Sequence shape: a '/compact' turn after each task but the last, before the gap (warm) or "
+                             'after it (cold)')
+    parser.add_argument('--autocompact', type=int, help="Sequence shape: the client's auto-compaction window in tokens "
+                                                        '(100000 to 1000000)')
     parser.add_argument('--run-budget', type=float, help='Stop starting sessions once known spend reaches this (required with --live)')
     parser.add_argument('--claude', type=Path)
     parser.add_argument('--live', action='store_true', help='Required to send billable requests')
@@ -954,13 +1048,32 @@ def main():
                         help='Comma-separated fixed arms that run on a Claude subscription (a claude setup-token token, '
                              'asked for at a hidden prompt) instead of the API key; dollars are reported API-key equivalent')
     args = parser.parse_args()
-    tasks = [t for i in args.tasks.split(',') for t in bench_tasks.load(i)]
+    from . import long_session
+    units = None
+    if args.shape == 'sequence':
+        if args.tasks or not args.sequences:
+            raise SystemExit('--shape sequence takes --sequences, not --tasks.')
+        try:
+            units = long_session.load(None if args.sequences == 'all' else args.sequences.split(','))
+        except ValueError as e:
+            raise SystemExit(str(e))
+        tasks = [t for u in units for t in u['tasks']]
+    else:
+        if args.sequences or not args.tasks or args.compact != 'none' or args.autocompact is not None:
+            raise SystemExit('--tasks is required; --sequences, --compact and --autocompact need --shape sequence.')
+        tasks = [t for i in args.tasks.split(',') for t in bench_tasks.load(i)]
+        if len(tasks) != len(args.tasks.split(',')):
+            raise SystemExit('Unknown task.')
     arms = args.arms.split(',')
     unknown = [a for a in arms if a not in ARMS]
-    if len(tasks) != len(args.tasks.split(',')) or unknown:
-        raise SystemExit(f'Unknown task or arm. Arms: {", ".join(ARMS)}')
-    if args.gap and args.shape != 'followup':
-        raise SystemExit('--gap applies only to --shape followup.')
+    if unknown:
+        raise SystemExit(f'Unknown arm. Arms: {", ".join(ARMS)}')
+    if units and any(a in long_session.UNSUPPORTED_ARMS for a in arms):
+        raise SystemExit(f'Not supported in sequences: {", ".join(long_session.UNSUPPORTED_ARMS)}.')
+    if args.autocompact is not None and not 100_000 <= args.autocompact <= 1_000_000:
+        raise SystemExit('--autocompact takes 100000 to 1000000 tokens.')
+    if args.gap and args.shape == 'single':
+        raise SystemExit('--gap applies only to --shape followup or sequence.')
     subscription_arms = [a for a in args.subscription_arms.split(',') if a]
     wrong = [a for a in subscription_arms if a not in arms or ARMS[a]['kind'] not in SUBSCRIPTION_KINDS]
     if wrong:
@@ -1000,8 +1113,10 @@ def main():
         except PreflightError as e:
             raise SystemExit(str(e))
     print('Preflight passed: ' + ', '.join(f"{i} ({e['hidden_passed']} hidden)" for i, e in expected.items()), flush=True)
-    runs = len(tasks) * len(arms) * args.trials
-    sessions = 2 if args.shape == 'followup' else 1
+    runs = len(units or tasks) * len(arms) * args.trials
+    plans = [long_session.plan(len(u['tasks']), args.gap, args.compact) for u in units] if units else None
+    sessions = max(len(p) for p in plans) if plans else 2 if args.shape == 'followup' else 1
+    session_total = sum(len(p) for p in plans) if plans else len(tasks) * sessions  # per arm and trial
     try:
         planned = client_problem(resolve_client(args.claude or shutil.which('claude') or 'claude')[1])
     except OSError:
@@ -1009,15 +1124,19 @@ def main():
     if not args.live:
         if planned:
             print('Client: ' + planned + ' A live run would stop here.')
-        shape = f'follow-up after {args.gap:g} s' if args.shape == 'followup' else 'single prompt'
-        ceiling = len(tasks) * len(api_arms) * args.trials * sessions * args.budget  # API-billed sessions only
+        shape = (f'follow-up after {args.gap:g} s' if args.shape == 'followup' else
+                 f'sequences of {min(len(u["tasks"]) for u in units)}-{max(len(u["tasks"]) for u in units)} task turns '
+                 f'{args.gap:g} s apart, compaction {args.compact}'
+                 + (f', autocompact window {args.autocompact}' if args.autocompact else '') if units else 'single prompt')
+        ceiling = session_total * len(api_arms) * args.trials * args.budget  # API-billed sessions only
         if args.run_budget is None:
             run_stop, worst = 'No run stop threshold yet (--live needs --run-budget).', ceiling
         else:
             # No new session starts at the run threshold, but the one running can still add its own.
             run_stop = f'Run stop threshold ${args.run_budget:.2f}: no session starts once known spend reaches it.'
             worst = min(ceiling, args.run_budget + args.budget)
-        print(f'Prepared {runs} trials ({len(tasks)} tasks × {len(arms)} arms × {args.trials}), {shape}, seed {args.seed}, '
+        print(f'Prepared {runs} trials ({len(units or tasks)} {"sequences" if units else "tasks"} × {len(arms)} arms × '
+              f'{args.trials}), {shape}, seed {args.seed}, '
               f'max {args.max_turns} turns and ${args.budget:.2f} stop threshold per session. {run_stop} Up to about '
               f'${worst:.2f} of API spend if sessions reach their thresholds. Thresholds are not billing caps. No retries. Add --live.')
         if jev_arms:
@@ -1030,7 +1149,11 @@ def main():
                   '(hidden prompt with --live) and asks for 1h cache writes; their dollars are reported API-key '
                   'equivalent (1h writes at the 5m rate), as-sent alongside, and do not count toward the run budget. '
                   'A usage or rate limit (HTTP 429) excludes the trial and stops the run.')
-        for arm in (a for a in arms if ARMS[a]['kind'] == 'modelpilot'):
+        for arm in (a for a in arms if ARMS[a]['kind'] == 'modelpilot' and ARMS[a].get('advisor') != 'jev'):
+            print(f'ModelPilot exploration arm {arm}: low concise with no advisor; each trial\'s draw from its task, arm '
+                  'and trial number decides whether it switches to Opus 5.5 at the turn\'s effort and at which main-loop '
+                  'request (configs/modelpilot-policy.json, exploration). Measurement only; no TypeSafe key needed.')
+        for arm in (a for a in arms if ARMS[a]['kind'] == 'modelpilot' and ARMS[a].get('advisor') == 'jev'):
             print(f'ModelPilot arm {arm}: active policy (benchmark arm only). Jev (compat checkout, advice only) predicts '
                   'the model and effort at each turn start and on stuck evidence; ModelPilot jumps straight there when '
                   'the expected total cost says it pays, else stays (configs/modelpilot-policy.json). Stuck with nothing '
@@ -1066,8 +1189,9 @@ def main():
     out = ROOT/'runs'/('bench-' + time.strftime('%Y%m%d-%H%M%S'))
     print(f'Running {runs} billable trials with {cli} ({version}); stop at ${args.run_budget:.2f} known spend; '
           f'results: {out}', flush=True)
-    summary = run_bench(tasks, arms, args.trials, args.seed, out, cli, key, 'https://api.anthropic.com', table,
+    summary = run_bench(units or tasks, arms, args.trials, args.seed, out, cli, key, 'https://api.anthropic.com', table,
                         client_version=version, shape=args.shape, gap=args.gap, run_budget=args.run_budget,
+                        compact=args.compact, autocompact=args.autocompact,
                         expected=expected, jev_key=jev_key, max_turns=args.max_turns, budget_usd=args.budget,
                         subscription_arms=subscription_arms, oauth_token=oauth_token)
     print(json.dumps(summary, indent=2))

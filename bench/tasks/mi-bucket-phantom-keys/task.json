@@ -1,0 +1,38 @@
+{
+ "id": "mi-bucket-phantom-keys",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "bug_fix",
+ "base": "b2f3aff7633057d234ec9186c18a53f4df306d08",
+ "reference": "2b8d5cddce4ea01f88a973551cd50479cf5fa45f",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "source": "https://github.com/more-itertools/more-itertools/commit/2b8d5cddce4ea01f88a973551cd50479cf5fa45f",
+ "instruction": "more_itertools.bucket reports keys that were never produced: a membership test for a missing key (30 in b) or selecting an absent bucket (list(b[30])) leaves that key among the keys that iterating the bucket object reports (list(b), set(b)), so '30 in b' is False while 30 is in list(b), and every miss adds another phantom key. Fix it: iterating a bucket must report only keys for which at least one item of the iterable was seen, whatever lookups came before, also when a validator accepts the missing key. A missing key still gives an empty bucket and False for 'in'. A key stays reported once seen, including when its items were handed straight to a caller of b[key] (for example after consuming list(b[10]) entirely).",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

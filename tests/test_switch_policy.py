@@ -501,3 +501,24 @@ class BreakEvenTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ExplorationPlanTests(unittest.TestCase):
+    def cfg(self, **spec):
+        return sp.with_overrides(sp.load(), {'exploration': dict({'enabled': True}, **spec)})
+
+    def test_draws_are_reproducible_balanced_and_in_range(self):
+        cfg = self.cfg()
+        self.assertEqual(sp.exploration_plan(cfg, 'a/x/0'), sp.exploration_plan(cfg, 'a/x/0'))
+        draws = [sp.exploration_plan(cfg, f'task{i}/modelpilot-explore/0') for i in range(4000)]
+        self.assertAlmostEqual(sum(d['switch'] for d in draws) / len(draws), 0.5, delta=0.03)
+        self.assertEqual({d['at_request'] for d in draws}, {2, 3, 4, 5})
+        never = self.cfg(probability=0.0)
+        self.assertFalse(any(sp.exploration_plan(never, f'k{i}')['switch'] for i in range(200)))
+
+    def test_bad_settings_are_refused(self):
+        for spec in ({'probability': 1.5}, {'first_request': 1}, {'first_request': 4, 'last_request': 3},
+                     {'target_model': 'claude-haiku-4-5-20251001'}):
+            with self.assertRaises(ValueError, msg=spec):
+                self.cfg(**spec)
+        self.assertFalse(sp.exploration(sp.load())['enabled'])  # off unless an arm turns it on

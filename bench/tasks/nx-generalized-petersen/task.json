@@ -1,0 +1,40 @@
+{
+ "id": "nx-generalized-petersen",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/generators/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/generators/tests"
+ ],
+ "type": "feature",
+ "base": "8b1c5a19c7baeb044daccf6903a3d680efd69fde",
+ "reference": "79e113baab1f9a17a1884ef62ebda2e2e1e61428",
+ "hidden_tests": [
+  "networkx/generators/tests/test_small.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/generators/tests/test_small.py"
+ ],
+ "source": "https://github.com/networkx/networkx/commit/79e113baab1f9a17a1884ef62ebda2e2e1e61428",
+ "instruction": "Add generalized_petersen_graph(n, k, *, create_using=None) to networkx's small graph generators (networkx/generators/small.py, available as nx.generalized_petersen_graph): the generalized Petersen graph GP(n, k), with an outer cycle on nodes 0..n-1 (edges i - (i+1) mod n), spokes i - n+i, and inner edges n+i - n+((i+k) mod n). It needs n >= 3 and 1 <= k <= n/2 (k = n/2 is allowed), else raises NetworkXError. create_using works as for the other small graphs (a MultiGraph gets the same edges), but a directed graph type raises NetworkXError with a message starting 'Directed Graph not supported'. Known cases: GP(5, 2) is the Petersen graph, GP(10, 3) the Desargues graph, GP(8, 3) the Moebius-Kantor graph and GP(10, 2) the dodecahedron; GP(10, 4) has 20 nodes, 30 edges, every degree 3, diameter 4 and radius 4. Add tests.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

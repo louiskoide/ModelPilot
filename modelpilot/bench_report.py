@@ -67,8 +67,11 @@ def api_key_equivalent(rows, rates):
 
 
 def priced_rows(record, rows, rates):
-    """The rows a trial's dollar figures come from: as measured, or as an API key would have been billed."""
-    return api_key_equivalent(rows, rates) if record.get('auth') == 'subscription' else rows
+    """The rows a trial's dollar figures come from: as measured, or as an API key would have been billed. An arm
+    that sets its cache lifetime (prompt_cache_ttl) sends the same writes with an API key, so it is priced as sent."""
+    if record.get('auth') == 'subscription' and not record.get('prompt_cache_ttl'):
+        return api_key_equivalent(rows, rates)
+    return rows
 
 
 def cache_attribution(rows, rates):
@@ -530,7 +533,7 @@ def pair_summary(a, b, cells_a, cells_b, rng, resamples, scopes=('complete', 'co
 
 def ineligible_reason(record):
     """Why a trial is excluded from comparisons, or None: its router or adapter says so, or a fixed arm's
-    requested effort or appended system prompt didn't reach the wire."""
+    requested effort, appended system prompt or cache lifetime didn't reach the wire."""
     routing = record.get('routing') or {}
     if routing.get('benchmark_eligible') is False:
         return routing.get('ineligible_reason', 'adapter_not_benchmark_eligible')
@@ -538,6 +541,8 @@ def ineligible_reason(record):
         return 'effort_not_applied'
     if (record.get('prompt_check') or {}).get('applied') is False:
         return 'prompt_not_applied'
+    if (record.get('ttl_check') or {}).get('applied') is False:
+        return 'ttl_not_applied'
     return None
 
 
@@ -584,6 +589,8 @@ def latest_regrade(run_dir):
 
 def apply_pass_rule(record, edge=None):
     """passed = the hidden grader and, where the task has an edge suite, all of it (see the module docstring)."""
+    if record.get('shape') == 'sequence':  # graded per subtask (long_session); passed means every subtask passed
+        return record
     hidden = hidden_passed(record)
     record['grade'] = dict(record.get('grade') or {}, passed=hidden)  # older records kept it only as 'passed'
     edge = record.get('edge') or edge

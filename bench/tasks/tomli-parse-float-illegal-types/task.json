@@ -1,0 +1,38 @@
+{
+ "id": "tomli-parse-float-illegal-types",
+ "repo": "tomli",
+ "url": "https://github.com/hukkin/tomli",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "feature",
+ "base": "0eaf93dd85934636f727c43f413a13e06509d2d6",
+ "reference": "794c8e50d676f1e8e081914eb77e4a48a4f6a20b",
+ "hidden_tests": [
+  "tests/test_error.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_error"
+ ],
+ "source": "https://github.com/hukkin/tomli/commit/794c8e50d676f1e8e081914eb77e4a48a4f6a20b",
+ "instruction": "tomli.loads(s, parse_float=...) and tomli.load accept a parse_float callable that turns TOML float strings into values. If it returns a dict or a list (or a subclass of either), those values get mixed up with parsed tables and arrays. Raise ValueError('parse_float must not return dicts or lists') instead as soon as parse_float returns such a value, for floats anywhere in the document (top level, tables, arrays, inline tables). Any other return value, such as a Decimal or a str, is used as before, and the default float keeps its speed. Update the README's note on illegal types.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

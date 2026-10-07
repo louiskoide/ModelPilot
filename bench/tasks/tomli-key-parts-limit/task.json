@@ -1,0 +1,38 @@
+{
+ "id": "tomli-key-parts-limit",
+ "repo": "tomli",
+ "url": "https://github.com/hukkin/tomli",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": "src",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "feature",
+ "base": "c20c49113890c226ffb27a67befe20d14fcf0c73",
+ "reference": "e1fdb94bc998377f1c2545c7cd4f70ff2a3fb4e4",
+ "hidden_tests": [
+  "tests/test_misc.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_misc"
+ ],
+ "source": "https://github.com/hukkin/tomli/commit/e1fdb94bc998377f1c2545c7cd4f70ff2a3fb4e4",
+ "instruction": "tomli takes quadratic time on a key with a pathological number of dotted parts (a.a.a. ... = 1 with tens of thousands of parts). Limit the number of parts in one key to sys.getrecursionlimit(), as nesting of inline arrays and tables is already limited: tomli.loads must raise RecursionError with a message matching 'TOML key has more than the allowed N parts' (N the limit) for a key with more parts than that, in a key/value pair or a table header, while keys with up to the limit (310 parts, or getrecursionlimit() - 1 parts) still parse normally.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

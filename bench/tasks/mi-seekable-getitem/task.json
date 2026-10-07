@@ -1,0 +1,38 @@
+{
+ "id": "mi-seekable-getitem",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "feature",
+ "base": "18d98893df45e0014bf316ca7832d441dd94aa4f",
+ "reference": "ba7ef9425f6983deaf0aedb616e8cdf0ece2f517",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "source": "https://github.com/more-itertools/more-itertools/commit/ba7ef9425f6983deaf0aedb616e8cdf0ece2f517",
+ "instruction": "Let a more_itertools.seekable be indexed: s[i] returns an item from its cache of items produced so far, the same items s.elements() shows, so s[0] is the oldest cached item and s[-1] the most recently produced one. An index outside the cache raises IndexError (s[0] before anything was produced, s[3] after three items). With maxlen the cache holds only the last maxlen items, and indexing covers just those: after taking 5 items from seekable(range(10), maxlen=2) as strings, s[0] is '3' and s[-1] is '4'.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

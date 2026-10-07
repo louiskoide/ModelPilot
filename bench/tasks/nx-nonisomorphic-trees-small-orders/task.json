@@ -1,0 +1,40 @@
+{
+ "id": "nx-nonisomorphic-trees-small-orders",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/generators/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/generators/tests"
+ ],
+ "type": "bug_fix",
+ "base": "9f8e7e298828ced14200e6bdabcd6d02f5965cec",
+ "reference": "f6a23d363720ce1ff49b67be3954d5bc79442348",
+ "hidden_tests": [
+  "networkx/generators/tests/test_nonisomorphic_trees.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/generators/tests/test_nonisomorphic_trees.py"
+ ],
+ "source": "https://github.com/networkx/networkx/commit/f6a23d363720ce1ff49b67be3954d5bc79442348",
+ "instruction": "nx.nonisomorphic_trees(order) and nx.number_of_nonisomorphic_trees(order) (networkx/generators/nonisomorphic_trees.py) raise a bare ValueError for every order below 2. Give them consistent semantics for small orders: order 0 has no trees (number_of_nonisomorphic_trees(0) == 0 and the generator yields nothing), order 1 has exactly one, the single-node graph nx.empty_graph(1) (count 1, the generator yields that one graph), and only a negative order raises ValueError('order must be non-negative'), from the count and from the generator (on its first next()). For every order the generator yields exactly number_of_nonisomorphic_trees(order) trees, each with order nodes and none isomorphic to another; larger orders behave as before. Document the behavior and add tests.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

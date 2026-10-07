@@ -1,0 +1,38 @@
+{
+ "id": "mi-numeric-range-reversed-values",
+ "repo": "more-itertools",
+ "url": "https://github.com/more-itertools/more-itertools",
+ "license": "MIT",
+ "test_dir": "tests",
+ "pythonpath": null,
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "discover",
+  "-q",
+  "-s",
+  "tests",
+  "-t",
+  "."
+ ],
+ "type": "bug_fix",
+ "base": "9ed3dbb0ae527230cd156d91d0af305478558fba",
+ "reference": "752799b5c88e0823f1bd93e073edab0a6a7e5648",
+ "hidden_tests": [
+  "tests/test_more.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "unittest",
+  "-q",
+  "tests.test_more"
+ ],
+ "source": "https://github.com/more-itertools/more-itertools/commit/752799b5c88e0823f1bd93e073edab0a6a7e5648",
+ "instruction": "reversed(more_itertools.numeric_range(...)) must yield exactly the values the range yields forward, in reverse order, and as many of them. Today it builds a new range counting down from the last value, so float ranges drift (list(reversed(numeric_range(0.0, 1.0, 0.1))) differs from list(numeric_range(0.0, 1.0, 0.1))[::-1]) and datetime ranges near the limits fail, for example numeric_range(datetime.min, datetime.min + timedelta(days=2), timedelta(days=1)) or one counting down from datetime.max with a step of -1 day. Fix reversed() so that list(reversed(r)) == list(r)[::-1] for every numeric_range r, including empty ranges and negative steps.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

@@ -2,6 +2,12 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 7, 2026: `main` (PR #37, plan item 7) merged into `long-session`
+
+$0, no code changed beyond the merge. Conflicts only in `CLAUDE.md` and this file. `CLAUDE.md` keeps this branch's items 6, 8, 9 and 11 and `main`'s item 7, and names both `long_session` and `late_fix`. It comes to 8,136 bytes, so no trim was needed. Here, both branches' entries are kept, newest first by commit.
+
+- Tests: 667 offline tests on Python 3.12 with the pinned 2.1.284 client first on PATH (`runs/merge-main-into-long-session-py312.log`). The one failure is the documented worktree one (the Jev launcher's checkout-path test, `work/` symlinked).
+
 ## October 7, 2026: plan item 7, the late-fix harness (offline; live step proposed)
 
 $0, offline. What does a miss cost to fix once someone notices it late? `modelpilot/late_fix.py` ships each strict failure on record and has a fresh session fix it from a bug report the host writes. Harness built and the reports prepared; the live step hasn't run. Details: `docs/m6-benchmark-plan.md`, "Late fix, plan item 7's measured part".
@@ -15,6 +21,27 @@ $0, offline. What does a miss cost to fix once someone notices it late? `modelpi
 - Shared changes: `bench_tasks.grade` and `regrade.run_edge` keep whole test output on request (`keep_output`), `spec_tests.saved_fixes(with_records=True)` returns each record, and `bench_tasks.GIT_IDENTITY` names the workspace commits' author.
 - Tests: 638 offline tests pass on Python 3.12 with the pinned 2.1.284 client first on PATH (`runs/late-fix-regression-py312.log`; an earlier full run, one test short, is `…-first.log`). New: `tests/test_late_fix.py` (report parsing and reproductions, `prepare` on the synthetic repository, the trial with a stub client, the run's stop rules, and one session with the real client against the fixture; also passes on system Python 3.9, real-client case skipped).
 
+## October 7, 2026: exploration arm for randomized mid-task switches (offline)
+
+$0, user request: more evidence on what switches do, since only 11 were on record (all at a turn start, all upward, all passing, none since October 3). Details: `docs/m6-modelpilot-policy.md`, "Exploration arm".
+
+- **The arm.** `modelpilot-explore` is low concise with no advisor. Each trial draws, reproducibly from its task, arm and trial number, whether it switches (probability 0.5) and at which main-loop request (2–5). At that request it moves to Opus 5.5 at the turn's effort through the usual dispatcher, journaling kind `exploration` with the predicted switch cost. Config `exploration` is off by default. The arm's trials are eligible without an advisor and need no TypeSafe key. `bench.arm_adapter` now gives an advisor only to arms that name Jev.
+- **Reading.** `python3 -m modelpilot.exploration <runs>` compares switched with unswitched trials and predicted with measured switch costs.
+- **Proposed runs.** Broad: 59 tuning tasks, about $7–9 API, after the labelling run. Targeted: miss-prone tasks, about $10–15. Neither has run.
+- Tests: two real-client trials (`tests/test_bench_tools.py`: a switch at request 2 onto Opus 5.5 low, and a trial drawn not to switch), the draw and its validation (`tests/test_switch_policy.py`), and the report (`tests/test_exploration.py`).
+
+## October 7, 2026: plan item 6, one-hour cache test: partly measured
+
+The user-approved live run `runs/m0-replication-ttl-1h-20261006-215100`, from code on `long-session`, API key, no retries: 78 of 102 calls, $2.0937, cost complete. Stopped by hand. Details: `docs/m6-benchmark-plan.md`, "One-hour cache test, first run".
+
+- **Measured** (Sonnet 5.5 and Opus 5.5, three repeats each):
+  - A 1h entry survives 10 minutes (6/6) where a 5m entry doesn't (6/6 rewritten).
+  - A read marked 1h costs a read but doesn't extend a 5m entry: 6/6 rewritten 10 minutes later. So an entry's lifetime is fixed when it is written, and the turn-end upgrade lever is dropped.
+  - A read marked 5m doesn't shorten a 1h entry (6/6 hits).
+- **Not measured: the hour itself.** The computer slept during the 40–80 minute waits, which the harness counted on `time.monotonic`. That clock stops during sleep on macOS, so those requests would have gone out about 10 hours late. They were stopped instead of being paid for.
+- **Fixed.** `cache_replication.execute` schedules waits on the wall clock. Each step records `planned_gap_seconds` and is marked `late` when it starts more than 60 s after its gap, and `ttl_summary` leaves late repeats out. The new suite `ttl-1h-long` holds only the three hour-long kinds: 42 requests, at most $1.34. Rerunning it needs the user's go and an awake computer.
+- Tests: `tests/test_cache_replication.py` (12) pass; new tests for a simulated sleep and for the long suite.
+
 ## October 6, 2026: plan item 7, the $0 part: break-even damage and exposure
 
 $0, offline. What an unnoticed miss costs beyond its redo has no measured price, so nothing assumes one; the gate shows what a protection would need it to be, and each change gets an exposure measure. Details: `docs/m6-modelpilot-policy.md`, "Break-even damage instead of an assumed price", and `docs/m6-benchmark-plan.md`, "Exposure and break-even damage".
@@ -25,6 +52,60 @@ $0, offline. What an unnoticed miss costs beyond its redo has no measured price,
 - **`modelpilot/exposure.py`** (and `line_trace.py`, a standalone tracer run with the bench interpreter): per change, the definitions it touches with their shortest import path and whether that is public API, references to each by name in the repository's source and tests, and which changed lines the task's own suite (the change's test edits dropped) runs inside a test, and how many tests run each changed definition. Over 29 reference fixes and 83 saved fixes (`runs/exposure-20261006-215532`, 6 min): parse's misses touch no public API, yet 87 of 96 existing tests run them; tomli's touch the public `TOMLDecodeError` constructor, run by 5–13 of 14; ISMAGS's 4 public definitions run by 516 of 2,272 tests, with only 2–3% of their changed lines run. A task's failing and passing fixes have the same exposure: it locates a miss's reach, it doesn't predict one. A first run (`runs/exposure-20261006-214844`) counted functions defined inside methods as public API; fixed, superseded, kept.
 - **Next** (item 7's measured part): the late-fix harness offline, then its live run (about $2–5 API-key equivalent, estimate; needs the user's go).
 - Tests: 624 of 625 offline tests pass on Python 3.12 with the pinned 2.1.284 client first on PATH (`runs/miss-exposure-regression-py312.log`). The one error, `test_governed_session`'s `test_correction_during_the_last_model_call_is_delivered_by_blocking_the_stop` (no request carrying the tool result reached the fixture), is in a real-client path this change doesn't reach (`governed_session`, `governor`, `hooks` and `proxy` import none of the changed modules); not re-run. New: `tests/test_exposure.py` (synthetic repository, tracer under unittest; the `sys.settrace` fallback, which CI's 3.10 uses, was also checked by hand), break-even tests in `tests/test_switch_policy.py`, and the replay's figure in `tests/test_policy_replay.py`.
+
+## October 6, 2026: user decisions on items 6, 8, 9 and 11
+
+$0, no code changed.
+
+- **Item 9: caveman parked.** No live arm for now; the $0 pass found about 1% at most, all of it lossy.
+- **Item 6: shape kept as built.** Whole tasks of one repository as the turns of one session. The one-hour cache test (`cache_replication --suite ttl-1h`) is approved: API key, at most $2.82, about 90 minutes. It decides nothing about the other long-session runs, which stay available. Its results go in their own entry.
+- **Item 11: 4b held.** The trial-count rule's evaluation on the record stands (n = 1 under the stated assumption).
+- **Item 8: open.** The user asked whether there are other choices, given a wish to see ModelPilot switch more. The labelling runs wait on that answer.
+
+## October 6, 2026: plan items 9 and 11, offline steps
+
+$0; same session and branch as items 6 and 8.
+
+- **Item 9, caveman's engine over recorded tool results.**
+  - Setup: caveman at commit `6571943`, its engine built with a checksum-verified Go 1.26.8 kept in ignored `work/caveman-src` (nothing installed globally), run with an empty environment and no network. Each tool result is compressed once, as its proxy does (`runs/caveman-pass-20261006.py` → `.json`).
+  - Result over 60 low concise trials (409 results): a 9% cut of tool-result tokens. Only 23 results changed, all lossy, mostly function bodies elided from source the agent had just read.
+  - Estimate: at most about $0.0008 a trial (1.0%) before any recovery call.
+  - The plan's condition for the live arm (a real cut) isn't met. Dropping it or running it anyway (about $2–3 as sent) is the user's decision. Details: `docs/m6-benchmark-plan.md`, "Caveman's engine over recorded tool results".
+- **Item 11, the trial-count rule on the record** (`runs/trial-count-rule-20261006.py` → `.json`), the rule itself not confirmed:
+  - Repeated trials already give run-to-run SDs: low concise $0.017, Sonnet 5.5 medium $0.018, Opus 5.5 $0.040 (4 tasks only).
+  - Assuming the ModelPilot arm's spread equals low concise's, the rule gives n = 1 for 4b (projected half-width $0.0095 against a $0.0116 target). It holds up to 1.4× low concise's spread; n = 2 up to 2.2×.
+  - A second ModelPilot trial (about $2.4 API plus TypeSafe) would settle it.
+  - On the tuning tasks that arm never left low concise, so 4b would mostly measure overhead. Arms and timing are the user's decision. Details: the plan doc, "The 4b trial-count rule on the record".
+- `CLAUDE.md`: plan items 6, 8 and 9 updated; kept under 8 KB.
+- Tests: 636 offline tests on Python 3.12 with the pinned 2.1.284 client first on PATH, 635 passing (`runs/long-session-items-6-11-regression-py312.log`). The one failure is the documented worktree one, the Jev launcher's checkout-path test with `work/` symlinked.
+
+## October 6, 2026: plan item 8, 30 labelling tasks (offline)
+
+$0, offline. This is the same session as item 6 below, on branch `long-session`. Details: `docs/m6-benchmark-plan.md`, "Labelling batch".
+
+- **Built.** 30 new tuning tasks from repositories already in the tuning split: networkx 14, more-itertools 12, cachetools 2, tomli 2. That is 15 bug fixes and 15 features, 28 of them committed in 2025–2026, a mix of hard algorithmic changes and easy controls. Each spec carries `"batch": "item-8-labels"`. All 30 are in `bench/splits.json` under `tuning` (59 tuning tasks); the final split and its lock are unchanged. The long-session sequences and the 29-task comparisons leave the batch out (`long_session.make_sequences` skips it).
+- **Checked.** `bench_tasks validate`: 30/30 valid (`runs/bench-validate-20261006-211134.json`). Every task has a frozen edge suite (3–5 tests, 123 in all) that its reference passes in full, many of them against brute force on random inputs (`bench/edge_tests/README.md`). The harness preflight passes for all 30.
+- **Dropped candidates**, each for a stated reason in the plan doc, among them:
+  - group betweenness: its hidden tests skip without numpy, and spanning its four fixes would need a base `validate` refuses on purpose;
+  - Steiner weights: the base already passes;
+  - the Louvain hang: a timeout never counts as a failure;
+  - two 2017–18 toolz commits: they don't run on Python 3.12.
+- **Instruction source.** Written from commit messages and hidden tests; the linked issues weren't read, unlike earlier batches (`instruction_source`).
+- **Waiting on the user.** The labelling runs on the subscription: low concise ×3 and Opus 5.5 ×2 per task, 150 trials, about $22–25 API-key equivalent and 3–4 hours. Commands are in the plan doc.
+- Tests: the suites touched pass (`test_long_session`, `test_bench_tasks`, `test_regrade`, `test_bench`; 101 tests). The full regression is recorded with the next entry.
+
+## October 6, 2026: plan item 6, long sessions: harness, one-hour probe and forecast (offline)
+
+$0, offline, user request: work items 6, 8, 9 and 11 in order, as far as possible without the user running anything or settling a design question; 5 and 7 are being worked on elsewhere and weren't touched. Branch `long-session` (from `miss-pricing`), in its own worktree. Details: `docs/m6-benchmark-plan.md`, "Long sessions".
+
+- **Shape.** `bench --shape sequence`: each tuning repository's tasks, in base-commit order and 3–5 to a session, run as the turns of one Claude Code session. That is 8 sequences over 28 tasks (`bench/sequences.json`). Each task has its own checkout. `--gap` sets the idle time between task turns, `--compact warm|cold` adds `/compact` turns, and `--autocompact` passes the client's window. Every subtask is graded at the end. `long_session report` pairs arms per subtask. `modelpilot` runs in sequences; `modelpilot-delegate` is refused.
+- **Cache lifetime.** Found at $0 in the pinned client: `CLAUDE_CODE_PROMPT_CACHE_TTL` (5m or 1h) sets the main conversation's writes on either login. Unset, the client writes 1h on a subscription and 5m with an API key, as recorded runs show (every write in the last 12 runs). New arms `sonnet-5.5-low-concise-5m`/`-1h` set it, are priced as sent and record `ttl_check`. Proxy rows now carry `cache_ttl` and `compaction`. The policy's warmth and write rate follow the request's lifetime (`cache_lifetime_seconds`: 5m 300 s, measured; 1h 3600 s, nominal until probed).
+- **Compaction, at $0.** `/compact` works on a resumed `-p` session. Its request reads the warm entry, and is marked 5m even under 1h. The request after it rewrites everything, since the first system block changes. `--autocompact 100000` fires when usage reports a larger context.
+- **One-hour probe, built.** `cache_replication --suite ttl-1h`: 102 requests, at most $2.82, about 90 minutes. Besides expiry and refresh it asks whether a request marked 1h moves a warm 5m entry to the hour, and how that is billed.
+- **Forecast, not measured** (`runs/long-session-forecast-20261006.json`). The 28 tasks as sequences cost about $2.37 with gaps under 5 minutes (5m writes), against $2.30 as single prompts. With 5–60 minute gaps: 5m $3.29, 1h $2.77. Over an hour: 5m $3.29, 1h $4.29. With no gaps, 1h costs $2.77. Contexts end at 28–47k tokens, below auto-compaction's 100k minimum.
+- **Waiting on the user.** The probe (API key, about $1.5) and the sequence runs on the subscription: the lifetime at a 10-minute gap (about $6 as sent), then compaction (about $5–7). Commands are in the plan doc.
+- Tests: 636 offline tests on Python 3.12 with the pinned 2.1.284 client first on PATH, 635 passing (`runs/long-session-regression-py312.log`). The one failure is the documented worktree one, the Jev launcher's checkout-path test with `work/` symlinked. New: `tests/test_long_session.py` (16, five through the real client), two cache-lifetime policy tests, two `ttl-1h` tests.
+
 
 ## October 6, 2026: plan item 7 rewritten: each miss priced by its own cost
 

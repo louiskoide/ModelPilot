@@ -1,0 +1,40 @@
+{
+ "id": "nx-k-components-lost",
+ "repo": "networkx",
+ "url": "https://github.com/networkx/networkx",
+ "license": "BSD-3-Clause",
+ "test_dir": "networkx/algorithms/connectivity/tests",
+ "pythonpath": ".",
+ "requires_python": "3.12",
+ "suite_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/connectivity/tests"
+ ],
+ "type": "bug_fix",
+ "base": "472a452c4db89c79efdebbdb20501b10fc726eae",
+ "reference": "d8081795e1344c576590b214c2e4f264b5e87244",
+ "hidden_tests": [
+  "networkx/algorithms/connectivity/tests/test_kcomponents.py"
+ ],
+ "hidden_command": [
+  "{python}",
+  "-m",
+  "pytest",
+  "-q",
+  "-rfE",
+  "-p",
+  "no:cacheprovider",
+  "networkx/algorithms/connectivity/tests/test_kcomponents.py"
+ ],
+ "source": "https://github.com/networkx/networkx/commit/d8081795e1344c576590b214c2e4f264b5e87244",
+ "instruction": "nx.k_components(G) (networkx/algorithms/connectivity/kcomponents.py, the exact Moody and White algorithm) loses or truncates k-components on some graphs. A k-component is a maximal set of nodes whose induced subgraph has node connectivity at least k; the result maps each k to the list of k-components. Two failures to fix: (1) take two icosahedra, nodes 0-11 (nx.icosahedral_graph()) and 12-23 (the same graph relabelled i -> i + 12), and add connector node 24 joined to 0, 1, 2, 12, 13; node 25 joined to 3, 4, 5, 14, 15; node 26 joined to 6, 7, 8, 16, 17; and node 27 joined to 9, 10, 20, 21. The graph is 4-connected, so for k = 1 to 4 the only k-component is all 28 nodes, and its 5-components are the two icosahedra, but one of them is missing from the result. (2) G = nx.gnp_random_graph(16, 0.6, seed=22070) is 7-connected, so for every k from 1 to 7 the only k-component is the whole graph, yet some levels report smaller fragments instead. Results on other graphs must stay correct. Add tests.",
+ "batch": "item-8-labels",
+ "notes": "Plan item 8 labelling batch (October 6, 2026): mined from a tuning repository to label which settings miss; not in the 29-task tuning comparisons or the long-session sequences. Tuning only.",
+ "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}
