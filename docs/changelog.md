@@ -2,6 +2,12 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 7, 2026: `main` (PR #37, plan item 7) merged into `long-session`
+
+$0, no code changed beyond the merge. Conflicts only in `CLAUDE.md` and this file. `CLAUDE.md` keeps this branch's items 6, 8, 9 and 11 and `main`'s item 7, and names both `long_session` and `late_fix`. It comes to 8,136 bytes, so no trim was needed. Here, both branches' entries are kept, newest first by commit.
+
+- Tests: 667 offline tests on Python 3.12 with the pinned 2.1.284 client first on PATH (`runs/merge-main-into-long-session-py312.log`). The one failure is the documented worktree one (the Jev launcher's checkout-path test, `work/` symlinked).
+
 ## October 7, 2026: plan item 7, the late-fix harness (offline; live step proposed)
 
 $0, offline. What does a miss cost to fix once someone notices it late? `modelpilot/late_fix.py` ships each strict failure on record and has a fresh session fix it from a bug report the host writes. Harness built and the reports prepared; the live step hasn't run. Details: `docs/m6-benchmark-plan.md`, "Late fix, plan item 7's measured part".
