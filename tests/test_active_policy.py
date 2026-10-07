@@ -192,6 +192,30 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertEqual([(d['action'], d['reason']) for d in self.decisions()], [('stay', 'current_is_cheapest')])
         self.assertEqual(self.dispatches(), [])
 
+    def test_jev_is_asked_only_where_some_answer_could_move(self):
+        self.start(config=switch_policy.load())  # the shipped, calibrated policy
+        self.advisor.answer = {'model': {'choice': O, 'confidence': .99, 'probabilities': {O: 1}},
+                               'effort': {'choice': 'max', 'confidence': .99, 'probabilities': {'max': 1}}}
+        self.assertEqual(self.post()[0], 200)
+        self.assertEqual(self.advisor.calls, [])  # no answer moves this turn start at jev_weight 0.03
+        self.assertEqual(self.sent(), [(S, 'medium')])
+        gov = self.gov()
+        try:
+            decision, = [e['payload'] for e in gov.journal('advisor_decision')]
+        finally:
+            gov.close()
+        self.assertEqual((decision['action'], decision['reason'], decision['advice']), ('stay', 'jev_cannot_change', None))
+        self.assertEqual((decision['gate']['can_change'], decision['gate']['reason']), (False, 'every_answer_stays'))
+        self.assertGreater(decision['forecast_usd'], 0)  # a later step still compares spend against it
+
+    def test_with_the_gate_off_jev_is_asked_at_every_point(self):
+        cfg = switch_policy.load()
+        cfg['jev_gate']['enabled'] = False
+        self.start(config=cfg)
+        self.advisor.answer = {'model': {'choice': S, 'confidence': .9, 'probabilities': {S: 1}}}
+        self.assertEqual(self.post()[0], 200)
+        self.assertEqual(len(self.advisor.calls), 1)
+
     def test_no_advice_stays_and_never_blocks_the_request(self):
         self.start()
         self.advisor.answer = {'error': 'advice_failed: AbortError'}
@@ -398,6 +422,28 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         step = self.decisions()[-1]
         self.assertEqual((step['step']['cause'], step['action']), ('tests_now_fail', 'jump'))
         self.assertIn('the test suite now fails', self.advisor.calls[-1]['evidence'])
+
+    def test_the_agents_own_test_runs_flipping_is_a_step(self):
+        """Plan item 2: agents test through Bash (the host tool ran in 2 of 28 trials), so their runs, read from the
+        conversation by summary line, are a step too, marked as the agent's."""
+        def run(i, output):
+            return [{'role': 'assistant', 'content': [{'type': 'tool_use', 'id': f'b{i}', 'name': 'Bash',
+                                                       'input': {'command': 'python3 -m pytest -q 2>&1 | tail -3'}}]},
+                    {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': f'b{i}', 'content': output}]}]
+        failing = self.TURN + run(0, '1 failed, 4 passed in 0.1s')
+        self.start()
+        self.advise(O, 'xhigh')
+        self.post(messages=self.TURN)
+        self.post(messages=failing)
+        self.post(messages=failing + run(1, 'Ran 1 test in 0.01s'))  # cut off before its outcome: not a run
+        self.advise(S, 'medium')
+        self.post(messages=failing + run(1, 'Ran 1 test in 0.01s') + run(2, '5 passed in 0.1s'))
+        self.assertEqual(self.sent(), [(O, 'xhigh')]*3 + [(S, 'xhigh')])
+        turn, step = self.decisions()
+        self.assertEqual((turn['agent_runs'], step['agent_runs']), (0, 2))
+        self.assertEqual((step['point'], step['step']['cause'], step['step']['source'], step['action']),
+                         ('1/step/agent_tests/2', 'tests_now_pass', 'agent', 'jump'))
+        self.assertIn("the agent's own test run now passes", self.advisor.calls[-1]['evidence'])
 
     def test_spending_past_the_forecast_is_a_step_limited_per_revision(self):
         cfg = jev_only()

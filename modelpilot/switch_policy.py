@@ -49,6 +49,7 @@ rewrite and enough confidence. Models, efforts, cache behaviour and the cost
 model come from configs/modelpilot-policy.json and prices from the rate table; nothing here names
 a model.
 """
+import itertools
 import json
 from pathlib import Path
 
@@ -84,6 +85,8 @@ def load(path=CONFIG):
                          "'model/effort' -> passed <= trials (integers, trials >= 1)")
     if not set(cfg['decision_points']) <= set(TRIGGERS):
         raise ValueError(f'decision_points must be among {TRIGGERS}')
+    if type(gate(cfg)['enabled']) is not bool:
+        raise ValueError('jev_gate: enabled is a boolean')
     step = cfg['step']
     if (type(step['enabled']) is not bool or not _count(step['min_requests_between'], 1)
             or not _count(step['max_per_revision'], 0) or not _at_least_number(step['overrun_factor'], 0)
@@ -152,6 +155,11 @@ def with_overrides(cfg, overrides):
 def delegation(cfg, kind):
     """The consult or handoff_note settings; a config without them has delegation off."""
     return (cfg.get('delegation') or {}).get(kind) or {'enabled': False}
+
+
+def gate(cfg):
+    """The jev_gate settings; a config without them asks Jev at every decision point."""
+    return cfg.get('jev_gate') or {'enabled': False}
 
 
 def delegating(cfg):
@@ -367,7 +375,50 @@ def decide(cfg, rates, advice, current, prof, trigger):
     return decision
 
 
-def _decide(cfg, rates, advice, current, prof, trigger):
+def answer_shapes(cfg):
+    """Every way Jev's answer can shape the candidates: each model and effort choice, sure (1) or unsure (0) of each,
+    or no effort answer. Its probabilities don't matter here; jev_gate bounds them."""
+    models, efforts = list(cfg['models']), cfg['effort_order']
+    for choice, sure in itertools.product(models, (0.0, 1.0)):
+        model = {'choice': choice, 'confidence': sure, 'probabilities': {m: float(m == choice) for m in models}}
+        yield {'model': model}
+        for e_choice, e_sure in itertools.product(efforts, (0.0, 1.0)):
+            yield {'model': model, 'effort': {'choice': e_choice, 'confidence': e_sure,
+                                              'probabilities': {e: float(e == e_choice) for e in efforts}}}
+
+
+def jev_gate(cfg, rates, current, prof, trigger):
+    """Whether some answer Jev could give changes the decision at this point (config jev_gate). Jev's choices and
+    confidences pick the candidates and where a failure is redone; its probabilities only set each setting's
+    estimate, which lies in [0, 1]. With a failure wasting its whole run (recovery.wasted_fraction 1), every expected
+    cost falls as any P_ok rises, so staying is at its dearest, and its hysteresis lowest, with Jev's estimate 0
+    everywhere, and a candidate at its cheapest with 1. If no candidate beats staying by the hysteresis even then, for
+    every answer shape, the decision stays whatever Jev says. The bound ignores a downgrade's extra hysteresis and its
+    confidence check, so the gate errs to asking. Returns {'can_change': bool, 'reason': ...}: True without
+    calibration at this point (Jev's estimate is then the whole of P_ok), where a consult is possible (its target is
+    Jev's setting), or where the bound doesn't hold (wasted_fraction below 1)."""
+    cal, consult = cfg['calibration'], delegation(cfg, 'consult')
+    if not (cal['enabled'] and trigger in cal['applies_at']):
+        return {'can_change': True, 'reason': 'uncalibrated'}
+    if consult['enabled'] and trigger in consult['at']:
+        return {'can_change': True, 'reason': 'consult_possible'}
+    if cfg['recovery']['wasted_fraction'] < 1:
+        return {'can_change': True, 'reason': 'not_monotone'}
+    closest, shapes = None, 0
+    for advice in answer_shapes(cfg):
+        shapes += 1
+        low, high = (_decide(cfg, rates, advice, current, prof, trigger, jev_estimate=x)['candidates'] for x in (0.0, 1.0))
+        stay, required = low[0]['expected_usd'], cfg['hysteresis_usd'] * low[0]['p_ok']
+        for row in high[1:]:
+            gap = stay - row['expected_usd'] - required
+            closest = gap if closest is None else max(closest, gap)
+            if gap > 0:
+                return {'can_change': True, 'reason': 'a_move_can_pay', 'shapes': shapes, 'closest_usd': gap}
+    return {'can_change': False, 'reason': 'every_answer_stays', 'shapes': shapes, 'closest_usd': closest}
+
+
+def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None):
+    """jev_estimate: Jev's estimate for every setting, in place of its probabilities (jev_gate's bounds)."""
     if trigger not in TRIGGERS:
         raise ValueError(f'Unknown decision point {trigger!r}')
     current = tuple(current)
@@ -393,7 +444,7 @@ def _decide(cfg, rates, advice, current, prof, trigger):
         out['calibration'] = {'jev_weight': cal['jev_weight']}
 
     def jev_ok(setting):
-        return model_ok(setting[0]) * effort_ok(setting[1])
+        return model_ok(setting[0]) * effort_ok(setting[1]) if jev_estimate is None else jev_estimate
 
     def p_ok(setting):
         measured = measured_ok(cfg, setting) if calibrated else None
