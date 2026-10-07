@@ -35,6 +35,7 @@ Files are under `runs/`; the full table, failures included: `docs/evidence.md`.
 ## Working rules
 
 - Keep API keys in local environment/hidden prompts; never print, commit or ask for them in chat. A key was exposed earlier in the conversation; do not reuse transcript credentials.
+- Prefer the subscription token (`claude setup-token`, `CLAUDE_CODE_OAUTH_TOKEN`; a secret) to an API key where it fits, today fixed bench arms (`--subscription-arms`). Direct API calls (`spec_tests`, `cache_probe`), Jev/ModelPilot arms and cache-TTL probes need the key.
 - Offline commands are the default; paid harnesses require `--live`. No automatic retries in ModelPilot measurement runs because retries affect costs/cache state. Preserve failed evidence and use new run directories.
 - Keep routing disabled until integration has explicit evidence. Do not silently lower verification standards as budget depletes. Unaffordable escalation means defer/stop, not accept an unverified answer.
 - Trust host-verified task revision, lease, file hashes and test outcomes, not model confidence. Corrected/cancelled work must not land stale results.
@@ -46,7 +47,7 @@ Files are under `runs/`; the full table, failures included: `docs/evidence.md`.
 - Jev dollars are provider cost only, a lower bound. Never count fail-open Claude or stub-router decisions as Jev routing. Never edit `work/jev-router-baseline`.
 - Never edit a final task spec after the lock (`bench/splits.json`). Lock the bench venv's site-packages read-only before live runs.
 - The TypeSafe key seen in a September 22 screenshot is revoked.
-- Keep this file under 8 KB (`tests/test_claude_md.py`): history to `docs/changelog.md`, run evidence to `docs/evidence.md`, module detail to `docs/code-map.md`.
+- Keep this file under 8 KB (`tests/test_claude_md.py`); detail goes to the three docs named at the top.
 
 ## Commands and testing
 
@@ -59,7 +60,7 @@ python3 -m modelpilot.m5 --out runs/m5-new-report.json
 python3 -m modelpilot.governor --out runs/governor-demo.json
 ```
 
-- Latest: 616 offline tests pass on Python 3.12 (`runs/agent-test-steps-regression-py312.log`); record counts in `docs/changelog.md`.
+- Latest test count and log: the newest `docs/changelog.md` entry; record counts there.
 - Put the pinned client 2.1.284 (`work/claude-client/node_modules/.bin`) first on PATH: 2.1.289 retries refused requests. System Python 3.9 has two known `test_transport` errors.
 - Real-client, bench and Jev tests need `work/` and node; CI (3.10, 3.14) skips them. With `work/` symlinked into a worktree, the Jev launcher's checkout-path test fails.
 - Paid, all behind `--live` (inspect each plan first): `cache_probe`, `claude_check`, `worker_check`, `cascade_check`, `evaluate`, `jev_check`, `jev_route_check`, `governed_session`, `bench`, `thinking_probe`. Limits are stopping thresholds, not billing caps.
@@ -72,15 +73,11 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 
 ## Plan, in order
 
-Built offline first; any live run needs the user's approval. Reviewed October 6 (`docs/changelog.md`).
+Built offline first; any live run needs the user's approval. 1–4 done October 6 (`docs/changelog.md`); 4 found no pre-run miss signal.
 
-1. Done October 6: Jev only where an answer could change the decision (none of 180 replayed).
-2. Done October 6: steps read the agent's Bash test runs; 66 of 80 would fire at the finish.
-3. Done October 6: no R5 tools or channel paragraph while delegation is off.
-4. Done October 6: nothing known before a run separates the 3 misses.
-5. Catch misses after a run: Opus writes edge tests from the spec; the host runs them; a failure escalates.
+5. Spec-written tests: the first probe caught 1 of 3 (parse), $0.13 a task; a 29-task run waits on 7.
 6. Long-session benchmark: idle gaps, compaction, a one-hour TTL probe.
-7. Price an unnoticed miss in the gate.
+7. Price each miss, not one set price: the late fix (measured: repair from a host-written bug report) plus damage, unknown until real incidents; meanwhile exposure and per-task break-even damage.
 8. 30 more labelled tasks before any predictor.
 9. Caveman's proxy (user decision): $0 pass over recorded tool results, then low concise behind it; strict passes decide.
 10. ModelPilot's own predictor, only if 8 shows misses predictable; never edit Jev.
