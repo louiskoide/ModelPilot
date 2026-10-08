@@ -118,6 +118,24 @@ ARMS = {
                            'served_models': ['claude-opus-5-5', 'claude-sonnet-5-5'],
                            'policy': 'docs/m6-modelpilot-policy.md',
                            'policy_overrides': {'exploration': {'enabled': True}}},
+    # The modelpilot arm with the quality floor on (user decision, October 8; docs/m6-modelpilot-policy.md, "Quality
+    # floor"): no worse than the user's own model, one arm per baseline, each compared with that baseline's fixed arm
+    # (sonnet-5.5, opus-5.5). Each starts at the cheapest setting its floor allows on the October 8 evidence: low concise
+    # against Sonnet 5.5 medium, Opus 5.5 medium (with the concise prompt) against Opus 5.5 medium.
+    'modelpilot-for-sonnet': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'low', 'advisor': 'jev',
+                              'append_system_prompt': 'bench/prompts/concise.md',
+                              'checkout': 'work/jev-router-compat', 'models': POLICY_TIERS,
+                              'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}),
+                              'policy': 'docs/m6-modelpilot-policy.md',
+                              'policy_overrides': {'quality_floor': {'enabled': True,
+                                                                     'baseline': 'claude-sonnet-5-5/medium'}}},
+    'modelpilot-for-opus': {'kind': 'modelpilot', 'model': 'claude-opus-5-5', 'effort': 'medium', 'advisor': 'jev',
+                            'append_system_prompt': 'bench/prompts/concise.md',
+                            'checkout': 'work/jev-router-compat', 'models': POLICY_TIERS,
+                            'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}),
+                            'policy': 'docs/m6-modelpilot-policy.md',
+                            'policy_overrides': {'quality_floor': {'enabled': True,
+                                                                   'baseline': 'claude-opus-5-5/medium'}}},
 }
 RUNNABLE = ('fixed', 'jev')
 AUTHS = ('api_key', 'subscription')
@@ -1161,6 +1179,10 @@ def main():
                   f'stronger, the task stops; any request is refused once wire spend reaches ${args.budget * sessions:.2f} '
                   'per trial or cost is unknown. TypeSafe advice is billed separately and unpriced, so its dollars are a '
                   'lower bound; --live asks for a TypeSafe key.')
+            floor = (ARMS[arm].get('policy_overrides') or {}).get('quality_floor') or {}
+            if floor.get('enabled'):
+                print(f'  Quality floor: only settings no worse than {floor["baseline"]} on the measured tuning tasks, '
+                      'or above the current one; a start below it moves to the cheapest allowed setting without Jev.')
         return
     cli, version = resolve_client(args.claude or shutil.which('claude') or 'claude')
     if client_problem(version):

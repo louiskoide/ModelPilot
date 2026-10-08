@@ -63,7 +63,9 @@ def parameters(model, effort, config=None, overrides=None):
             'switch_rule': 'jump directly to the setting with the lowest expected total cost (switch + P_ok x run + '
                            '(1 - P_ok) x recovery) when it beats staying by the hysteresis (downgrades: plus a multiple '
                            'of their rewrite, and enough confidence); never climbs. P_ok blends Jev with measured '
-                           'pass rates when calibration is on; a failure is redone at the turn\'s effort',
+                           'pass rates when calibration is on; a failure is redone at the turn\'s effort. With the '
+                           'quality floor on, only settings no worse than the baseline (or above the current one) are '
+                           'weighed, and a setting below it moves to the cheapest allowed one',
             'stop_on': 'stuck with no stronger setting', 'stuck': 'm2 heuristic-v1 (score >= 3, window 6)',
             'config_sha256': hashlib.sha256(switch_policy.CONFIG.read_bytes()).hexdigest(), 'overrides': overrides or {},
             'admission': 'measured spend below the per-task limit; a move also needs the limit to cover its full '
@@ -72,6 +74,8 @@ def parameters(model, effort, config=None, overrides=None):
             'calibration': dict({k: cfg['calibration'][k] for k in ('enabled', 'jev_weight', 'applies_at')},
                                 outcomes=cfg['calibration']['outcomes']),
             'jev_gate': {'enabled': switch_policy.gate(cfg)['enabled']},
+            'quality_floor': {k: v for k, v in switch_policy.quality_floor(cfg).items() if k in
+                              ('enabled', 'baseline', 'min_shared_tasks')},
             'cost_model': {k: cfg[k] for k in ('defaults', 'effort_output_factor', 'effort_request_factor',
                                                'bytes_per_token')},
             'delegation': {kind: {k: v for k, v in switch_policy.delegation(cfg, kind).items() if k != 'about'}
@@ -295,7 +299,8 @@ class ActivePolicy(ProxyPolicy):
         decision = switch_policy.decide(self.config, rates, usable, setting, prof, trigger)
         if gate is not None:
             decision['gate'] = gate
-            if not gate['can_change']:  # Jev wasn't asked: no answer it could give moves this point
+            # Jev wasn't asked: no answer it could give moves this point (a quality floor move keeps its own reason)
+            if not gate['can_change'] and decision['reason'] == 'advice_unavailable':
                 decision['reason'] = 'jev_cannot_change'
         if decision['action'] != 'consult':
             self.briefs.pop(key, None)

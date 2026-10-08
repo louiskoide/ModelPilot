@@ -24,8 +24,7 @@ With the config's jev_gate on, each replayed decision also says whether the gate
 (replayed.gate); the decision itself is still replayed on the answer Jev gave. A skipped point whose recorded answer
 replays to anything but a stay would mean the gate is wrong: summary gate.skipped_but_moved counts them.
 
-Each replayed decision also carries switch_policy.break_even (plan item 7): what an unnoticed miss would have to cost
-for a stronger setting to pay there. summary.break_even gives its range per decision point.
+With the quality floor on (an arm's overrides), each replayed decision carries the floor's verdict (quality_floor).
 """
 import argparse
 from collections import Counter
@@ -129,7 +128,7 @@ def replay_run(run_dir, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_
             else:
                 row['replayed'] = {'action': new['action'], 'target': _setting(new), 'reason': new.get('reason'),
                                    'p_ok_current': _p_current(new), 'forecast_usd': new['forecast_usd'],
-                                   'candidates': new.get('candidates'), 'break_even': new.get('break_even')}
+                                   'candidates': new.get('candidates'), 'quality_floor': new.get('quality_floor')}
                 if 'gate' in new:
                     row['replayed']['gate'] = dict(new['gate'], skip=not new['gate']['can_change'])
                 changed = (new['action'], _setting(new)) != (baseline['action'], baseline['target'])
@@ -149,28 +148,13 @@ def summarize(rows):
             'closest_skipped_usd': max((r['replayed']['gate']['closest_usd'] for r in gated if r['replayed']['gate']['skip']
                                         and r['replayed']['gate']['closest_usd'] is not None), default=None)}
     return {'decisions': len(rows), 'status': dict(Counter(r['status'] for r in rows)),
-            **({'gate': gate} if gated else {}), **({'break_even': break_even(rows)} if any(
-                (r['replayed'] or {}).get('break_even') for r in rows) else {}),
+            **({'gate': gate} if gated else {}),
             'by_trigger': {t: dict(Counter(r['status'] for r in rows if r['trigger'] == t))
                            for t in sorted({r['trigger'] for r in rows if r['trigger']})},
             'rebased': sum('baseline' in r for r in rows),
             'moves': dict(Counter(f"{_baseline(r)['action']} {_baseline(r)['target']} -> "
                                   f"{r['replayed']['action']} {r['replayed']['target']}"
                                   for r in rows if r['status'] == 'changed'))}
-
-
-def break_even(rows):
-    """Per decision point: the damage per unnoticed miss above which the cheapest stronger setting would pay
-    (switch_policy.break_even), its range and where it points, and how many points no move could pay at."""
-    out = {}
-    for trigger in sorted({r['trigger'] for r in rows if (r['replayed'] or {}).get('break_even')}):
-        shown = [r['replayed']['break_even']['cheapest'] for r in rows
-                 if r['trigger'] == trigger and (r['replayed'] or {}).get('break_even')]
-        damage = sorted(c['damage_usd'] for c in shown if c)
-        out[trigger] = {'decisions': len(shown), 'no_move_can_pay': sum(c is None for c in shown),
-                        'damage_usd': [round(damage[0], 3), round(damage[len(damage) // 2], 3), round(damage[-1], 3)]
-                        if damage else None, 'cheapest': dict(Counter(c['setting'] for c in shown if c))}
-    return out
 
 
 def _baseline(row):

@@ -443,60 +443,101 @@ class JevGateTests(unittest.TestCase):
         self.assertGreater(moved, 0)
 
 
-class BreakEvenTests(unittest.TestCase):
-    """Plan item 7: what an unnoticed miss would have to cost for a stronger setting to pay. Shown, never priced."""
+class QualityFloorTests(unittest.TestCase):
+    """User decision, October 8: no worse than the user's own model, instead of a price per unnoticed miss."""
     def setUp(self):
-        self.cfg, self.rates = sp.load(), bench.rates()
+        self.base, self.rates = sp.load(), bench.rates()
 
-    def named(self, setting):
-        return {'model': {'choice': setting[0], 'confidence': 1.0, 'probabilities': {setting[0]: 1.0}},
-                'effort': {'choice': setting[1], 'confidence': 1.0, 'probabilities': {setting[1]: 1.0}}}
+    def cfg(self, baseline, **floor):
+        return sp.with_overrides(self.base, {'quality_floor': dict({'enabled': True, 'baseline': baseline}, **floor)})
 
-    def test_each_break_even_is_where_the_decision_turns(self):
-        """Priced into the gate's own decision, a damage just under each figure stays and just over it moves there."""
-        measured = copy.deepcopy(self.cfg)
-        measured['calibration']['jev_weight'] = 0.0
-        checked = 0
-        for kb, warm, trigger, current in itertools.product(
-                (2, 11, 60), (False, True), ('turn_start', 'step'), ((S, 'low'), (S, 'medium'), (O, 'low'))):
-            prof = sp.profile(self.cfg, request(kb), warm)
-            shown = sp.break_even(self.cfg, self.rates, current, prof, trigger)
-            for move in shown['moves']:
-                damage = move['damage_usd']
-                if not damage:
-                    continue
-                target = tuple(move['setting'].split('/'))
-                below, above = (sp._decide(measured, self.rates, self.named(target), current, prof, trigger,
-                                           damage_usd=damage * f) for f in (.99, 1.01))
-                self.assertEqual(below['action'], 'stay', (kb, warm, trigger, current, move))
-                self.assertEqual((above['action'], above['target']), ('jump', list(target)), (kb, warm, trigger, move))
-                checked += 1
-        self.assertGreater(checked, 20)
+    def allowed(self, cfg):
+        return {sp._label(c) for c in sp.settings(cfg) if sp.floor_allows(cfg, c)['allowed']}
 
-    def test_from_the_low_start_only_opus_at_medium_or_above_has_fewer_measured_misses(self):
-        prof = sp.profile(self.cfg, request(20), False)
-        start = sp.break_even(self.cfg, self.rates, (S, 'low'), prof, 'turn_start')
-        self.assertEqual(start['basis'], 'measured_pass_rates')
-        self.assertEqual(start['cheapest']['setting'], f'{O}/medium')
-        self.assertTrue(1 < start['cheapest']['damage_usd'] < 10, start['cheapest'])
-        by = {m['setting']: m for m in start['moves']}
-        self.assertIsNone(by[f'{O}/low']['damage_usd'])  # Opus low has only Sonnet low's measured rate
-        self.assertGreater(by[f'{S}/medium']['damage_usd'], start['cheapest']['damage_usd'])  # 0.4 points fewer misses
-        # Inside a turn the effort holds, and Opus at low has no fewer measured misses: no move can pay.
-        step = sp.break_even(self.cfg, self.rates, (S, 'low'), prof, 'step')
-        self.assertEqual([m['setting'] for m in step['moves']], [f'{O}/low'])
-        self.assertIsNone(step['cheapest'])
+    def test_against_sonnet_medium_low_adds_no_miss_against_opus_no_sonnet_setting_qualifies(self):
+        sonnet = self.cfg(f'{S}/medium')
+        self.assertEqual(self.allowed(sonnet), {sp._label(c) for c in sp.settings(sonnet)})
+        low = sp.floor_allows(sonnet, (S, 'low'))
+        self.assertEqual((low['reason'], low['shared_tasks'], low['extra_misses']), ('no_extra_misses', 29, []))
+        opus = self.cfg(f'{O}/medium')
+        self.assertEqual(self.allowed(opus), {f'{O}/{e}' for e in EFFORTS[1:]})
+        # Opus 5.5 low and Sonnet 5.5 above medium have only Sonnet's measured outcomes to go on.
+        for c in ((S, 'low'), (S, 'max'), (O, 'low')):
+            self.assertEqual(sp.floor_allows(opus, c)['extra_misses'], ['parse-decimal-grouping', 'tomli-decode-error-attrs'])
 
-    def test_it_is_shown_only_where_the_measured_rates_apply_and_changes_nothing(self):
-        prof = sp.profile(self.cfg, request(11), False)
-        self.assertIsNone(sp.break_even(self.cfg, self.rates, (S, 'low'), prof, 'stuck_evidence'))
-        self.assertIsNone(sp.break_even(jev_only(), self.rates, (S, 'low'), prof, 'turn_start'))
-        self.assertIsNone(sp.break_even(self.cfg, self.rates, (O, 'max'), prof, 'turn_start')['cheapest'])  # strongest
-        adv = advice(O, 'xhigh')
-        decision = sp.decide(self.cfg, self.rates, adv, (S, 'low'), prof, 'turn_start')
-        self.assertEqual(decision['break_even'], sp.break_even(self.cfg, self.rates, (S, 'low'), prof, 'turn_start'))
-        bare = sp._decide(self.cfg, self.rates, adv, (S, 'low'), prof, 'turn_start')
-        self.assertEqual({k: decision[k] for k in bare}, bare)
+    def test_a_baseline_with_nothing_measured_at_or_above_it_is_taken_to_miss_nothing(self):
+        cfg = self.cfg(f'{O}/high')
+        self.assertEqual(self.allowed(cfg), {f'{O}/{e}' for e in EFFORTS[1:]})  # Opus 5.5 medium missed no task
+        self.assertEqual(sp.floor_allows(cfg, (O, 'medium'))['baseline_evidence'], [])
+        self.assertEqual(sp.floor_allows(cfg, (S, 'medium'))['reason'], 'extra_misses')
+
+    def test_too_few_shared_tasks_are_not_evidence(self):
+        cfg = self.cfg(f'{S}/medium', min_shared_tasks=30)
+        self.assertEqual(sp.floor_allows(cfg, (S, 'low'))['reason'], 'too_few_tasks')
+        self.assertTrue(sp.floor_allows(cfg, (S, 'medium'))['allowed'])  # the baseline itself needs no evidence
+
+    def test_the_outcomes_must_add_up_to_the_calibration_and_the_floor_is_off_by_default(self):
+        self.assertFalse(sp.quality_floor(self.base)['enabled'])
+        bad = copy.deepcopy(self.base)
+        bad['quality_floor']['outcomes'][f'{S}/low']['parse-decimal-grouping'] = [1, 1]
+        with tempfile.NamedTemporaryFile('w', suffix='.json') as f:
+            json.dump(bad, f)
+            f.flush()
+            with self.assertRaises(ValueError):
+                sp.load(f.name)
+        for floor in ({'baseline': 'claude-next/medium'}, {'baseline': f'{S}/turbo'}, {'min_shared_tasks': 0},
+                      {'enabled': 'yes'}):
+            with self.assertRaises(ValueError, msg=floor):
+                sp.with_overrides(self.base, {'quality_floor': floor})
+
+    def test_below_the_floor_it_moves_to_the_cheapest_allowed_setting_without_jev(self):
+        cfg = self.cfg(f'{O}/medium')
+        for warm in (False, True):
+            prof = sp.profile(cfg, request(20), warm)
+            for adv in (None, advice(S, 'low', .99, .99)):  # Jev's answer plays no part
+                decision = sp.decide(cfg, self.rates, adv, (S, 'low'), prof, 'turn_start')
+                self.assertEqual((decision['action'], decision['target'], decision['reason']),
+                                 ('jump', [O, 'medium'], 'below_quality_floor'))
+                self.assertEqual({c['setting'] for c in decision['candidates']}, {f'{O}/{e}' for e in EFFORTS[1:]})
+            self.assertEqual(sp.jev_gate(cfg, self.rates, (S, 'low'), prof, 'turn_start'),
+                             {'can_change': False, 'reason': 'below_quality_floor'})
+        # Inside a turn the effort holds, and Opus at low is below the floor too: nothing allowed is reachable.
+        step = sp.decide(cfg, self.rates, advice(O, 'medium'), (S, 'low'), sp.profile(cfg, request(20), True), 'step')
+        self.assertEqual((step['action'], step['reason']), ('stay', 'quality_floor_unreachable'))
+
+    def test_a_move_below_the_floor_is_never_weighed(self):
+        prof = sp.profile(self.base, request(20), False)
+        sure_low = advice(S, 'low', .99, .99)
+        free = sp.decide(self.base, self.rates, sure_low, (O, 'medium'), prof, 'turn_start')
+        self.assertEqual((free['action'], free['target']), ('jump', [S, 'low']))  # the floor off: down it goes
+        held = sp.decide(self.cfg(f'{O}/medium'), self.rates, sure_low, (O, 'medium'), prof, 'turn_start')
+        self.assertEqual(held['action'], 'stay')
+        self.assertEqual([c['setting'] for c in held['candidates']], [f'{O}/medium'])
+        self.assertEqual(held['quality_floor']['current']['reason'], 'at_least_baseline')
+
+    def test_a_move_up_from_an_allowed_setting_is_always_weighed(self):
+        """Opus 5.5 low measured on one more task, which it missed: below the floor by evidence, yet a move up from
+        Sonnet 5.5 low (allowed) to it stays possible, so an escalation is never blocked."""
+        cfg = copy.deepcopy(self.cfg(f'{S}/medium'))
+        outcomes = cfg['quality_floor']['outcomes']
+        outcomes[f'{O}/low'] = dict(outcomes[f'{S}/low'], **{'extra-task': [0, 1]})
+        outcomes[f'{S}/medium']['extra-task'] = [1, 1]
+        self.assertEqual(sp.floor_allows(cfg, (O, 'low'))['extra_misses'], ['extra-task'])
+        self.assertTrue(sp.floor_allows(cfg, (S, 'low'))['allowed'])
+        decision = sp.decide(cfg, self.rates, advice(O, 'low', .99, .99), (S, 'low'),
+                             sp.profile(cfg, request(20), False), 'turn_start')
+        self.assertIn(f'{O}/low', {c['setting'] for c in decision['candidates']})
+
+    def test_with_every_setting_allowed_the_floor_changes_no_decision(self):
+        """Against Sonnet 5.5 medium every setting qualifies, so modelpilot-for-sonnet decides as modelpilot does."""
+        cfg = self.cfg(f'{S}/medium')
+        for kb, warm, trigger, current, adv in itertools.product(
+                (2, 20, 60), (False, True), ('turn_start', 'step', 'stuck_evidence'), ((S, 'low'), (S, 'medium'), (O, 'low')),
+                (None, advice(O, 'xhigh'), advice(S, 'medium', .5, .5), advice(O, 'low', .99, .4))):
+            prof = sp.profile(cfg, request(kb), warm)
+            floored = sp.decide(cfg, self.rates, adv, current, prof, trigger)
+            self.assertTrue(floored.pop('quality_floor')['current']['allowed'])
+            self.assertEqual(floored, sp.decide(self.base, self.rates, adv, current, prof, trigger))
 
 
 if __name__ == '__main__':

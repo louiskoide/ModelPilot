@@ -17,6 +17,8 @@ User decision, September 28: ModelPilot no longer climbs a ladder (Sonnet medium
    - **The redo can fail too.** Staying on a setting that will likely fail carries the same downstream risk as moving now. Without this, a hard task stayed on Sonnet in 11 of 27 combinations of the guessed parameters. With it, a clear prediction jumps in all 27.
 
    It jumps straight to the cheapest option when that beats staying by the hysteresis. The margin is scaled by how plausible the current setting is, so it protects a setting that may well be enough from marginal moves, not one that is almost certain to fail. When Jev is confident of both model and effort (0.6 or more), only staying and Jev's exact setting are weighed, and nothing cheaper is tried first. A partial move (Jev's model or effort alone) is weighed only in a dimension Jev is unsure of. A downgrade must also beat a multiple of its rewrite and needs enough confidence, so downgrades in long, warm sessions rarely pay.
+
+   With the quality floor on (October 8), only settings no worse than the user's own model are weighed; see "Quality floor".
 3. **Decision points, not every request:** the start of each user turn (where Jev itself decides), evidence from the M2 stuck detector that the current setting isn't enough, and mid-task steps (see below). On evidence, Jev is asked again, with a factual progress note in its session state. The probabilities are conditioned on the current setting having failed, and only settings at least as strong in both model and effort are considered. Stuck with nothing stronger, the task stops (`policy_stop:no_stronger_setting`). A jump is kept for the task revision. Each decision is journaled with every candidate's numbers.
 4. **Configurable:** models, capability order, efforts (including xhigh and max), what each effort change rewrites, output factors, horizon, recovery, hysteresis and downgrade rules are in `configs/modelpilot-policy.json`. Prices come from the rate files. `policy_actions.MODELS` and each model's efforts are read from the same config.
 
@@ -108,9 +110,7 @@ Replayed over the seven ModelPilot runs (`runs/policy-replay-jev-gate-20261006.j
 
 What it adds, estimated at $0 (`runs/agent-test-steps-20261006.json`, 215 recorded trials of eight runs, simulated request by request): agents tested through Bash in 206; such a step would fire in 77 trials (80 steps), 66 of them in a trial's last two requests, where the agent's tests turn green just before it finishes. So in single-turn tasks the signal arrives at the finish: too late to move the work, and at today's weight the gate keeps every such step a stay without a Jev call. Its use is the review point at the finish (item 5) and long sessions (item 6).
 
-**Break-even damage instead of an assumed price (October 6, plan item 7, offline).** The gate prices a failure as its wasted run plus a redo, as if someone noticed at once; what an unnoticed miss costs beyond that (a later, dearer fix and the damage meanwhile) has no measured price. So instead of assuming one, every decision at a calibrated point (turn starts and steps) now carries `break_even`: for each stronger setting the point can reach, weighed as if Jev had named it, the damage per unnoticed miss above which moving there would beat staying, on the measured pass rates alone (`jev_weight` 0, its maximum likelihood, so the figure doesn't depend on whether Jev was asked). Damage counts once, on the decision's own run: each setting's expected cost gains damage × (1 − P_ok), so a move pays when damage > (its expected cost − staying's + the hysteresis) / (its P_ok − staying's). `cheapest` is the lowest such figure; none where no stronger setting has fewer measured misses. It changes no decision: damage is priced at 0 everywhere (`_decide`'s `damage_usd`, set only by the tests, which check that a damage 1% under each figure stays and 1% over moves there). Journaled with each decision, and replayed by `policy_replay` (`summary.break_even`).
-
-Replayed over the low-start run (`runs/policy-replay-break-even-20261006.json`, `bench-20261006-134508 --arm modelpilot`, all 36 decisions the same): at every one of the 28 turn starts the cheapest protection is Opus 5.5 medium, paying only if an unnoticed miss would cost more than $2.41–2.43 beyond its redo (6.45 points fewer measured misses for about $0.14 more forecast cost); the figure barely varies by task, because the forecast depends on the task only through its first request's size. At the 8 steps no move can pay: inside a turn the effort holds at low, and Opus 5.5 low has no measured rate of its own (it takes Sonnet 5.5 low's). Sonnet 5.5 medium, 0.4 points fewer misses, pays only above about $5.7.
+**Break-even damage (October 6, plan item 7; retired October 8).** Every decision at a calibrated point carried `break_even`: the damage per unnoticed miss above which a stronger setting would pay, on the measured pass rates alone. Over `bench-20261006-134508` (`runs/policy-replay-break-even-20261006.json`) it was $2.41–2.43 for Opus 5.5 medium at every turn start. It changed no decision. The quality floor (below) replaces it, so `switch_policy.break_even`, `_decide`'s `damage_usd` and `policy_replay`'s `summary.break_even` are removed; journals recorded before October 8 still carry it.
 
 Haiku 4.5 is not a candidate: Claude Code's mid-history system messages can't be kept on it. Jev's probability for Haiku still counts toward the stronger models being enough. The effort output factors, horizon, recovery fraction, hysteresis and downgrade multiplier are starting guesses, which the 4a tuning run calibrates. Every Sonnet 5.5 ↔ Opus 5.5 move is verified across thinking history (`runs/thinking-probe-sonnet-5-5-20260928-133426`). The rules below (R1–R6) are the September 22 design. R2's ladder is replaced by the above. R3's cost-motivated switches are now part of the gate. R4, the cache-state model beyond cache warmth, and worker drafts are still not built.
 
@@ -138,6 +138,43 @@ Randomization makes the two groups comparable. Failures are rare (about 9%), so 
 **Checked offline ($0, real client 2.1.284, fixture upstream):**
 - A trial drawn to switch at request 2 runs request 1 on Sonnet 5.5 low and every later request on Opus 5.5 low. The move is confirmed, journaled with a positive predicted rewrite, tokens match, and the trial is eligible.
 - A trial drawn not to switch stays on low concise throughout.
+
+### Quality floor: no worse than the user's own model (October 8, offline)
+
+User decision, October 8. A missed bug can cost anything from a quick re-prompt to an incident that reaches other people, so no single price fits. Instead, ModelPilot promises quality no worse than the model the user would have used, and the code decides how much a change matters. The code part is planned, not built. This replaces the break-even price and drops plan item 5 (spec-written tests). Those tests catch misses the user's own model would also make, which is beyond the promise. Protection means choosing the model, not adding checks.
+
+**Rule** (config `quality_floor`, `switch_policy.floor_allows`; off by default):
+- **Baseline.** The user's own setting, `quality_floor.baseline`. Any setting at least as strong may always run.
+- **Weaker settings need evidence.** A miss is a tuning task with any complete trial that failed strict grading. The rule assumes a stronger setting never misses more:
+  - A task counts against a candidate only when every measured setting the candidate is at least as strong as missed it.
+  - A task counts for the baseline when any measured setting at least as strong as the baseline missed it. If no such setting is measured, the baseline is taken to miss nothing.
+  - The candidate may run when it adds no miss over at least `min_shared_tasks` (20, a guess) shared tasks.
+- **Moves up are never blocked.** From an allowed setting, a move to anything at least as strong is weighed as before, so escalations, rescues and redos keep working.
+- **Below the floor, move without Jev.** At a turn start or a step, a current setting below the floor moves to the allowed setting with the lowest expected cost on the measured pass rates (reason `below_quality_floor`), and the gate skips Jev. Inside a turn the effort holds; if no allowed setting is reachable, it stays (`quality_floor_unreachable`).
+- **Otherwise unchanged.** Among allowed settings the expected-cost rule decides as before. Recovery still prices a redo, because a redo is real spend. No miss carries a damage price.
+
+**Evidence** (`runs/quality-floor-outcomes-20261008.py` → `.json`, $0). These are the per-task outcomes of the calibration's own trials; `load()` checks that they add up to `calibration.outcomes`. On the same 29 tasks:
+- Sonnet 5.5 low concise missed `parse-decimal-grouping` and `tomli-decode-error-attrs`.
+- Sonnet 5.5 medium missed those two and `nx-ismags-monomorphism`.
+- Opus 5.5 medium missed none.
+
+**Arms**, each compared in the final run with the fixed arm at its baseline:
+
+| Arm | Baseline | Start | Allowed on today's evidence |
+| --- | --- | --- | --- |
+| `modelpilot-for-sonnet` | Sonnet 5.5 medium (`sonnet-5.5`) | low concise | Every setting, so it decides exactly as `modelpilot` does (a test checks this over a grid of decision points) |
+| `modelpilot-for-opus` | Opus 5.5 medium (`opus-5.5`) | Opus 5.5 medium with the concise prompt | Opus 5.5 at medium or above |
+
+Replayed over `bench-20261006-134508` ($0), neither arm changes any of the 36 recorded decisions. `modelpilot-for-opus` stays at Opus 5.5 medium at every point.
+
+**What it means now:**
+- **A Sonnet 5.5 medium user:** the saving is low concise's, about 20% at the same strict passes on the tuning tasks.
+- **An Opus 5.5 user:** ModelPilot runs Opus 5.5 medium. The saving can come only from three places: the concise prompt, the cache levers, or per-task evidence that some tasks are safe on Sonnet (plan items 8 and 10).
+- **The concise prompt on Opus:** its effect on Opus 5.5's strict passes is unmeasured. The floor assumes it changes none, as measured on Sonnet 5.5 medium.
+
+**Not built yet:**
+- **Blast radius at the first edit.** `modelpilot/exposure.py` measures public API, callers and the tests that reach a change, but only after the fact. It has to run inside the governor when the agent first edits, starting with the static part. On a wide-reach change it would require stronger evidence before the work stays on a cheaper setting.
+- **Per-task estimates (item 10).** These would let the floor judge a class of tasks instead of all tasks pooled.
 
 ## Why a policy is needed
 
@@ -234,13 +271,16 @@ Opus 5.5 replaced Opus 5 as the top rung on September 26 (user decision). It is 
 | switch-policy parameters | `configs/modelpilot-policy.json`: measured or fitted (task shape, effort factors for low/high/xhigh, model factors, calibration outcomes, `jev_weight` 0.03, recovery fraction 1.0, bytes per token); still guesses: the max effort factor, hysteresis $0.02, downgrade multiplier 2, step spacing | tuning split |
 | `T` excerpt threshold | 8 KB | tuning split |
 | stuck threshold | M2 heuristic-v1 (score ≥ 3, window 6) | fixed |
+| quality floor | off in `modelpilot`; baseline per arm (Sonnet 5.5 medium, Opus 5.5 medium); `min_shared_tasks` 20 (a guess) | user decision (October 8); evidence from the tuning split |
 
 All parameters are frozen, with a recorded policy version and hash, before the final split runs. Only the tuning split is used for tuning (see `docs/m6-benchmark-plan.md`).
 
 ## What would count against it
 
 The policy fails if either of these holds on the final split:
-- it isn't cheaper per passed task than the best fixed arm at a pass rate that isn't significantly lower;
+- against the user's own model, it isn't cheaper per passed task at a pass rate that isn't significantly lower. Since October 8 (user decision), that model is the fixed arm at each floor's baseline: `sonnet-5.5` for `modelpilot-for-sonnet` and `opus-5.5` for `modelpilot-for-opus`. Until then the comparison was with the best fixed arm, low concise. That is the arm's own cheapest setting, so on single prompts ModelPilot could at best tie it;
 - it loses to compat Jev on the same measure.
+
+Low concise stays in the final run as a reference: it shows how much of a saving the cheap setting gives on its own and how much ModelPilot adds.
 
 That result gets reported as it is. Every rule above can be switched off individually, so the tuning split can also show which lever, if any, carries the savings.

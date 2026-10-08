@@ -208,6 +208,18 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertEqual((decision['gate']['can_change'], decision['gate']['reason']), (False, 'every_answer_stays'))
         self.assertGreater(decision['forecast_usd'], 0)  # a later step still compares spend against it
 
+    def test_below_the_quality_floor_it_moves_without_asking_jev(self):
+        cfg = switch_policy.with_overrides(switch_policy.load(),
+                                           {'quality_floor': {'enabled': True, 'baseline': f'{O}/medium'}})
+        self.start(config=cfg)  # the start, Sonnet 5.5 medium, misses tasks Opus 5.5 medium doesn't
+        self.assertEqual(self.post()[0], 200)
+        self.assertEqual(self.advisor.calls, [])
+        decision, = self.decisions()
+        self.assertEqual((decision['action'], decision['target'], decision['reason'], decision['gate']['reason']),
+                         ('jump', [O, 'medium'], 'below_quality_floor', 'below_quality_floor'))
+        self.assertEqual(decision['quality_floor']['allowed'], [f'{O}/{e}' for e in ('medium', 'high', 'xhigh', 'max')])
+        self.assertEqual(self.sent(), [(O, 'medium')])
+
     def test_with_the_gate_off_jev_is_asked_at_every_point(self):
         cfg = switch_policy.load()
         cfg['jev_gate']['enabled'] = False
