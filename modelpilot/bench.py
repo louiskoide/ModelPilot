@@ -516,7 +516,8 @@ class Trial:
         if adapter is not None:
             arm = dict(arm, model=adapter.model)
         self.task, self.arm = task, arm
-        self.dir = Path(trial_dir)
+        # Absolute: the client resolves its home, tmp and config paths against the workspace it runs in.
+        self.dir = Path(trial_dir).absolute()
         self.cli, self.api_key, self.upstream, self.rates = cli, key, upstream, price_table
         self.python = python or bench_tasks.interpreter()
         self.limits = {'max_turns': max_turns, 'budget_usd': budget_usd, 'timeout_s': timeout, 'tools': TOOLS}
