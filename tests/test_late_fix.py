@@ -2,6 +2,7 @@
 start, the repair graded strictly, and the run's stop rules. $0: nothing reaches a provider."""
 import http.client
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -442,7 +443,12 @@ class OfflineLateFixTests(SyntheticMisses):
                                {'tool': 'Write', 'input': {'file_path': str(work/'pkg'/'__init__.py'),
                                                            'content': synthetic.FIXED}},
                                {'text': 'Fixed.'}]
-            trial = late_fix.LateFixTrial(found, text, self.task, 'sonnet-5', self.root/'late'/'repairs'/found['id'],
+            # A relative trial directory, as `late_fix run runs/late-fix-…` passes: the client's home, tmp and config
+            # paths must still land beside the workspace, not inside it (they did once, run late-fix-20261007-160727).
+            cwd = os.getcwd()
+            os.chdir(self.root)
+            self.addCleanup(os.chdir, cwd)
+            trial = late_fix.LateFixTrial(found, text, self.task, 'sonnet-5', Path('late')/'repairs'/found['id'],
                                           cli, 'sk-ant-offline-not-a-key', f'http://127.0.0.1:{upstream.server_port}',
                                           RATES, python=sys.executable, max_turns=8, client_version=version,
                                           expected_hidden_passed=2)
@@ -459,6 +465,7 @@ class OfflineLateFixTests(SyntheticMisses):
         self.assertTrue(record['passed'], record['grade'])
         self.assertTrue(record['late_fix']['reported_test_fixed'])
         self.assertTrue(record['accounting']['tokens_match'], record['accounting'])
+        self.assertEqual(record['late_fix']['repair_scope']['source_files'], 1, record['late_fix']['repair_scope'])
         first = next(json.loads(b) for b in upstream.bodies if json.loads(b).get('tools'))
         sent = ''.join(b.get('text', '') for m in first['messages'] for b in m['content'] if isinstance(b, dict))
         self.assertIn(late_fix.PREAMBLE + text, sent)  # the report reached the model whole

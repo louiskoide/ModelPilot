@@ -2,6 +2,17 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 7, 2026: plan item 7, live: a late fix repairs every miss that got a session, at a quarter of the assumed redo
+
+The user's go. `runs/late-fix-20261007-160727`, code `5457bf6`: 29 sessions on `sonnet-5.5-low-concise` with the subscription token, seed 0, the benchmark's limits, no retries. $1.69 known spend as sent, API-key equivalent (estimate was $2.52). 15 minutes of sessions and grading after a 14-minute preflight. Details: `docs/m6-benchmark-plan.md`, "Ran: the late fix, live".
+
+- **Repaired strictly 28/29:** parse 8/8, tomli 17/17, ISMAGS 3/4. The ISMAGS miss left unrepaired got a 502 on its second request; with no retries it counts as not repaired under the benchmark's rule, so 28/28 of the sessions that got an attempt. Every repair also fixed the reported test. Each ISMAGS repair passes all the hidden tests, though its report named one of the 20–28 its miss failed.
+- **Cost:** mean $0.056 a repair (median $0.044, $0.038–0.095; cold-equivalent), against the gate's $0.25 Opus 5.5 redo and $0.113 for the miss's own session (median ratio 0.53). tomli $0.043, ISMAGS $0.073, parse $0.076; parse's repair costs about what its task did. Repairs change 2–23 lines (median 10.5) in one source file (`runs/late-fix-analysis-20261007.json`).
+- **Reading.** A lower bound: the report is precise and the culprit is the latest commit. The fix part of a late miss is small, so what a protection is worth is nearly all damage, still unpriced. Item 5's 29-task run (about $3.90) pays only if a miss does more than about $4–8 of damage. That figure is the user's call. No decision changes: the gate already never leaves low concise on these tasks.
+- **Two earlier attempts stopped at $0 on their first request, kept.** `late-fix-20261007-085304`: the subscription's weekly limit (429). `late-fix-20261007-160244`: `401 OAuth access token is invalid` on a second account. Each used up its prepared directory.
+- **Fixed: relative trial directories.** `late_fix run runs/…` kept the path relative, so the client resolved its home, tmp and config against the workspace it ran in. The agent's git status context showed `?? runs/`, and each `agent.diff` (so `repair_scope` in `summary.json`) counts the client's files. Isolation held: the client's start-up state matched a benchmark trial's, and no agent touched the directory. `bench.Trial` now makes its directory absolute (every caller; earlier `bench` runs used an absolute path, 0 of 98 diffs affected). The real-client late-fix test now passes a relative directory and checks the repair's scope (it failed before the fix: 4 files, not 1).
+- Tests: 667 offline tests pass on Python 3.12 with the pinned 2.1.284 client first on PATH (`runs/late-fix-live-regression-py312.log`).
+
 ## October 7, 2026: `main` (PR #37, plan item 7) merged into `long-session`
 
 $0, no code changed beyond the merge. Conflicts only in `CLAUDE.md` and this file. `CLAUDE.md` keeps this branch's items 6, 8, 9 and 11 and `main`'s item 7, and names both `long_session` and `late_fix`. It comes to 8,136 bytes, so no trim was needed. Here, both branches' entries are kept, newest first by commit.
