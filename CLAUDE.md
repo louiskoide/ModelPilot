@@ -75,9 +75,9 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 
 Built offline first; any live run needs the user's approval. 1–4 done October 6 (`docs/changelog.md`); 4 found no pre-run miss signal.
 
-5. Spec-written tests: the first probe caught 1 of 3 (parse), $0.13 a task; a 29-task run waits on 7.
+5. Spec-written tests: the probe caught 1 of 3 (parse), $0.13 a task; a 29-task run ($3.90) pays above about $4–8 of damage a miss: user's call.
 6. Long sessions: built offline; 1h TTL probe and sequence runs await approval.
-7. Price each miss: its late fix (repair from a host-written bug report) plus damage, unknown until real incidents. Exposure, break-even, late-fix harness done; its live run (about $2.5) next.
+7. Price each miss: a late fix from a host-written bug report repaired 28/28, $0.056 each on low concise (`late-fix-analysis-20261007.json`; lower bound). Damage: unknown until real incidents.
 8. 30 labelling tasks: built offline; runs await approval.
 9. Caveman: parked (user decision); its $0 pass found about 1% at most, all lossy.
 10. ModelPilot's own predictor, only if 8 shows misses predictable; never edit Jev.
