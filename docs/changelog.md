@@ -2,6 +2,28 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 8, 2026: the quality floor replaces the price of a miss (offline)
+
+$0, user decision. A missed bug can cost anything from a re-prompt to an incident, so no single damage figure is assumed. ModelPilot now promises quality no worse than the user's own model. The code will later say how much a change matters; that part is planned. Details: `docs/m6-modelpilot-policy.md`, "Quality floor".
+
+- **The rule** (`quality_floor`, `switch_policy.floor_allows`; off by default). A setting may run when it is at least as strong as the baseline, or when, over at least 20 shared tuning tasks, it adds no miss the baseline doesn't make. The rule assumes a stronger setting never misses more, and bounds each side by the measured settings below or above it.
+  - Moves up from an allowed setting are always weighed.
+  - Below the floor, a turn start or step moves to the cheapest allowed setting on measured pass rates, without Jev (the gate skips it). With nothing reachable it stays (`quality_floor_unreachable`).
+  - Otherwise the expected-cost rule is unchanged: a redo is still priced, damage never is.
+- **Evidence** (`runs/quality-floor-outcomes-20261008.py` → `.json`). Per-task outcomes of the calibration's own trials, now in the config; `load()` checks they add up to `calibration.outcomes`. Over the same 29 tasks, low concise missed parse and tomli, Sonnet 5.5 medium those two and ISMAGS, Opus 5.5 medium none.
+- **Arms.**
+  - `modelpilot-for-sonnet`: baseline Sonnet 5.5 medium, start low concise. Every setting qualifies, so it decides exactly as `modelpilot` does; a test checks this over a grid of decision points.
+  - `modelpilot-for-opus`: baseline Opus 5.5 medium, start Opus 5.5 medium with the concise prompt. Only Opus 5.5 at medium or above qualifies.
+  - Replayed over `bench-20261006-134508`, neither changes a decision. The final run compares each arm with its baseline's fixed arm, with low concise as a reference.
+- **Removed:** `switch_policy.break_even`, `_decide`'s `damage_usd` and `policy_replay`'s `summary.break_even`. Journals recorded before today keep the field. Plan item 5 (spec-written tests) is dropped; item 7's figures stay on record.
+- **Also:**
+  - `ActivePolicy` keeps a floor move's reason when the gate skipped Jev. Before, it wrote `jev_cannot_change` over every gated decision.
+  - The arm's parameters record the floor, and `bench` prints it in its plan.
+- **What it means.** Against a Sonnet 5.5 medium user, the saving is low concise's: about 20% on the tuning tasks at the same strict passes. Against an Opus 5.5 user, ModelPilot runs Opus 5.5 medium until per-task evidence (items 8 and 10) or the cache levers (item 6) find a saving. The concise prompt's effect on Opus's strict passes is unmeasured.
+- **Item 8 settled** (user decisions): the planned low concise ×3 and Opus 5.5 ×2, plus `modelpilot` ×1 (for Jev's features) and `sonnet-5.5` ×1. The runs will go on another computer. Their scripts, `runs/item8-labelling-20261008.sh` and `runs/ttl-1h-long-20261008.sh` (the one-hour probe), aren't committed. A plan-only check passed ($0, a 7-minute preflight). Labels must drop `transport_error` trials, which count as complete.
+- **Next:** the blast radius at the agent's first edit (`exposure`'s static part, inside the governor).
+- **Tests:** 673 offline tests pass on Python 3.12 with the pinned 2.1.284 client first on PATH (`runs/quality-floor-regression-py312.log`). New: `QualityFloorTests` (8) in `tests/test_switch_policy.py`, and a floor move without Jev in `tests/test_active_policy.py`.
+
 ## October 7, 2026: plan item 7, live: a late fix repairs every miss that got a session, at a quarter of the assumed redo
 
 The user's go. `runs/late-fix-20261007-160727`, code `5457bf6`: 29 sessions on `sonnet-5.5-low-concise` with the subscription token, seed 0, the benchmark's limits, no retries. $1.69 known spend as sent, API-key equivalent (estimate was $2.52). 15 minutes of sessions and grading after a 14-minute preflight. Details: `docs/m6-benchmark-plan.md`, "Ran: the late fix, live".

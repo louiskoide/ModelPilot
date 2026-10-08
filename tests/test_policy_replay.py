@@ -76,7 +76,7 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(summary['gate']['skipped'], {'turn_start': 2, 'step': 1})
         self.assertEqual((summary['gate']['asked'], summary['gate']['skipped_but_moved']), ({}, 0))
         self.assertTrue(jumped['replayed']['gate']['skip'])
-        self.assertGreater(jumped['replayed']['break_even']['cheapest']['damage_usd'], 0)  # plan item 7
+        self.assertIsNone(jumped['replayed']['quality_floor'])  # off in the shipped config
 
     def test_an_arms_start_replaces_the_recorded_one_until_the_path_diverges(self):
         stay = dict(self.jump, action='stay', target=[S, 'medium'])

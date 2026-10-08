@@ -41,6 +41,10 @@ with that of each direct move:
   the step causes it lists whatever its price (measurement only). With handoff_note on, a model move
   whose request holds earlier work also pays for the note the model being left writes; its benefit isn't
   priced.
+- quality floor (config 'quality_floor', off by default; user decision, October 8): the user's own model is the
+  quality bar, and a miss is never given a price. A setting may run when it is at least as strong as that baseline,
+  or when, over enough tuning tasks, it adds no miss the baseline doesn't make (floor_allows). A move up from an
+  allowed setting is always allowed; a setting below the floor moves to the cheapest allowed one without Jev.
 
 A move goes straight to its target and never climbs. It must beat staying by the hysteresis, scaled
 by how plausible the current setting is: the margin protects a setting that may well be enough from
@@ -84,6 +88,7 @@ def load(path=CONFIG):
                        for o in cal['outcomes'].values())):
         raise ValueError('calibration: enabled is a boolean, jev_weight in [0, 1], applies_at among turn_start and step, outcomes '
                          "'model/effort' -> passed <= trials (integers, trials >= 1)")
+    _check_floor(cfg)
     if not set(cfg['decision_points']) <= set(TRIGGERS):
         raise ValueError(f'decision_points must be among {TRIGGERS}')
     if type(gate(cfg)['enabled']) is not bool:
@@ -151,7 +156,66 @@ def with_overrides(cfg, overrides):
     merge(out, overrides or {}, '')
     _check_delegation(out)
     _check_exploration(out)
+    _check_floor(out)
     return out
+
+
+def quality_floor(cfg):
+    """The quality floor settings; a config without them has the floor off."""
+    return cfg.get('quality_floor') or {'enabled': False}
+
+
+def _check_floor(cfg):
+    floor = quality_floor(cfg)
+    if 'outcomes' not in floor:
+        if floor['enabled']:
+            raise ValueError('quality_floor: enabled needs per-task outcomes')
+        return
+    pooled = cfg['calibration']['outcomes']
+    model, _, effort = str(floor.get('baseline')).partition('/')
+    ok = (type(floor['enabled']) is bool and model in cfg['models'] and effort in cfg['models'][model]['efforts']
+          and _count(floor.get('min_shared_tasks'), 1) and isinstance(floor['outcomes'], dict)
+          and set(floor['outcomes']) == set(pooled))
+    for label, tasks in floor['outcomes'].items() if ok else ():
+        pairs = list(tasks.values()) if isinstance(tasks, dict) else [None]
+        ok = ok and all(isinstance(v, list) and len(v) == 2 and _count(v[1], 1) and _count(v[0], 0) and v[0] <= v[1]
+                        for v in pairs) and [sum(v[0] for v in pairs), sum(v[1] for v in pairs)] == [
+                            pooled[label]['passed'], pooled[label]['trials']]
+    if not ok:
+        raise ValueError("quality_floor: enabled is a boolean, baseline a 'model/effort' the config knows, min_shared_tasks "
+                         ">= 1, and outcomes {task: [passed, trials]} for exactly the calibration's settings, adding up to "
+                         'its outcomes')
+
+
+def floor_allows(cfg, setting):
+    """Whether the quality floor lets setting run, and why. A setting at least as strong as the baseline may. Otherwise,
+    assuming a stronger setting never misses more: a task counts against setting only when every measured setting it is
+    at least as strong as missed it (an upper bound on its misses), and for the baseline when any measured setting at
+    least as strong as the baseline did (a lower bound; none such, and the baseline is taken to miss nothing). The
+    setting may run when, over at least min_shared_tasks tasks measured on both sides, it adds no miss. A miss: any
+    complete trial of the task that failed strict grading."""
+    floor = quality_floor(cfg)
+    setting, base = tuple(setting), tuple(floor['baseline'].split('/'))
+    if at_least(cfg, setting, base):
+        return {'allowed': True, 'reason': 'at_least_baseline'}
+    outcomes = {tuple(k.split('/')): v for k, v in floor['outcomes'].items()}
+    below = [m for m in outcomes if at_least(cfg, setting, m)]
+    above = [m for m in outcomes if at_least(cfg, m, base)]
+    if not below:
+        return {'allowed': False, 'reason': 'unmeasured'}
+    tasks = set().union(*(outcomes[m] for m in below))
+    if above:
+        tasks &= set().union(*(outcomes[m] for m in above))
+    out = {'evidence': [_label(m) for m in below], 'baseline_evidence': [_label(m) for m in above],
+           'shared_tasks': len(tasks)}
+    if len(tasks) < floor['min_shared_tasks']:
+        return dict(out, allowed=False, reason='too_few_tasks')
+
+    def missed(m, task):
+        return task in outcomes[m] and outcomes[m][task][0] < outcomes[m][task][1]
+    extra = sorted(t for t in tasks if all(missed(m, t) for m in below if t in outcomes[m])
+                   and not any(missed(m, t) for m in above))
+    return dict(out, allowed=not extra, reason='extra_misses' if extra else 'no_extra_misses', extra_misses=extra)
 
 
 def exploration(cfg):
@@ -406,48 +470,41 @@ def _consult_target(cfg, current, model, effort, forced=False):
 def decide(cfg, rates, advice, current, prof, trigger):
     """Stay, jump straight to a target, or stop (stuck with nothing stronger). Returns the decision with every
     candidate's numbers, so the journal shows why, forecast_usd: run() on the setting it leaves the task on,
-    which a later step compares measured spend against, and break_even (see break_even), which changes nothing."""
+    which a later step compares measured spend against, and with the quality floor on, the floor's verdict on the
+    current setting and every setting it allows."""
     decision = _decide(cfg, rates, advice, current, prof, trigger)
     decision['forecast_usd'] = run_cost(cfg, rates, tuple(decision['target']), prof)
-    decision['break_even'] = break_even(cfg, rates, current, prof, trigger)
+    floor = quality_floor(cfg)
+    if floor['enabled']:
+        decision['quality_floor'] = {'baseline': floor['baseline'], 'current': floor_allows(cfg, current),
+                                     'allowed': [_label(c) for c in settings(cfg) if floor_allows(cfg, c)['allowed']]}
     return decision
 
 
-def break_even(cfg, rates, current, prof, trigger):
-    """Plan item 7: what an unnoticed miss would have to cost, beyond the redo already priced, for a move to a
-    stronger setting to pay here. A miss's damage has no measured price, so the gate shows this instead of assuming
-    one; nothing here changes a decision.
+def _below_floor(cfg, current, trigger):
+    """The current setting is below the quality floor at a point that can act on it (stuck evidence only moves up)."""
+    return quality_floor(cfg)['enabled'] and trigger != 'stuck_evidence' and not floor_allows(cfg, current)['allowed']
 
-    Each stronger setting the decision point can reach is weighed as if Jev had named it, on the measured pass rates
-    alone (jev_weight 0, its maximum likelihood), so the figure doesn't depend on whether Jev was asked. Damage counts
-    once, on the decision's own run: every setting's expected cost gains damage x (1 - P_ok), so a move pays when
-    damage > (its expected cost - staying's + the hysteresis) / (its P_ok - staying's). damage_usd 0: it pays without
-    any; None: no fewer misses measured. None at an uncalibrated point (Jev's estimate is the whole of P_ok there)."""
-    cal = cfg['calibration']
-    if not (cal['enabled'] and trigger in cal['applies_at']):
-        return None
-    measured = dict(cfg, calibration=dict(cal, jev_weight=0.0))
-    current = tuple(current)
-    effort_fixed = trigger not in cfg['effort_changes_at']
-    moves = []
-    for c in settings(cfg):
-        if c == current or not at_least(cfg, c, current) or (effort_fixed and c[1] != current[1]):
-            continue
+
+def _floor_move(cfg, rates, current, prof, trigger, runnable, out):
+    """The current setting is below the quality floor: move to the allowed setting with the lowest expected cost on the
+    measured pass rates alone (jev_weight 0, its maximum likelihood), since the floor, not Jev, requires the move. Each
+    allowed setting is weighed as if Jev had named it, through the same rule with the floor off. With none reachable
+    (inside a turn only the model moves, at the turn's effort), it stays and says so."""
+    allowed = {_label(c): c for c in runnable if c != current and floor_allows(cfg, c)['allowed']}
+    if not allowed:
+        return dict(out, action='stay', reason='quality_floor_unreachable')
+    plain = dict(cfg, quality_floor=dict(quality_floor(cfg), enabled=False),
+                 calibration=dict(cfg['calibration'], jev_weight=0.0))
+    rows = []
+    for label, c in allowed.items():
         named = {'model': {'choice': c[0], 'confidence': 1.0, 'probabilities': {c[0]: 1.0}}}
         if c[1] is not None:
             named['effort'] = {'choice': c[1], 'confidence': 1.0, 'probabilities': {c[1]: 1.0}}
-        rows = _decide(measured, rates, named, current, prof, trigger)['candidates']
-        stay, move = rows[0], next(r for r in rows if r['setting'] == _label(c))
-        if stay['p_measured'] is None or move['p_measured'] is None:
-            moves.append({'setting': _label(c), 'unmeasured': True, 'damage_usd': None})
-            continue
-        fewer = move['p_ok'] - stay['p_ok']
-        extra = move['expected_usd'] - stay['expected_usd'] + cfg['hysteresis_usd'] * stay['p_ok']
-        damage = 0.0 if extra <= 0 else extra / fewer if fewer > 0 else None
-        moves.append({'setting': _label(c), 'fewer_misses': fewer, 'extra_usd': extra, 'damage_usd': damage})
-    priced = [m for m in moves if m['damage_usd'] is not None]
-    return {'basis': 'measured_pass_rates', 'moves': moves,
-            'cheapest': min(priced, key=lambda m: m['damage_usd']) if priced else None}
+        rows += [r for r in _decide(plain, rates, named, current, prof, trigger)['candidates'] if r['setting'] == label]
+    best = min(rows, key=lambda r: r['expected_usd'])
+    return dict(out, action='jump', target=list(allowed[best['setting']]), reason='below_quality_floor',
+                candidates=rows)
 
 
 def answer_shapes(cfg):
@@ -471,8 +528,11 @@ def jev_gate(cfg, rates, current, prof, trigger):
     every answer shape, the decision stays whatever Jev says. The bound ignores a downgrade's extra hysteresis and its
     confidence check, so the gate errs to asking. Returns {'can_change': bool, 'reason': ...}: True without
     calibration at this point (Jev's estimate is then the whole of P_ok), where a consult is possible (its target is
-    Jev's setting), or where the bound doesn't hold (wasted_fraction below 1)."""
+    Jev's setting), or where the bound doesn't hold (wasted_fraction below 1). False when the current setting is below
+    the quality floor: the floor's move doesn't use Jev's answer."""
     cal, consult = cfg['calibration'], delegation(cfg, 'consult')
+    if _below_floor(cfg, current, trigger):
+        return {'can_change': False, 'reason': 'below_quality_floor'}
     if not (cal['enabled'] and trigger in cal['applies_at']):
         return {'can_change': True, 'reason': 'uncalibrated'}
     if consult['enabled'] and trigger in consult['at']:
@@ -492,10 +552,8 @@ def jev_gate(cfg, rates, current, prof, trigger):
     return {'can_change': False, 'reason': 'every_answer_stays', 'shapes': shapes, 'closest_usd': closest}
 
 
-def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None, damage_usd=0.0):
-    """jev_estimate: Jev's estimate for every setting, in place of its probabilities (jev_gate's bounds). damage_usd:
-    a price per unnoticed miss of the decision's own run, beyond its redo; 0 everywhere until one is measured (plan
-    item 7), so only the tests set it, to check break_even against the decisions it describes."""
+def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None):
+    """jev_estimate: Jev's estimate for every setting, in place of its probabilities (jev_gate's bounds)."""
     if trigger not in TRIGGERS:
         raise ValueError(f'Unknown decision point {trigger!r}')
     current = tuple(current)
@@ -506,6 +564,10 @@ def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None, damag
     effort_fixed = trigger not in cfg['effort_changes_at']
     if effort_fixed:
         runnable = [c for c in runnable if c[1] == current[1] or c == current]
+    if _below_floor(cfg, current, trigger):
+        return _floor_move(cfg, rates, current, prof, trigger, runnable, out)
+    if quality_floor(cfg)['enabled']:  # a move up from an allowed setting is always allowed; others must meet the floor
+        runnable = [c for c in runnable if at_least(cfg, c, current) or floor_allows(cfg, c)['allowed']]
     probabilities = sufficiency(cfg, advice) if advice else None
     if probabilities is None:
         return dict(out, action='stay', reason='advice_unavailable')
@@ -597,7 +659,7 @@ def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None, damag
         p, switch = probability(c), switch_cost(cfg, rates, current, c, prof, reuse=True)
         note = note_cost(cfg, rates, current, c, prof)  # the handoff note the model being left writes, if on
         row = {'setting': _label(c), 'p_ok': p, 'switch_usd': switch + note, 'run_usd': run, 'recover_usd': recover,
-               'expected_usd': switch + note + p * run + (1 - p) * (recover + damage_usd), '_setting': c}
+               'expected_usd': switch + note + p * run + (1 - p) * recover, '_setting': c}
         if note:
             row['note_usd'] = note
         if calibrated:
@@ -614,7 +676,7 @@ def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None, damag
         cost = consult_cost(cfg, rates, current, adviser, prof)
         rows.append({'setting': 'consult:' + _label(adviser), 'p_ok': p, 'switch_usd': 0.0, 'consult_usd': cost,
                      'run_usd': stay['run_usd'], 'recover_usd': stay['recover_usd'],
-                     'expected_usd': cost + p * stay['run_usd'] + (1 - p) * (stay['recover_usd'] + damage_usd),
+                     'expected_usd': cost + p * stay['run_usd'] + (1 - p) * stay['recover_usd'],
                      '_setting': current})
     out['candidates'] = [{k: v for k, v in r.items() if k != '_setting'} for r in rows]
     if forced and adviser:  # measurement only: consult.force names this step's cause
