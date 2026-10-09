@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Updated October 8, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
+Updated October 9, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
 
 ## Objective
 
@@ -84,4 +84,4 @@ Built offline first; any live run needs the user's approval. 1–4 done October 
 11. 4b held (user decision); on record its trial-count rule gives n=1.
 12. Governor: live evidence for turn-end delivery and observed rebuilds; dry-run meanwhile.
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
-14. Haiku 5.5: built, off; your call on its outcomes, then probes.
+14. Haiku 5.5: built, off; outcomes in (Haiku only); probes next.

@@ -331,8 +331,11 @@ class CalibrationTests(unittest.TestCase):
         cal = self.cfg['calibration']
         self.assertTrue(cal['enabled'])
         # Strict passes (hidden grader and edge suite, October 4) over full sets of the 29 tuning tasks (October 6);
-        # Sonnet 5.5 low is low concise, the ModelPilot arms' start.
-        self.assertEqual(cal['outcomes'], {f'{S}/low': {'passed': 27, 'trials': 29},
+        # Sonnet 5.5 low is low concise, the ModelPilot arms' start. Haiku 5.5's (October 9) bound only its own settings
+        # (tests/test_haiku_5_5.py).
+        self.assertEqual(cal['outcomes'], {f'{H}/low': {'passed': 25, 'trials': 29},
+                                           f'{H}/medium': {'passed': 56, 'trials': 58},
+                                           f'{S}/low': {'passed': 27, 'trials': 29},
                                            f'{S}/medium': {'passed': 48, 'trials': 52},
                                            f'{O}/medium': {'passed': 29, 'trials': 29}})
         self.assertAlmostEqual(sp.measured_ok(self.cfg, (S, 'low')), 28 / 31)
