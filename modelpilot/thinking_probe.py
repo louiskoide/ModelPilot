@@ -22,7 +22,7 @@ import time
 import urllib.error
 import uuid
 from . import cache_probe as probe
-from .cache_replication import HAIKU as H, OPUS_5_5, RATES, SONNET_5_5, SOURCE, Budget
+from .cache_replication import HAIKU_5_5 as H, OPUS_5_5, RATES, SONNET_5_5, SOURCE, Budget
 from .policy_actions import (MODELS as POLICY_MODELS, PLACEMENTS, effort_anchor, effort_message, transform_request,
                              with_effort_messages)
 from .switch_policy import content_positions
@@ -30,7 +30,8 @@ from .switch_policy import content_positions
 ROOT = Path(__file__).resolve().parents[1]
 SHAPE_FIXTURE = ROOT/'tests/fixtures/claude-2.1.284-shape.json'
 FAKE_KEY = 'sk-ant-offline-fixture-not-a-key'
-SUITES = ('smoke', 'transitions', 'top-rung', 'opus-5-5-effort', 'sonnet-5-5', 'returns', 'per-message-effort')
+SUITES = ('smoke', 'transitions', 'top-rung', 'opus-5-5-effort', 'sonnet-5-5', 'haiku-5-5', 'returns',
+          'per-message-effort')
 SHAPES = ('tool_continuation', 'new_turn')
 PREFIX_LINES, SEED_MAX_TOKENS, SWITCH_MAX_TOKENS = 260, 4096, 2048
 PUZZLE = ('Find the smallest positive integer n that leaves remainder 3 when divided by 7, remainder 4 when '
@@ -45,25 +46,33 @@ TOOL = {'name': 'record_answer', 'description': 'Record the final integer answer
 THINKING_TYPES = ('thinking', 'redacted_thinking')
 # case: (source setting, target setting). Controls continue on the same setting; they check that the
 # request shape itself is accepted, so a rejected transition can be attributed to the change.
-# "sonnet" and "opus" are the policy's tiers: Opus 5.5 since September 26 (the first transitions run used Opus 5)
-# and Sonnet 5.5 since September 28 (every run before then used Sonnet 5).
+# "sonnet", "opus" and "haiku" are the policy's tiers: Opus 5.5 since September 26 (the first transitions run used
+# Opus 5), Sonnet 5.5 since September 28 (every run before then used Sonnet 5) and Haiku 5.5 since October 8 (every
+# run before then planned Haiku 4.5, whose targets the transform refused for mid-history system messages).
 S, TOP = SONNET_5_5, OPUS_5_5
 CONTROLS = {'control/sonnet': ((S, 'medium'), (S, 'medium')), 'control/opus': ((TOP, 'medium'), (TOP, 'medium'))}
+# Planned only in suites with a case that ends on Haiku.
+HAIKU_CONTROL = {'control/haiku': ((H, 'medium'), (H, 'medium'))}
 # The ladder's rungs, correction resets to the client's setting and R3 downgrades.
 TRANSITIONS = {'effort_up/sonnet': ((S, 'medium'), (S, 'high')), 'effort_down/sonnet': ((S, 'high'), (S, 'medium')),
                'model_up': ((S, 'high'), (TOP, 'medium')), 'model_down': ((TOP, 'medium'), (S, 'medium')),
                'effort_up/opus': ((TOP, 'medium'), (TOP, 'high')),
-               'to_haiku/sonnet': ((S, 'medium'), (H, None)), 'to_haiku/opus': ((TOP, 'medium'), (H, None))}
+               'to_haiku/sonnet': ((S, 'medium'), (H, 'medium')), 'to_haiku/opus': ((TOP, 'medium'), (H, 'medium')),
+               'from_haiku': ((H, 'medium'), (S, 'medium')), 'effort_up/haiku': ((H, 'medium'), (H, 'high'))}
 TOP_RUNG = ('model_up', 'model_down', 'effort_up/opus')
 # What the Sonnet 5.5 ladder needs: its effort rung, its model rung and the Opus 5.5 correction reset (Opus 5.5
 # effort is verified). The API docs say no other model reads Sonnet 5.5's thinking blocks.
 SONNET_5_5_CASES = ('effort_up/sonnet', 'effort_down/sonnet', 'model_up', 'model_down')
-SUITE_TRANSITIONS = {'transitions': tuple(TRANSITIONS), 'top-rung': TOP_RUNG, 'sonnet-5-5': SONNET_5_5_CASES}
+# What a Haiku 5.5 tier needs before it can be a candidate: the move down from Sonnet 5.5, the move back up (a correction
+# reset or an escalation) and its own effort rung. Unlike Haiku 4.5 it takes Claude Code's mid-history system messages.
+HAIKU_5_5_CASES = ('to_haiku/sonnet', 'from_haiku', 'effort_up/haiku')
+SUITE_TRANSITIONS = {'transitions': tuple(TRANSITIONS), 'top-rung': TOP_RUNG, 'sonnet-5-5': SONNET_5_5_CASES,
+                     'haiku-5-5': HAIKU_5_5_CASES}
 # Opus 5.5 is not a policy tier: this answers the replication's open effort/cache question with real thinking.
 O55_CASES = {'o55/control_high': ((OPUS_5_5, 'high'), (OPUS_5_5, 'high')),
              'o55/high_to_low': ((OPUS_5_5, 'high'), (OPUS_5_5, 'low')),
              'o55/low_to_high': ((OPUS_5_5, 'low'), (OPUS_5_5, 'high'))}
-CONTROL_CASES = set(CONTROLS) | {'control/haiku', 'o55/control_high'}
+CONTROL_CASES = set(CONTROLS) | set(HAIKU_CONTROL) | {'o55/control_high'}
 # Returns to a warm setting (the policy's return_reuse): seed at home, `away` requests at another setting, then one
 # request back home. The API's breakpoints look back at most 20 content positions for an earlier entry, and a
 # Claude Code step adds about four, so a return reaches home's entry only if it comes soon, or if a breakpoint is
@@ -235,9 +244,7 @@ def _group(run_id, case, shape_name, repeat, source, target, client_shape, spec_
             # The proxy forwards the client's headers unchanged, so the switch keeps the source's betas.
             'betas': list(spec['anthropic_beta']), 'system_after_prompt': spec['system_after_prompt'],
             'system_after_tool_result': spec['system_after_tool_result'],
-            # The single-turn Haiku control uses the tool prompt.
-            'request': seed_request(shape_name if shape_name in PROMPTS else 'tool_continuation',
-                                    source[0], source[1], f'{run_id}/{name}', spec),
+            'request': seed_request(shape_name, source[0], source[1], f'{run_id}/{name}', spec),
             'steps': ['seed', 'switched']}
 
 
@@ -267,18 +274,19 @@ def plan(run_id, suite, repeats, client_shape):
                 g.update(steps=['seed'] + ['away']*count + ['return'], away_requests=count, anchored=anchored)
                 groups.append(g)
             continue
-        cases = dict(CONTROLS, **{case: TRANSITIONS[case] for case in SUITE_TRANSITIONS.get(suite, ())})
+        transitions = {case: TRANSITIONS[case] for case in SUITE_TRANSITIONS.get(suite, ())}
+        # A transition is judged against the control on its target model, so a suite plans only those controls
+        # (smoke, with no transitions, is the Sonnet and Opus controls alone).
+        targets = {target[0] for _, target in transitions.values()}
+        cases = {case: pair for case, pair in dict(CONTROLS, **HAIKU_CONTROL).items()
+                 if (pair[1][0] in targets if transitions else case in CONTROLS)}
+        cases.update(transitions)
         for shape_name in (('tool_continuation',) if suite == 'smoke' else SHAPES):
             for case, (source, target) in cases.items():
-                # The arm's client is the Sonnet tier (S0): the top rung is reached only by the proxy rewriting its
-                # requests, which keeps the client's headers. So top-rung seeds carry Sonnet's betas.
+                # The arm's client is the Sonnet tier (S0): the top rung and Haiku are reached only by the proxy
+                # rewriting its requests, which keeps the client's headers. So their seeds carry Sonnet's shape and betas.
                 groups.append(_group(run_id, case, shape_name, repeat, source, target, client_shape,
-                                     spec_model=S if source[0] == TOP else None))
-        if suite == 'transitions':
-            # Haiku's request shape without any history: attributes a Haiku rejection to the history.
-            g = _group(run_id, 'control/haiku', 'single_turn', repeat, (S, 'medium'), (H, None), client_shape)
-            g.update(request=transform_request(g['request'], H, None), steps=['single'])
-            groups.append(g)
+                                     spec_model=S if source[0] in (TOP, H) else None))
     for g in groups:
         if 'switched' in g['steps']:
             # A refusal that does not depend on the reply (e.g. mid-history system messages for Haiku)
@@ -437,7 +445,7 @@ def _stop_details(response):
 
 def estimate(nbytes, max_tokens, model):
     # Conservative admission estimate, as in cache_replication: UTF-8 bytes as tokens, all written.
-    rate = RATES[model]
+    rate = probe.tier(RATES[model])  # priced by prompt length: the dearest tier
     return ((nbytes + 1024)*rate['write_5m'] + max_tokens*rate['output'])/1e6
 
 
@@ -460,7 +468,7 @@ def max_reserve(groups):
 
 
 def verdicts(groups, outcomes):
-    # A transition's control continues on its target model, in the same shape and repeat (Haiku's is single-turn).
+    # A transition's control continues on its target model, in the same shape and repeat.
     controls = {(g['target'][0], g['shape'], g['repeat']): outcomes.get(g['name']) for g in groups if g['case'] in CONTROL_CASES}
     result = []
     for g in groups:
@@ -470,7 +478,7 @@ def verdicts(groups, outcomes):
         if ('away_requests' not in g and 'effort_mode' not in g and g['case'] not in CONTROL_CASES
                 and v['verdict'] in ('accepted', 'rejected', 'refused')):
             model = g['target'][0]
-            seen = controls.get((model, 'single_turn' if model == H else g['shape'], g['repeat']))
+            seen = controls.get((model, g['shape'], g['repeat']))
             if not seen or seen['verdict'] != 'accepted':
                 v.update(verdict='inconclusive', reason='control_not_accepted', observed=v['verdict'])
         result.append(v)
@@ -708,13 +716,6 @@ def execute(groups, out, budget, suite, repeats, transport=probe.send):
                     outcomes[group['name']] = run_return(group)
                     summary()
                     continue
-                if group['steps'] == ['single']:
-                    reply = send(group, 'single', group['request'])
-                    verdict = 'rejected' if reply is None else 'refused' if reply.get('stop_reason') == 'refusal' else 'accepted'
-                    outcomes[group['name']] = {'verdict': verdict, 'api_error': rows[-1].get('api_error'),
-                                               'observation': rows[-1].get('observation')}
-                    summary()
-                    continue
                 seed = send(group, 'seed', group['request'])
                 outcome = {'seed_observation': rows[-1]['observation'], 'seed_thinking_blocks': rows[-1]['thinking_blocks']}
                 problem = seed_problem(group['shape'], seed)
@@ -779,8 +780,9 @@ def main(argv=None):
     out.mkdir(parents=True, exist_ok=False)
     calls = planned_calls(groups)
     manifest = dict(run_id=rid, suite=args.suite, repeats=repeats, live=args.live, calls=calls, budget_usd=args.budget,
-                    max_reserve_usd=max_reserve(groups), rates=RATES, pricing_source=SOURCE, pricing_checked='2026-09-24',
-                    shape=shape, prompts=PROMPTS, follow_up=FOLLOW_UP, controls=CONTROLS, transitions=TRANSITIONS,
+                    max_reserve_usd=max_reserve(groups), rates=RATES, pricing_source=SOURCE,
+                    pricing_checked='2026-10-08' if args.suite == 'haiku-5-5' else '2026-09-24', shape=shape,
+                    prompts=PROMPTS, follow_up=FOLLOW_UP, controls=dict(CONTROLS, **HAIKU_CONTROL), transitions=TRANSITIONS,
                     opus_5_5_cases=O55_CASES, return_cases=RETURN_CASES, next_step=NEXT_STEP, effort_cases=EFFORT_CASES,
                     step_puzzles=[step_puzzle(i) for i in range(1, EFFORT_STEPS + 1)], groups=groups,
                     method='Seed at the source setting; continue with its content passed back unchanged, transformed '

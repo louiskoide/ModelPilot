@@ -95,11 +95,17 @@ class ScheduleTests(unittest.TestCase):
         self.assertTrue(set(MODELS) <= fixed)
 
     def test_policy_tiers_have_rates_with_provenance(self):
+        from modelpilot.cache_probe import dated
         from modelpilot.cache_replication import RATES
-        for model, name, rate in (('claude-opus-5-5', 'opus-5-5', dict(input=4, output=20, write_5m=5, write_1h=8, read=.2)),
-                                  ('claude-sonnet-5-5', 'sonnet-5-5', dict(input=2, output=10, write_5m=2.5, write_1h=4, read=.2))):
-            self.assertEqual(bench.rates()[model], rate)
-            self.assertEqual(RATES[model], rate)  # the probe's table
+        # Today's prices: Sonnet 5.5's reads were $0.20 until October 7 (tests/test_dated_rates.py); Haiku 5.5's change
+        # with prompt length (tests/test_haiku_5_5.py).
+        today = {'claude-opus-5-5': dict(input=4, output=20, write_5m=5, write_1h=8, read=.2),
+                 'claude-sonnet-5-5': dict(input=2, output=10, write_5m=2.5, write_1h=4, read=.1)}
+        for model, name in (('claude-opus-5-5', 'opus-5-5'), ('claude-sonnet-5-5', 'sonnet-5-5'),
+                            ('claude-haiku-5-5', 'haiku-5-5')):
+            self.assertEqual(RATES[model], bench.rates()[model])  # the probe's table
+            if model in today:
+                self.assertEqual({k: dated(bench.rates()[model])[k] for k in today[model]}, today[model])
             config = json.loads((bench.ROOT/f'configs/{name}-rates.json').read_text())
             self.assertTrue(config['source'] and config['retrieved'])
 
@@ -408,6 +414,19 @@ class RunBenchTests(unittest.TestCase):
         self.assertEqual(manifest['follow_up_prompt'], bench.FOLLOW_UP)
         self.assertEqual(manifest['client_version'], '9.9 (fake)')
         self.assertEqual(manifest['code'], bench.code_revision())  # which ModelPilot design ran
+
+    def test_the_manifest_flags_arms_the_client_has_no_price_for(self):
+        self.run_fake('A', shape='single')
+        manifest = json.loads((self.out/'manifest.json').read_text())
+        self.assertIsNone(manifest['client_unpriced_arms'])
+        self.assertNotIn('unknown-model rate', manifest['note'])
+        self.out = Path(self.tmp.name)/'haiku'
+        bench.run_bench([{'id': 'A'}], ['haiku-5.5', 'sonnet-5.5'], 1, 0, self.out, '/fake/claude', 'k', 'http://127.0.0.1:1',
+                        RATES, client_version='9.9 (fake)', clock=self.clock, sleep=self.clock.sleep, python=sys.executable,
+                        trial_factory=lambda task, arm, d, n: FakeTrial(task['id'], self.clock), shape='single')
+        manifest = json.loads((self.out/'manifest.json').read_text())
+        self.assertEqual(manifest['client_unpriced_arms'], {'haiku-5.5': 'claude-haiku-5-5'})
+        self.assertIn("unknown-model rate (Opus 5.5's)", manifest['note'])
 
     def test_a_harness_crash_still_writes_the_summary(self):
         order = [task for task, _, _ in bench.schedule([{'id': n} for n in 'AB'], ['sonnet-5'], 1, 0)]

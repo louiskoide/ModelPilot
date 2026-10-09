@@ -78,6 +78,18 @@ class ReplayTests(unittest.TestCase):
         self.assertTrue(jumped['replayed']['gate']['skip'])
         self.assertIsNone(jumped['replayed']['quality_floor'])  # off in the shipped config
 
+    def test_points_below_the_quality_floor_are_counted_apart_from_gate_errors(self):
+        # modelpilot-for-opus from its old start: every point is below the floor, where the gate skips Jev and returns no
+        # closest_usd; the floor's moves are by design, not a skip that moved (October 8: summarize raised KeyError).
+        def row(action, reason, **gate):
+            return {'trigger': 'turn_start', 'status': 'same', 'replayed': {
+                'action': action, 'target': f'{S}/low', 'gate': dict(gate, can_change=False, reason=reason, skip=True)}}
+        rows = [row('jump', 'below_quality_floor'), row('stay', 'below_quality_floor'),
+                row('stay', 'every_answer_stays', closest_usd=-.01), row('jump', 'every_answer_stays', closest_usd=-.02)]
+        gate = pr.summarize(rows)['gate']
+        self.assertEqual(gate['below_floor'], {'decisions': 2, 'moved': 1})
+        self.assertEqual((gate['skipped_but_moved'], gate['closest_skipped_usd']), (1, -.01))
+
     def test_an_arms_start_replaces_the_recorded_one_until_the_path_diverges(self):
         stay = dict(self.jump, action='stay', target=[S, 'medium'])
         step = {'point': '1/step/spend/3', 'trigger': 'step', 'current': [S, 'medium'], 'action': 'stay',

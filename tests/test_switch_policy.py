@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from modelpilot import bench, switch_policy as sp
+from modelpilot.cache_probe import dated
 
 H, S, O = 'claude-haiku-4-5-20251001', 'claude-sonnet-5-5', 'claude-opus-5-5'
 MODELS, EFFORTS = [H, S, O], ['low', 'medium', 'high', 'xhigh', 'max']
@@ -127,8 +128,8 @@ class SwitchPolicyTests(unittest.TestCase):
         cfg = copy.deepcopy(off)
         cfg['models'][S]['effort_switch_rewrite'] = 'full'  # as Sonnet 5 did
         self.assertAlmostEqual(sp.switch_cost(cfg, self.rates, (S, 'medium'), (S, 'high'), prof),
-                               prof['prefix_tokens'] * (2.5 - .2) / 1e6)
-        self.assertAlmostEqual(sonnet_effort, prof['messages_tokens'] * (2.5 - .2) / 1e6)  # so does Sonnet 5.5 (probe)
+                               prof['prefix_tokens'] * (2.5 - .1) / 1e6)  # Sonnet 5.5 reads $0.10 since October 7
+        self.assertAlmostEqual(sonnet_effort, prof['messages_tokens'] * (2.5 - .1) / 1e6)  # so does Sonnet 5.5 (probe)
         self.assertLess(opus_effort, model_change)
         self.assertEqual(sp.switch_cost(self.cfg, self.rates, (S, 'medium'), (O, 'medium'), dict(prof, warm=False)), 0)
 
@@ -187,7 +188,7 @@ class SwitchPolicyTests(unittest.TestCase):
         prof = sp.profile(self.cfg, request_, warm=True)
         covered = prof['prefix_tokens'] - 1000  # Sonnet medium ran until 1,000 tokens ago
         prof = sp.profile(self.cfg, request_, warm=True, entries={f'{S}/medium': covered})
-        extra = (2.5 - .2) / 1e6
+        extra = (2.5 - .1) / 1e6  # Sonnet 5.5's write less its read, $0.10 since October 7
         on, off = self.off(), self.off()  # effort rewrites, to see what a warm entry saves
         on['return_reuse']['enabled'], off['return_reuse']['enabled'] = True, False
         self.assertTrue(self.cfg['return_reuse']['enabled'])  # on since the returns probe (September 30)
@@ -215,7 +216,7 @@ class SwitchPolicyTests(unittest.TestCase):
         # A return to a warm model counts its newest entry, whatever effort it ran at.
         prof = sp.profile(on, request_, warm=True, entries={f'{S}/*': prof['prefix_tokens'] - 1000})
         self.assertAlmostEqual(sp.switch_cost(on, self.rates, (O, 'xhigh'), (S, 'low'), prof, reuse=True),
-                               1000 * (2.5 - .2) / 1e6)
+                               1000 * (2.5 - .1) / 1e6)
 
     def test_a_bad_config_is_refused(self):
         for change in ({'effort_switch_rewrite': 'partial'}, {'efforts': ['medium', 'extreme']}):
@@ -283,7 +284,7 @@ class CostModelTests(unittest.TestCase):
         self.prof = dict(self.cfg['defaults'], prefix_tokens=7100, messages_tokens=1500, warm=False, warm_entries={})
 
     def expected(self, model, requests, reply, warm=False):
-        rate, d = self.rates[model], self.cfg['defaults']
+        rate, d = dated(self.rates[model]), self.cfg['defaults']  # today's prices, as forecasts use
         growth = d['new_input_tokens'] + reply
         prefix = 7100 + (requests - 1) / 2 * growth
         cold = 0 if warm else 7100 * (rate['write_5m'] - rate['read'])
@@ -296,7 +297,8 @@ class CostModelTests(unittest.TestCase):
         warm = dict(self.prof, warm=True)
         self.assertAlmostEqual(sp.run_cost(self.cfg, self.rates, (S, 'medium'), warm),
                                self.expected(S, d['horizon_requests'], d['output_tokens'], warm=True))
-        # The measured shape forecasts what a Sonnet 5.5 and an Opus 5.5 medium task cost on the tuning split.
+        # The measured shape forecasts what a Sonnet 5.5 and an Opus 5.5 medium task cost on the tuning split (Sonnet
+        # 5.5 about $0.090 at its $0.20 reads before October 7, $0.0825 at $0.10).
         self.assertAlmostEqual(sp.run_cost(self.cfg, self.rates, (S, 'medium'), self.prof), .085, delta=.01)
         self.assertAlmostEqual(sp.run_cost(self.cfg, self.rates, (O, 'medium'), self.prof), .219, delta=.02)
 

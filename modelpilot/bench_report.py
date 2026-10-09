@@ -11,11 +11,13 @@ report provider cost only (router cost unpriced): their dollars are a lower boun
 on a Claude subscription instead of an API key are priced as an API key would have been
 billed for the same tokens (api_key_equivalent); their as-sent price is kept alongside.
 
-    python3 -m modelpilot.bench_report runs/bench-<ts> [runs/bench-<ts2> ...] [--out FILE]
+    python3 -m modelpilot.bench_report runs/bench-<ts> [runs/bench-<ts2> ...] [--out FILE] [--price-at DATE]
 
 rebuilds the summary from a run's trial records (for example after a crash). Given several
 runs, it pairs their arms by task; an arm in more than one run is labeled arm@<run>. Evidence
-is never overwritten.
+is never overwritten. Each request is priced at the prices of its day; --price-at prices every
+request at one day's instead, so runs from either side of a price change (Sonnet 5.5's cache
+reads, October 7) compare.
 
 A trial passes on the hidden grader and, where its task has an edge suite, every edge test (user
 decision, October 4). Runs graded before then carry the hidden verdict only; their edge results
@@ -24,12 +26,13 @@ its hidden tests and labeled edge_missing. Hidden-test passes are reported along
 """
 import argparse
 from collections import Counter
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import random
 import statistics
 from . import regrade
-from .cache_probe import cost
+from .cache_probe import cost, dated, prompt_tokens, tier
 
 TTL_SECONDS = {'5m': 300, '1h': 3600}
 EDGE_ROOT = regrade.EDGE
@@ -59,10 +62,34 @@ def api_key_equivalent(rows, rates):
         row = dict(r, usage=usage, repriced_1h_write_tokens=hour)
         if r.get('cost_usd') is not None:
             try:
-                row['cost_usd'] = cost(usage, rates.get(r.get('model')), '5m')
+                row['cost_usd'] = cost(usage, rates.get(r.get('model')), '5m', r.get('started_unix'))
             except (KeyError, TypeError, ValueError):
                 row['cost_usd'] = None
         out.append(row)
+    return out
+
+
+def on_date(rates, when):
+    """The rate table on one date (unix seconds): every model whose prices changed resolved to that date's."""
+    return {model: dated(rate, when) for model, rate in rates.items()}
+
+
+def repriced(rows, rates):
+    """Rows priced again from their usage at these rates: one price list for runs on either side of a price change
+    (Sonnet 5.5's cache reads, October 7). A row priced at neither time, or whose cache writes have no lifetime
+    breakdown, stays unpriced."""
+    out = []
+    for r in rows:
+        usage = r.get('usage')
+        if r.get('kind') not in ('messages', 'side_call') or r.get('cost_usd') is None or not isinstance(usage, dict):
+            out.append(r)
+            continue
+        try:
+            price = (None if usage.get('cache_creation_input_tokens') and 'cache_creation' not in usage
+                     else cost(usage, rates.get(r.get('model')), '5m'))
+        except (KeyError, TypeError, ValueError):
+            price = None
+        out.append(dict(r, cost_usd=price))
     return out
 
 
@@ -102,7 +129,7 @@ def cache_attribution(rows, rates):
         carried_total += carried
         if start is None:
             start = {'first_read_tokens': read, 'carried_tokens': carried, 'warm': read > 0}
-        rate = rates.get(r.get('model'))
+        rate = tier(rates.get(r.get('model')), prompt_tokens(usage), r.get('started_unix'))
         if ttl is None:
             unknown = unknown or 'no_cache_write_breakdown'
         elif carried and ttl == 'mixed':
@@ -177,7 +204,8 @@ def cost_components(rows, rates):
     for r in rows:
         if r.get('kind') not in ('messages', 'side_call') or r.get('cost_usd') is None:
             continue
-        usage, rate = r.get('usage') or {}, rates.get(r.get('model'))
+        usage = r.get('usage') or {}
+        rate = tier(rates.get(r.get('model')), prompt_tokens(usage), r.get('started_unix'))
         split = usage.get('cache_creation') or ({'ephemeral_5m_input_tokens': 0, 'ephemeral_1h_input_tokens': 0}
                                                 if not usage.get('cache_creation_input_tokens') else None)
         if rate is None or split is None:
@@ -208,7 +236,8 @@ def write_sources(rows, rates):
     for r in messages:
         usage = r['usage']
         read, write = usage['cache_read_input_tokens'], usage.get('cache_creation_input_tokens') or 0
-        split, rate = usage.get('cache_creation'), rates.get(r.get('model'))
+        split = usage.get('cache_creation')
+        rate = tier(rates.get(r.get('model')), prompt_tokens(usage), r.get('started_unix'))
         if not write:
             per_token = 0.0
         elif split and rate:
@@ -603,9 +632,12 @@ def apply_pass_rule(record, edge=None):
     return record
 
 
-def load_run(run_dir, rates):
-    """A run's manifest and trial records; cache attribution is recomputed from the proxy log."""
+def load_run(run_dir, rates, price_at=None):
+    """A run's manifest and trial records; cache attribution is recomputed from the proxy log. Dollars are as recorded
+    (each request at the prices of its day), or with price_at (unix seconds) every request at that day's prices."""
     run_dir = Path(run_dir)
+    if price_at is not None:
+        rates = on_date(rates, price_at)
     manifest = json.loads((run_dir/'manifest.json').read_text())
     regraded = latest_regrade(run_dir)
     edges = {} if regraded is None else {(t['task'], t['arm'], t['trial']): t['edge']
@@ -619,20 +651,22 @@ def load_run(run_dir, rates):
         log = path.parent/'observations.jsonl'
         if log.exists():
             rows = priced_rows(record, [json.loads(line) for line in log.read_text().splitlines() if line.strip()], rates)
+            if price_at is not None:
+                rows = repriced(rows, rates)
             record.update(cache=cache_attribution(rows, rates), path=setting_path(rows),
                           cost_components=cost_components(rows, rates), write_sources=write_sources(rows, rates))
         records.append(apply_pass_rule(record, edges.get((record['task'], record['arm'], record['trial']))))
     return manifest, records
 
 
-def load_runs(run_dirs, rates):
+def load_runs(run_dirs, rates, price_at=None):
     """Several runs' trial records as one set of arms, paired by task.
 
     An arm that appears in more than one run is labeled arm@<run directory name>, so the same arm
     measured before and after a change stays apart. The runs ran at different times, possibly on
     different code, clients and auth; each run's manifest facts are listed with the arms it gave.
     The seed is the first run's."""
-    loaded = [(Path(d),) + load_run(d, rates) for d in run_dirs]
+    loaded = [(Path(d),) + load_run(d, rates, price_at) for d in run_dirs]
     seen = Counter(a for _, manifest, _ in loaded for a in manifest['arms'])
     arms, records, runs = [], [], []
     for path, manifest, run_records in loaded:
@@ -645,10 +679,12 @@ def load_runs(run_dirs, rates):
     return loaded[0][1].get('seed', 0), arms, records, runs
 
 
-def summary_of(run_dirs, rates, resamples=10000):
-    seed, arms, records, runs = load_runs(run_dirs, rates)
+def summary_of(run_dirs, rates, resamples=10000, price_at=None):
+    """price_at: an ISO date or timestamp (naive means UTC) to price every request at that day's prices."""
+    when = None if price_at is None else _timestamp(price_at)
+    seed, arms, records, runs = load_runs(run_dirs, rates, when)
     summary = summarize(records, arms, seed=seed, resamples=resamples)
-    summary.update(trials=len(records), rebuilt_from=str(run_dirs[0]) if len(run_dirs) == 1 else [r['run'] for r in runs],
+    summary.update(trials=len(records), priced_at=price_at or 'as recorded: each request at the prices of its day', rebuilt_from=str(run_dirs[0]) if len(run_dirs) == 1 else [r['run'] for r in runs],
                    pass_rule='hidden grader and, where the task has one, its whole edge suite (October 4); '
                              'hidden_passes alongside',
                    edge_from=[r['edge_from'] for r in runs])
@@ -658,10 +694,15 @@ def summary_of(run_dirs, rates, resamples=10000):
     return summary
 
 
-def write_summary(run_dirs, rates, out, resamples=10000):
+def _timestamp(text):
+    moment = datetime.fromisoformat(text)
+    return (moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)).timestamp()
+
+
+def write_summary(run_dirs, rates, out, resamples=10000, price_at=None):
     """Rebuild one run's summary, or pair several runs' arms (see load_runs). Never overwrites."""
     run_dirs = [run_dirs] if isinstance(run_dirs, (str, Path)) else list(run_dirs)
-    summary = summary_of(run_dirs, rates, resamples)
+    summary = summary_of(run_dirs, rates, resamples, price_at)
     with Path(out).open('x') as f:  # never overwrite evidence
         json.dump(summary, f, indent=2)
         f.write('\n')
@@ -674,12 +715,14 @@ def main():
     parser.add_argument('runs', type=Path, nargs='+', help='One run, or several whose arms are paired by task')
     parser.add_argument('--out', type=Path, help='Write here (must not exist); default prints the summary')
     parser.add_argument('--resamples', type=int, default=10000)
+    parser.add_argument('--price-at', help='Price every request at this ISO date\'s prices (naive means UTC), so runs '
+                                           'from either side of a price change compare; default: as recorded')
     args = parser.parse_args()
     if args.out:
-        write_summary(args.runs, rates(), args.out, args.resamples)
+        write_summary(args.runs, rates(), args.out, args.resamples, args.price_at)
         print('summary:', args.out)
         return
-    print(json.dumps(summary_of(args.runs, rates(), args.resamples), indent=2))
+    print(json.dumps(summary_of(args.runs, rates(), args.resamples, args.price_at), indent=2))
 
 
 if __name__ == '__main__':

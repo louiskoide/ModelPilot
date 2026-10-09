@@ -5,8 +5,15 @@ from modelpilot import policy_actions
 from modelpilot.m2 import State
 from modelpilot.policy_actions import transform_request, escalation_proposal, prepare_action
 
-H='claude-haiku-4-5-20251001'; S='claude-sonnet-5-5'; O='claude-opus-5-5'  # the ladder's tiers
+H='claude-haiku-5-5'; S='claude-sonnet-5-5'; O='claude-opus-5-5'  # the ladder's tiers
 S5='claude-sonnet-5'  # the middle tier until September 28
+H45='claude-haiku-4-5-20251001'  # the bottom tier until October 8
+def legacy_haiku():
+    """Haiku 4.5's tier as it was until October 8: no effort and no mid-history system messages. Every tier today takes
+    both; the transform still handles one that doesn't."""
+    return mock.patch.multiple(policy_actions,MODELS=(H45,)+policy_actions.MODELS,
+                               MODEL_EFFORTS=dict(policy_actions.MODEL_EFFORTS,**{H45:()}),
+                               MID_CONVERSATION_SYSTEM=dict(policy_actions.MID_CONVERSATION_SYSTEM,**{H45:False}))
 # Probe summaries whose verified_transitions fill THINKING_HISTORY_VERIFIED (docs/thinking-history-probe.md), for
 # the pairs whose models are both current tiers.
 EVIDENCE={'thinking-probe-transitions-20260926-131953':('349303b64a924350bf911fe189ad95c9635ee58aca6a1d82f5615f0c955b7c32',{(S5,S5)}),
@@ -20,9 +27,9 @@ class TransformTests(unittest.TestCase):
                     context_management={'edits':[{'type':'clear_thinking_20251015'},{'type':'clear_tool_uses_20250919'}]},
                     messages=[{'role':'user','content':[{'type':'tool_result','tool_use_id':'x','content':'result'}]},
                               {'role':'system','content':'environment'}])
-    def test_haiku_removes_only_unsupported_options_preserves_tools(self):
+    def test_a_tier_without_effort_drops_only_unsupported_options_preserves_tools(self):
         p=self.request(); old=copy.deepcopy(p)
-        out=transform_request(p,H,None)
+        with legacy_haiku():out=transform_request(p,H45,None)
         self.assertEqual(p,old)
         self.assertNotIn('thinking',out)
         self.assertNotIn('effort',out['output_config'])
@@ -46,8 +53,8 @@ class TransformTests(unittest.TestCase):
         self.assertEqual(out['messages'][0],old['messages'][0])
         self.assertEqual((out['model'],out['output_config']['effort']),(S,'medium'))
     def test_verified_pairs_come_from_the_probe_evidence(self):
-        # Every move between Sonnet 5.5 and Opus 5.5; the Sonnet 5 pairs left with that tier. Never Haiku (its
-        # targets are refused by the transform for mid-history system messages) and never Opus 5.
+        # Every move between Sonnet 5.5 and Opus 5.5; the Sonnet 5 pairs left with that tier. No Haiku 5.5 pair is
+        # probed yet (Haiku 4.5's targets were refused by the transform) and never Opus 5.
         tiers=set(policy_actions.MODELS)
         self.assertEqual(policy_actions.THINKING_HISTORY_VERIFIED,
                          frozenset(p for pairs in EVIDENCE.values() for p in pairs[1] if set(p)<=tiers))
@@ -75,15 +82,15 @@ class TransformTests(unittest.TestCase):
             self.assertEqual(out['messages'][0],p['messages'][0])
         p['model']=O
         self.assertEqual(transform_request(p,S,'medium')['messages'][0],p['messages'][0])  # correction reset
-        with self.assertRaises(ValueError):transform_request(p,H,None)
+        with self.assertRaises(ValueError):transform_request(p,H,'medium')  # no Haiku 5.5 pair is probed yet
     def test_only_verified_pairs_allow_thinking_history(self):
         with mock.patch.object(policy_actions,'THINKING_HISTORY_VERIFIED',frozenset({(O,S)})):
             self.assertEqual(transform_request(self.with_thinking(),S,'medium')['model'],S)
-            for model,effort in [(O,'low'),(H,None)]:
+            for model,effort in [(O,'low'),(H,'low')]:
                 with self.assertRaises(ValueError):transform_request(self.with_thinking(),model,effort)
-    def test_tiers_are_sonnet_5_5_and_opus_5_5_and_keep_client_fields(self):
+    def test_tiers_are_haiku_5_5_sonnet_5_5_and_opus_5_5_and_keep_client_fields(self):
         self.assertEqual(policy_actions.MODELS,(H,S,O))
-        for retired in ('claude-opus-5',S5):  # no longer tiers, as target or source
+        for retired in ('claude-opus-5',S5,H45):  # no longer tiers, as target or source
             with self.assertRaises(ValueError):transform_request(self.request(),retired,'medium')
             with self.assertRaises(ValueError):transform_request(dict(self.request(),model=retired),O,'medium')
         p=self.request(); p['model']=S; p['output_config']={'effort':'high'}
@@ -91,12 +98,20 @@ class TransformTests(unittest.TestCase):
         self.assertEqual((out['model'],out['output_config']['effort'],out['thinking']),(O,'medium',{'type':'adaptive'}))
         self.assertEqual(out['messages'],p['messages'])  # Opus 5.5 takes mid-conversation system messages
         self.assertEqual(out['context_management'],p['context_management'])
+    def test_haiku_5_5_keeps_what_the_client_sends(self):
+        # Unlike Haiku 4.5 it takes effort, adaptive thinking, thinking edits and mid-history system messages.
+        p=self.request(); p['model']=S; p['output_config']={'effort':'low'}; p['messages'].append({'role':'user','content':'later'})
+        for effort in policy_actions.EFFORTS:
+            out=transform_request(p,H,effort)
+            self.assertEqual((out['model'],out['output_config']['effort'],out['thinking']),(H,effort,{'type':'adaptive'}))
+            self.assertEqual((out['messages'],out['context_management']),(p['messages'],p['context_management']))
     def test_unknown_model_and_invalid_haiku_effort_refused(self):
-        for model,effort in [('unknown',None),(H,'high'),(S,'extreme')]:
+        for model,effort in [('unknown',None),(H,None),(H,'extreme'),(S,'extreme')]:
             with self.assertRaises(ValueError):transform_request(self.request(),model,effort)
+        with legacy_haiku(),self.assertRaises(ValueError):transform_request(self.request(),H45,'high')
     def test_non_trailing_system_message_is_not_silently_moved(self):
         p=self.request(); p['messages'].append({'role':'user','content':'later'})
-        with self.assertRaises(ValueError):transform_request(p,H,None)
+        with legacy_haiku(),self.assertRaises(ValueError):transform_request(p,H45,None)
     def test_sonnet_keeps_system_messages_as_the_client_sends_them(self):
         p=self.request(); p['messages'].append({'role':'user','content':'later'})
         self.assertEqual(transform_request(p,S,'low')['messages'],p['messages'])

@@ -1,0 +1,103 @@
+{
+ "client_version": "2.1.284 (Claude Code)",
+ "requests": {
+  "claude-haiku-5-5": {
+   "top_level_keys": [
+    "context_management",
+    "max_tokens",
+    "messages",
+    "metadata",
+    "model",
+    "output_config",
+    "stream",
+    "system",
+    "thinking",
+    "tools"
+   ],
+   "thinking": {
+    "type": "adaptive"
+   },
+   "effort": "medium",
+   "output_config_keys": [
+    "effort"
+   ],
+   "context_management": {
+    "edits": [
+     {
+      "type": "clear_thinking_20251015",
+      "keep": "all"
+     }
+    ]
+   },
+   "anthropic_beta": [
+    "interleaved-thinking-2025-05-14",
+    "thinking-token-count-2026-05-13",
+    "context-management-2025-06-27",
+    "prompt-caching-scope-2026-01-05",
+    "mid-conversation-system-2026-04-07",
+    "claude-code-20250219",
+    "mid-conversation-tool-changes-2026-07-01",
+    "effort-2025-11-24"
+   ],
+   "stream": true,
+   "tool_names": [
+    "Bash"
+   ],
+   "tool_cache_control": [],
+   "system_blocks": [
+    {
+     "type": "text"
+    },
+    {
+     "type": "text",
+     "cache_control": {
+      "type": "ephemeral"
+     }
+    },
+    {
+     "type": "text",
+     "cache_control": {
+      "type": "ephemeral"
+     }
+    }
+   ],
+   "messages": [
+    {
+     "role": "user",
+     "blocks": [
+      "text",
+      "text"
+     ]
+    },
+    {
+     "role": "system",
+     "blocks": "str"
+    },
+    {
+     "role": "assistant",
+     "blocks": [
+      "tool_use"
+     ]
+    },
+    {
+     "role": "user",
+     "blocks": [
+      "tool_result"
+     ]
+    },
+    {
+     "role": "system",
+     "blocks": [
+      "text"
+     ],
+     "cache_control": [
+      0
+     ]
+    }
+   ],
+   "system_after_prompt": true,
+   "system_after_tool_result": true
+  }
+ },
+ "scope": "Structure of what the client sent to an owned fixture upstream; no text, IDs or provider traffic. The Haiku 5.5 entry of thinking_probe.capture_shape(cli, models=(\"claude-haiku-5-5\", \"claude-haiku-4-5-20251001\", \"claude-sonnet-5-5\")), October 8, $0: what the pinned client sends for a model it has no entry for."
+}

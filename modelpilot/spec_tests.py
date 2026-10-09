@@ -56,7 +56,7 @@ def request(task):
 
 def max_cost(payload, rates):
     """The most one request can cost: its bytes as tokens (at most one token a byte) and every output token."""
-    rate = rates[payload['model']]
+    rate = cache_probe.tier(rates[payload['model']])  # a model priced by prompt length: its dearest tier
     return (len(json.dumps(payload).encode()) * rate['input'] + payload['max_tokens'] * rate['output']) / 1e6
 
 

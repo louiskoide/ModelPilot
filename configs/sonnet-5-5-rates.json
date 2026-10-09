@@ -1,8 +1,11 @@
 {
-  "source": "Claude API skill (bundled with Claude Code 2.1.284), 'Migrating to Claude Sonnet 5.5': the same prices as Sonnet 5, $2 input / $10 output per MTok, 5-minute cache writes $2.50, 1-hour cache writes $4, cache reads $0.20. Stated rates, not derived; not invoice-reconciled.",
-  "retrieved": "2026-09-28",
+  "source": "Claude API skill (bundled with Claude Code 2.1.284), 'Migrating to Claude Sonnet 5.5': the same prices as Sonnet 5, $2 input / $10 output per MTok, 5-minute cache writes $2.50, 1-hour cache writes $4, cache reads $0.20. Stated rates, not derived; not invoice-reconciled. Changed October 7 (Anthropic's release notes, https://platform.claude.com/docs/en/release-notes/overview, and the pricing page, both retrieved 2026-10-08): cache reads $0.10 (0.05x input); everything else unchanged. The notes give no time of day, so the new price applies from the start of October 7, Pacific time, the date of the release note. Billed traffic on record falls clear of that day's unknown hour: the API-key m0-replication-ttl-1h run ended at 22:03 PDT on October 6; the one later run that day, late-fix-20261007-160727 (16:30-16:44 PDT), was on the subscription, so its dollars are API-key equivalents, not a bill.",
+  "retrieved": "2026-10-08",
   "units": "USD per million tokens",
   "rates": {
-    "claude-sonnet-5-5": {"input": 2, "output": 10, "write_5m": 2.5, "write_1h": 4, "read": 0.2}
+    "claude-sonnet-5-5": {"dated": [
+      {"from": null, "input": 2, "output": 10, "write_5m": 2.5, "write_1h": 4, "read": 0.2},
+      {"from": "2026-10-07T00:00:00-07:00", "input": 2, "output": 10, "write_5m": 2.5, "write_1h": 4, "read": 0.1}
+    ]}
   }
 }

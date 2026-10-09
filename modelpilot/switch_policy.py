@@ -57,6 +57,7 @@ import hashlib
 import itertools
 import json
 from pathlib import Path
+from .cache_probe import dated
 
 CONFIG = Path(__file__).resolve().parents[1]/'configs/modelpilot-policy.json'
 TRIGGERS = ('turn_start', 'stuck_evidence', 'step')
@@ -355,8 +356,17 @@ def _scale(cfg, setting, prof):
     return requests, output
 
 
+def _rate(rates, model):
+    """A model's flat rates today (cache_probe.dated). Forecasts don't model a price that changes with prompt length
+    (Haiku 5.5), so such a model can't be a candidate until they do."""
+    rate = dated(rates[model])
+    if 'tiers' in rate:
+        raise ValueError(f'{model} is priced by prompt length, which forecasts do not model')
+    return rate
+
+
 def run_cost(cfg, rates, setting, prof):
-    rate = rates[setting[0]]
+    rate = _rate(rates, setting[0])
     requests, output = _scale(cfg, setting, prof)
     horizon = max(1.0, prof['horizon_requests'] * requests)
     reply = prof['output_tokens'] * output
@@ -374,7 +384,7 @@ def switch_cost(cfg, rates, current, target, prof, warm=None, reuse=False):
     warm = prof['warm'] if warm is None else warm
     if not warm or tuple(current) == tuple(target):
         return 0.0
-    rate = rates[target[0]]
+    rate = _rate(rates, target[0])
     extra = rate[write_rate(cfg, prof)] - rate['read']
     if current[0] != target[0]:
         tokens = prof['prefix_tokens']
@@ -404,7 +414,7 @@ def consult_cost(cfg, rates, current, target, prof):
     base = prof.get('output_effort')
     output = spec['output_tokens'] * (cfg['effort_output_factor'][target[1]] / cfg['effort_output_factor'][base]
                                       if target[1] and base else 1.0)
-    rt, rc = rates[target[0]], rates[current[0]]
+    rt, rc = _rate(rates, target[0]), _rate(rates, current[0])
     advice = spec['advice_tokens'] * (rc[write] + (_horizon(cfg, current, prof) - 1) * rc['read'])
     return (brief * rt['input'] + output * rt['output'] + advice) / 1e6
 
@@ -416,7 +426,7 @@ def note_cost(cfg, rates, current, target, prof):
     spec = delegation(cfg, 'handoff_note')
     if not spec['enabled'] or current[0] == target[0] or not prof.get('history'):
         return 0.0
-    rc, rt, write = rates[current[0]], rates[target[0]], write_rate(cfg, prof)
+    rc, rt, write = _rate(rates, current[0]), _rate(rates, target[0]), write_rate(cfg, prof)
     return (prof['prefix_tokens'] * rc['read'] + spec['output_tokens'] * rc['output'] +
             spec['note_tokens'] * (rt[write] + (_horizon(cfg, target, prof) - 1) * rt['read'])) / 1e6
 

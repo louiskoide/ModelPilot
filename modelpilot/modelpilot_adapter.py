@@ -12,6 +12,7 @@ import json
 import math
 from pathlib import Path
 import sys
+from .cache_probe import tier
 from .governor import Governor
 from .governed_session import hook_settings, OWNER
 from .hooks import REVIEW_AT_STOP, channel_declaration
@@ -27,6 +28,7 @@ def switch_decision(source, target, prefix_tokens, output_tokens, horizon, avail
         return result
     if source not in rates or target not in rates or available_usd is None:
         return result
+    rates={m:tier(rates[m],prefix_tokens) for m in (source,target)}  # a model priced by prompt length
     if isinstance(available_usd,bool) or not math.isfinite(available_usd) or available_usd<0:
         return result
     for model in (source,target):
