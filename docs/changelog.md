@@ -2,6 +2,20 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 9, 2026: Haiku 5.5's outcomes in, for its own settings only (offline)
+
+$0. User decision: "Haiku only". Haiku 5.5's tuning outcomes go into `calibration.outcomes` and the floor's evidence, but they don't stand for Sonnet's or Opus's settings. Under "a stronger setting never misses more" they would have lifted Sonnet 5.5 medium and every Sonnet setting above it from 48/52 to Haiku's 56/58, and cleared Sonnet's parse miss against an Opus user. On these tasks the premise fails from Haiku up: Haiku medium passed `parse-decimal-grouping` and `nx-ismags-monomorphism` on both trials, which Sonnet medium missed. Built in a separate worktree while the user ran the Haiku probes, so the probe's checkout stayed clean.
+
+- **Code:** `switch_policy.bounded_by` decides whether a measured setting's outcomes stand for another's: it must be at least as strong, and either on the same model or its model's `outcomes_count_for_stronger` is true (the default). `measured_ok` and `floor_allows` use it, and `_check_models` requires a boolean. Sonnet's outcomes still stand for Opus's unmeasured settings (Opus 5.5 low keeps Sonnet low's 28/31).
+- **Config:** Haiku 5.5's entry has `outcomes_count_for_stronger: false`. Its outcomes (low 25/29, medium 56/58) are in, written by `runs/haiku-apply-evidence-20261008.py --with-outcomes`, which now writes the flag too. Haiku is still not a candidate.
+- **Effect:** Haiku 5.5 medium's measured rate is 57/60 with the prior and low's 26/31. No other setting's rate or floor verdict changes. Against Sonnet 5.5 medium, Haiku medium is allowed and low isn't (`nx-classes-weak-views`); against Opus 5.5 medium neither is.
+- **Replay** (`runs/haiku-only-outcomes-replay-20261009.py` → `.json`, the seven recorded ModelPilot runs):
+  - With Haiku off, 0 of 161 decisions change in each of `modelpilot`, `modelpilot-for-sonnet` and `modelpilot-for-opus`.
+  - With Haiku on, 101 of 105 turn starts in the Sonnet-start arms move to Haiku 5.5 medium, as on October 8; the Opus arm stays.
+  - Letting Haiku's outcomes count for stronger models would change 0 decisions too. The choice keeps Sonnet's rate honest; it doesn't move decisions on these runs.
+- **Tests:** 707 offline tests on Python 3.12 with the pinned 2.1.284 client first on PATH, run in the worktree (`runs/haiku-only-outcomes-regression-py312.log`). 706 pass. The one failure is the known worktree one: with `work/` symlinked in, the Jev launcher's checkout-path test sees the worktree's path. After the last docstring and doc edits, the CLAUDE.md, Haiku, switch-policy and replay tests were rerun and pass (`runs/haiku-only-outcomes-final-tree-py312.log`). New: `test_the_shipped_haiku_outcomes_are_the_runs`; `test_haikus_outcomes_bound_only_haikus_settings` replaces the test that showed them lifting Sonnet (that reading stays checked inside it). The calibration test lists Haiku's outcomes.
+- **Next:** the probes (the user's run, `runs/haiku-probes-20261008.sh`), then steps 1–3 of "Turning Haiku 5.5 on" in `docs/m6-modelpilot-policy.md`.
+
 ## October 8, 2026 (night): Haiku 5.5's integration built and off; measured candidates on (offline)
 
 $0. The user asked for everything Haiku 5.5 needs in ModelPilot that doesn't need their decision, with the decisions asked first. User decisions:

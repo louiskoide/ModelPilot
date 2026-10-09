@@ -27,9 +27,10 @@ with that of each direct move:
   answer the lowest effort that can. So c is enough when both are at or below c's, treated as
   independent. With calibration, at the decision points it names, that estimate is blended with
   the pass rate measured on the tuning split for the strongest measured setting c is at least as
-  strong as: (1 - jev_weight) x measured + jev_weight x Jev. On evidence that the current setting
-  isn't enough, Jev's probabilities are conditioned on that, uncalibrated: the measured rates say
-  nothing about which setting rescues a task the current one can't finish.
+  strong as (on c's own model only, for a model whose outcomes don't count for stronger ones:
+  outcomes_count_for_stronger): (1 - jev_weight) x measured + jev_weight x Jev. On evidence that
+  the current setting isn't enough, Jev's probabilities are conditioned on that, uncalibrated: the
+  measured rates say nothing about which setting rescues a task the current one can't finish.
 - recover(c): a failure wastes part of run(c), and the task is redone where Jev says it needs to be (its
   recommendation, when at least as strong as c), or else on the strongest setting a failure can reach.
   A failure shows inside the turn, where the effort can't change (unless effort_changes_at allows it on
@@ -127,6 +128,8 @@ def _check_models(cfg):
             raise ValueError(f'{model}: effort_switch_rewrite must be one of {REWRITES}')
         if not set(spec.get('candidate_efforts') or []) <= set(spec['efforts']):
             raise ValueError(f'{model}: candidate_efforts must be among its efforts')
+        if type(spec.get('outcomes_count_for_stronger', True)) is not bool:
+            raise ValueError(f'{model}: outcomes_count_for_stronger must be a boolean')
         # Claude Code puts its own effort in an effort message on every turn (2.1.284), and the last one holds: with
         # per-message effort on, a model the proxy can't carry an effort message to would run at the client's effort.
         if spec['candidate'] and pme['enabled'] and spec['efforts'] and not spec.get('per_message_effort'):
@@ -214,13 +217,14 @@ def floor_allows(cfg, setting):
     at least as strong as missed it (an upper bound on its misses), and for the baseline when any measured setting at
     least as strong as the baseline did (a lower bound; none such, and the baseline is taken to miss nothing). The
     setting may run when, over at least min_shared_tasks tasks measured on both sides, it adds no miss. A miss: any
-    complete trial of the task that failed strict grading."""
+    complete trial of the task that failed strict grading. A model whose outcomes don't count for stronger ones
+    (bounded_by) bounds only its own settings."""
     floor = quality_floor(cfg)
     setting, base = tuple(setting), tuple(floor['baseline'].split('/'))
     if at_least(cfg, setting, base):
         return {'allowed': True, 'reason': 'at_least_baseline'}
     outcomes = {tuple(k.split('/')): v for k, v in floor['outcomes'].items()}
-    below = [m for m in outcomes if at_least(cfg, setting, m)]
+    below = [m for m in outcomes if bounded_by(cfg, setting, m)]
     above = [m for m in outcomes if at_least(cfg, m, base)]
     if not below:
         return {'allowed': False, 'reason': 'unmeasured'}
@@ -477,10 +481,19 @@ def note_cost(cfg, rates, current, target, prof):
 
 def measured_ok(cfg, setting):
     """The tuning split's pass rate, with a uniform prior ((passed + 1) / (trials + 2)), of the strongest measured
-    setting that setting is at least as strong as; None when no measured setting is that weak."""
+    setting whose outcomes bound setting's (bounded_by); None when there is none."""
     found = [(o['passed'] + 1) / (o['trials'] + 2) for key, o in cfg['calibration']['outcomes'].items()
-             if at_least(cfg, tuple(setting), tuple(key.split('/')))]
+             if bounded_by(cfg, setting, key.split('/'))]
     return max(found) if found else None
+
+
+def bounded_by(cfg, setting, measured):
+    """Whether a measured setting's outcomes stand for setting under "a stronger setting never misses more": setting is
+    at least as strong, on the same model or on a stronger one when the measured model's outcomes count for stronger
+    models. Haiku 5.5's don't (user decision, October 9): on the tuning tasks it passed two Sonnet 5.5 medium misses."""
+    setting, measured = tuple(setting), tuple(measured)
+    return at_least(cfg, setting, measured) and (
+        setting[0] == measured[0] or cfg['models'][measured[0]].get('outcomes_count_for_stronger', True))
 
 
 def per_message(cfg, model):

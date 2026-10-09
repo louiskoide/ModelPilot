@@ -27,20 +27,18 @@ USUAL = {'model': {'choice': S, 'confidence': .91, 'probabilities': {S: .95, H: 
                     'probabilities': {'low': 0, 'medium': .64, 'high': .33, 'xhigh': .03, 'max': 0}}}
 
 
-def with_haiku_outcomes(cfg):
-    """A config copy with the first Haiku run's outcomes in the calibration and the floor's evidence (left out of the
-    shipped config until the user decides how they may bound other models' settings)."""
+def without_haiku_outcomes(cfg):
+    """A config copy as it was before Haiku's outcomes went in (October 9)."""
     cfg = copy.deepcopy(cfg)
-    for setting, (n, failed) in HAIKU_OUTCOMES.items():
-        cfg['calibration']['outcomes'][setting] = {'passed': n * len(TASKS) - sum(failed.values()), 'trials': n * len(TASKS)}
-        cfg['quality_floor']['outcomes'][setting] = {t: [n - failed.get(t, 0), n] for t in TASKS}
+    for setting in HAIKU_OUTCOMES:
+        del cfg['calibration']['outcomes'][setting], cfg['quality_floor']['outcomes'][setting]
     return cfg
 
 
 def haiku_on(baseline=None, measured=True):
-    """The config once the probes pass: Haiku 5.5 a candidate with per-message effort, its outcomes in, the floor on
-    for baseline (None: off), as the arm's overrides would set it."""
-    cfg = with_haiku_outcomes(switch_policy.load())
+    """The config once the probes pass: Haiku 5.5 a candidate with per-message effort (its outcomes are in since
+    October 9), the floor on for baseline (None: off), as the arm's overrides would set it."""
+    cfg = switch_policy.load()
     cfg['models'][H].update(candidate=True, per_message_effort=True)
     cfg['measured_candidates']['enabled'] = measured
     if baseline:
@@ -167,6 +165,7 @@ class CandidacyTests(unittest.TestCase):
         self.assertNotIn(H, {m for m, _ in switch_policy.settings(cfg)})
         spec = cfg['models'][H]
         self.assertEqual((spec['candidate'], spec['per_message_effort'], spec['candidate_efforts']), (False, False, ['medium']))
+        self.assertIs(spec['outcomes_count_for_stronger'], False)  # user decision, October 9
         self.assertEqual((spec['request_factor'], spec['output_factor']), (2.11, 2.32))  # runs/haiku-policy-evidence-20261008
         with self.assertRaisesRegex(ValueError, 'per_message_effort'):  # the client's own effort message would hold
             switch_policy.with_overrides(cfg, {'models': {H: {'candidate': True}}})
@@ -205,27 +204,45 @@ class CandidacyTests(unittest.TestCase):
         gate = switch_policy.jev_gate(cfg, self.rates, (S, 'low'), self.prof, 'turn_start')
         self.assertEqual((gate['can_change'], gate['reason']), (True, 'a_move_can_pay'))
 
-    def test_haikus_outcomes_would_lift_stronger_settings_under_the_floors_premise(self):
-        # Why the shipped config leaves them out (a question for the user, October 8): under "a stronger setting never
-        # misses more", Haiku 5.5 medium's two trials a task raise Sonnet 5.5 medium's measured rate and clear its parse
-        # miss against an Opus user. No setting's floor verdict changes.
-        base, cfg = switch_policy.load(), with_haiku_outcomes(switch_policy.load())
-        self.assertAlmostEqual(switch_policy.measured_ok(base, (S, 'medium')), 49 / 54)
-        self.assertAlmostEqual(switch_policy.measured_ok(cfg, (S, 'medium')), 57 / 60)
-        opus = copy.deepcopy(cfg)
-        opus['quality_floor'].update(enabled=True, baseline=f'{O}/medium')
-        self.assertEqual(switch_policy.floor_allows(opus, (S, 'medium'))['extra_misses'], ['tomli-decode-error-attrs'])
-        everything = [(m, e) for m in (H, S, O) for e in base['effort_order']]
+    def test_the_shipped_haiku_outcomes_are_the_runs(self):
+        cfg = switch_policy.load()
+        for setting, (n, failed) in HAIKU_OUTCOMES.items():
+            self.assertEqual(cfg['calibration']['outcomes'][setting],
+                             {'passed': n * len(TASKS) - sum(failed.values()), 'trials': n * len(TASKS)})
+            self.assertEqual(cfg['quality_floor']['outcomes'][setting], {t: [n - failed.get(t, 0), n] for t in TASKS})
+
+    def test_haikus_outcomes_bound_only_haikus_settings(self):
+        # User decision, October 9 ("Haiku only"): under "a stronger setting never misses more" Haiku 5.5 medium's 56/58
+        # would raise Sonnet 5.5 medium's measured rate and clear its parse miss against an Opus user, though Haiku
+        # passed parse and ISMAGS where Sonnet medium missed them. So they count for Haiku's own settings only.
+        cfg, before = switch_policy.load(), without_haiku_outcomes(switch_policy.load())
+        self.assertAlmostEqual(switch_policy.measured_ok(cfg, (H, 'medium')), 57 / 60)
+        self.assertAlmostEqual(switch_policy.measured_ok(cfg, (H, 'low')), 26 / 31)
+        everything = [(m, e) for m in (H, S, O) for e in cfg['effort_order']]
+        others = [c for c in everything if c[0] != H]
+        self.assertEqual([switch_policy.measured_ok(cfg, c) for c in others],
+                         [switch_policy.measured_ok(before, c) for c in others])
+        self.assertAlmostEqual(switch_policy.measured_ok(cfg, (S, 'medium')), 49 / 54)
         for baseline in (f'{S}/medium', f'{O}/medium'):
-            before, after = copy.deepcopy(base), copy.deepcopy(cfg)
-            for c in (before, after):
+            after, old = copy.deepcopy(cfg), copy.deepcopy(before)
+            for c in (after, old):
                 c['quality_floor'].update(enabled=True, baseline=baseline)
-            self.assertEqual([switch_policy.floor_allows(before, c)['allowed'] for c in everything if c[0] != H],
-                             [switch_policy.floor_allows(after, c)['allowed'] for c in everything if c[0] != H], baseline)
-        sonnet = copy.deepcopy(cfg)
-        sonnet['quality_floor'].update(enabled=True, baseline=f'{S}/medium')
-        self.assertTrue(switch_policy.floor_allows(sonnet, (H, 'medium'))['allowed'])
-        self.assertEqual(switch_policy.floor_allows(sonnet, (H, 'low'))['extra_misses'], ['nx-classes-weak-views'])
+            self.assertEqual([switch_policy.floor_allows(after, c) for c in others],
+                             [switch_policy.floor_allows(old, c) for c in others], baseline)
+            if baseline.startswith(O):
+                self.assertEqual(switch_policy.floor_allows(after, (S, 'medium'))['extra_misses'],
+                                 ['parse-decimal-grouping', 'tomli-decode-error-attrs'])
+                self.assertEqual(switch_policy.floor_allows(after, (H, 'medium'))['extra_misses'], ['tomli-decode-error-attrs'])
+            else:
+                self.assertTrue(switch_policy.floor_allows(after, (H, 'medium'))['allowed'])
+                self.assertEqual(switch_policy.floor_allows(after, (H, 'low'))['extra_misses'], ['nx-classes-weak-views'])
+        # The alternative, on record: counted for stronger models, they would lift Sonnet's rate and clear its parse miss.
+        lift = switch_policy.with_overrides(cfg, {'models': {H: {'outcomes_count_for_stronger': True}}})
+        self.assertAlmostEqual(switch_policy.measured_ok(lift, (S, 'medium')), 57 / 60)
+        lift['quality_floor'].update(enabled=True, baseline=f'{O}/medium')
+        self.assertEqual(switch_policy.floor_allows(lift, (S, 'medium'))['extra_misses'], ['tomli-decode-error-attrs'])
+        with self.assertRaisesRegex(ValueError, 'outcomes_count_for_stronger'):
+            switch_policy.with_overrides(cfg, {'models': {H: {'outcomes_count_for_stronger': 'no'}}})
 
 
 class ProbeTests(unittest.TestCase):
