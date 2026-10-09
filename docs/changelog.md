@@ -2,6 +2,22 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 8, 2026: Haiku 5.5 plan, steps 2-3, live: Haiku 5.5 medium meets the floor for a Sonnet user, at a third of the cost
+
+The user's go and run (`runs/haiku-arms-20261008.sh`): `runs/bench-20261008-195122`, the two Haiku 5.5 arms on the 29 tuning tasks, 1 trial each, seed 9, subscription token, `--budget 40`, no retries; $0 API, $1.37 as sent; 58/58 complete, no unknown cost, re-graded (`runs/regrade-bench-20261008-195122-20261008-212105`). The manifest names commit `2a51d38` with uncommitted changes: the run started at 19:51, before the commit at 19:59 (`4c100a9`), and no file under `modelpilot/`, `configs/` or `bench/` changed after 19:32, so it ran `4c100a9`'s code. Analysis ($0): `runs/haiku-arms-analysis-20261008.py` → `.json`, every recorded fixed-arm trial on the same 29 tasks at October 8 prices, cold-equivalent, strict grading.
+
+| Arm | Strict passes | Tasks with a miss | $ a task | Wall s a task |
+| --- | --- | --- | --- | --- |
+| `haiku-5.5-low-concise` | 25/29 | 4 | $0.0109 | 43 |
+| `haiku-5.5` (medium) | 28/29 | 1 (tomli) | $0.0322 | 120 |
+| `sonnet-5.5-low-concise` | 55/60 | 3 | $0.0708 | 38 |
+| `sonnet-5.5` (medium) | 52/65 | 5 | $0.0891 | 45 |
+| `opus-5.5` (medium) | 38/40 | 1 | $0.2440 | 68 |
+
+- **Step 3, the quality floor's rule** (`switch_policy.floor_allows` with the Haiku outcomes added to a copy of the config). Haiku 5.5 medium adds no miss over Sonnet 5.5 medium on the 29 shared tasks: its one miss, `tomli-decode-error-attrs`, Sonnet medium misses too (0/2). So it **qualifies for a Sonnet user**, at 36% of Sonnet medium's cost and 45% of low concise's. Not for an Opus user (it adds tomli). Low concise Haiku fails for both: it adds `nx-classes-weak-views` (hidden tests), which Sonnet medium passes.
+- **Caveats.** One trial a task, where the Sonnet arms have up to 10 on the hard tasks; the floor counts any failed trial as a miss, so more Haiku trials can only add misses. Three Haiku medium trials hit the 30-turn limit (`nx-classes-weak-views`, `nx-connectivity-digraph-cuts`, `nx-ismags-monomorphism`) and passed because the fix was already in place. Haiku medium averaged 15.1 main-loop requests (Sonnet medium about 7), so it was 2.7× slower a task, not faster; low concise Haiku took 10.5 and about Sonnet's time. Its two longest sessions crossed 100,000 prompt tokens (26 requests, at the higher tier, included above). The client's own price peaked at $1.68 of the $40 stop: the usual $1 would have stopped sessions early.
+- **Next** (the plan's step 4 and the user's call): the probes, or first a second Haiku medium trial ($0 on the subscription) to firm up the floor.
+
 ## October 8, 2026: the Haiku 5.5 plan, and step 1: Sonnet 5.5 prices by date (offline)
 
 $0, user decisions. The plan, in `docs/m6-benchmark-plan.md`, "Haiku 5.5": test Haiku 5.5 as a cheap default and work toward making it a routing candidate, quality first; the client's 40× price handled with a raised `--budget` (no repin); Sonnet 5.5 priced by date; up to $3 of paid spend before results. Steps: (1) dated Sonnet rates, (2) the two Haiku arms on the 29 tuning tasks on the subscription, (3) the quality floor's rule decides, (4) only if Haiku passes, the two probes, (5) only if they pass, Haiku becomes a candidate. `CLAUDE.md` plan item 14.

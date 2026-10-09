@@ -84,4 +84,4 @@ Built offline first; any live run needs the user's approval. 1–4 done October 
 11. 4b held (user decision); on record its trial-count rule gives n=1.
 12. Governor: live evidence for turn-end delivery and observed rebuilds; dry-run meanwhile.
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
-14. Haiku 5.5 (user decisions): arms, then probes if it passes.
+14. Haiku 5.5: medium meets the Sonnet floor (1 trial); probes next.
