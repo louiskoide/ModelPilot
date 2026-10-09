@@ -193,7 +193,10 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertEqual(self.dispatches(), [])
 
     def test_jev_is_asked_only_where_some_answer_could_move(self):
-        self.start(config=switch_policy.load())  # the shipped, calibrated policy
+        # The shipped, calibrated policy with Jev's candidates only: from this Sonnet 5.5 medium start its measured
+        # candidates (low concise) could pay, so it asks Jev here; the arms start on low concise, where it still doesn't
+        # (runs/measured-candidates-replay-20261008.json).
+        self.start(config=switch_policy.with_overrides(switch_policy.load(), {'measured_candidates': {'enabled': False}}))
         self.advisor.answer = {'model': {'choice': O, 'confidence': .99, 'probabilities': {O: 1}},
                                'effort': {'choice': 'max', 'confidence': .99, 'probabilities': {'max': 1}}}
         self.assertEqual(self.post()[0], 200)

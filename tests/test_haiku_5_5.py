@@ -1,4 +1,5 @@
 """Haiku 5.5 (October 8): its prices by prompt length, where they apply, its arms and probes, and its request shape."""
+import copy
 import json
 from pathlib import Path
 import unittest
@@ -13,6 +14,38 @@ RATE = CONFIG['rates'][H]
 LOW = dict(input=.1, output=.5, write_5m=.125, write_1h=.2, read=.01)  # prompts up to 100,000 tokens
 HIGH = dict(input=.5, output=2.5, write_5m=.625, write_1h=1, read=.05)  # prompts over 100,000 tokens
 CLIENT_SHAPE = json.loads((ROOT/'tests/fixtures/claude-2.1.284-haiku-5-5-shape.json').read_text())
+# Strict outcomes of the Haiku 5.5 runs (the policy evidence is in the ignored runs/haiku-policy-evidence-20261008.json):
+# medium, two trials a task (bench-20261008-195122, -214840), failed tomli both times; low concise, one trial
+# (bench-20261008-195122), missed four tasks. setting: (trials a task, failed trials by task)
+TASKS = sorted(json.loads((ROOT/'configs/modelpilot-policy.json').read_text())['quality_floor']['outcomes'][f'{S}/medium'])
+HAIKU_OUTCOMES = {f'{H}/medium': (2, {'tomli-decode-error-attrs': 2}),
+                  f'{H}/low': (1, {'nx-classes-weak-views': 1, 'nx-ismags-monomorphism': 1, 'parse-decimal-grouping': 1,
+                                   'tomli-decode-error-attrs': 1})}
+# Jev's usual answer on the tuning tasks (bench-20261006-093401): Sonnet 5.5, effort medium.
+USUAL = {'model': {'choice': S, 'confidence': .91, 'probabilities': {S: .95, H: .02, O: .03}},
+         'effort': {'choice': 'medium', 'confidence': .55,
+                    'probabilities': {'low': 0, 'medium': .64, 'high': .33, 'xhigh': .03, 'max': 0}}}
+
+
+def with_haiku_outcomes(cfg):
+    """A config copy with the first Haiku run's outcomes in the calibration and the floor's evidence (left out of the
+    shipped config until the user decides how they may bound other models' settings)."""
+    cfg = copy.deepcopy(cfg)
+    for setting, (n, failed) in HAIKU_OUTCOMES.items():
+        cfg['calibration']['outcomes'][setting] = {'passed': n * len(TASKS) - sum(failed.values()), 'trials': n * len(TASKS)}
+        cfg['quality_floor']['outcomes'][setting] = {t: [n - failed.get(t, 0), n] for t in TASKS}
+    return cfg
+
+
+def haiku_on(baseline=None, measured=True):
+    """The config once the probes pass: Haiku 5.5 a candidate with per-message effort, its outcomes in, the floor on
+    for baseline (None: off), as the arm's overrides would set it."""
+    cfg = with_haiku_outcomes(switch_policy.load())
+    cfg['models'][H].update(candidate=True, per_message_effort=True)
+    cfg['measured_candidates']['enabled'] = measured
+    if baseline:
+        cfg['quality_floor'].update(enabled=True, baseline=baseline)
+    return cfg
 
 
 def usage(read, write=0, uncached=10, output=100):
@@ -72,11 +105,30 @@ class RateTests(unittest.TestCase):
         repriced = bench_report.api_key_equivalent([hour], bench.rates())[0]
         self.assertAlmostEqual(repriced['cost_usd'], priced(HIGH, rows[1]['usage']))
 
-    def test_forecasts_refuse_a_price_by_prompt_length(self):
+    def test_forecasts_price_each_request_at_the_tier_its_prompt_reaches(self):
+        low, high = dict(LOW, max_prompt_tokens=100000), dict(HIGH, max_prompt_tokens=None)
+        self.assertEqual(switch_policy._segments(RATE, 90_000, 2_000, 10), [(5.0, low), (5.0, high)])
+        self.assertEqual(switch_policy._segments(RATE, 10_000, 2_000, 10), [(10, low)])
+        self.assertEqual(switch_policy._segments(RATE, 120_000, 2_000, 4), [(4, high)])
+        self.assertEqual(switch_policy._segments(RATE, 50_000, 0, 3), [(3, low)])
+        flat = bench.rates()[O]
+        self.assertEqual(switch_policy._segments(flat, 90_000, 2_000, 10), [(10, flat)])
         cfg = switch_policy.load()
-        with self.assertRaisesRegex(ValueError, 'prompt length'):
-            switch_policy._rate(bench.rates(), H)
-        self.assertNotIn(H, {m for m, _ in switch_policy.settings(cfg)})  # not a candidate, so never priced there
+        prof = dict(cfg['defaults'], prefix_tokens=90_000, messages_tokens=1500, warm=True, warm_entries={})
+        requests, output = switch_policy._scale(cfg, (H, 'medium'), prof)
+        horizon = prof['horizon_requests'] * requests
+        reply = prof['output_tokens'] * output
+        growth = prof['new_input_tokens'] + reply
+        n1 = (100_000 - 90_000) / growth
+        expected = (n1 * ((90_000 + (n1 - 1) / 2 * growth) * LOW['read'] + growth * LOW['write_5m'] + reply * LOW['output']) +
+                    (horizon - n1) * ((90_000 + n1 * growth + (horizon - n1 - 1) / 2 * growth) * HIGH['read'] +
+                                      growth * HIGH['write_5m'] + reply * HIGH['output'])) / 1e6
+        self.assertAlmostEqual(switch_policy.run_cost(cfg, bench.rates(), (H, 'medium'), prof), expected)
+        # On the measured task shape, Haiku 5.5 medium forecasts below Sonnet 5.5 low concise, as measured.
+        cold = dict(prof, prefix_tokens=7100, warm=False)
+        self.assertLess(switch_policy.run_cost(cfg, bench.rates(), (H, 'medium'), cold),
+                        switch_policy.run_cost(cfg, bench.rates(), (S, 'low'), cold))
+        self.assertEqual(switch_policy._rate(bench.rates(), H, 150_000)['read'], .05)
 
 
 class TierTests(unittest.TestCase):
@@ -97,6 +149,83 @@ class TierTests(unittest.TestCase):
         for arm in ('jev-compat-o55', 'modelpilot', 'modelpilot-for-sonnet'):  # Jev now discovers Haiku 5.5
             self.assertEqual(tuple(bench.ARMS[arm]['models']), (H, S, O), arm)
         self.assertNotIn(H, bench.ARMS['modelpilot']['served_models'])
+
+
+class CandidacyTests(unittest.TestCase):
+    """What turning Haiku 5.5 on will do (user decisions, October 8: every arm, reached by proxy moves, measured
+    settings weighed beside Jev's), checked now with the flag that the probes will turn on."""
+    def setUp(self):
+        self.rates = bench.rates()
+        self.prof = switch_policy.profile(switch_policy.load(), {'model': S, 'messages': [{'role': 'user', 'content': 'x' * 19800}]},
+                                          False)
+
+    def decide(self, cfg, current, adv=USUAL, trigger='turn_start'):
+        return switch_policy.decide(cfg, self.rates, adv, current, self.prof, trigger)
+
+    def test_shipped_haiku_is_not_a_candidate_and_needs_per_message_effort_to_be_one(self):
+        cfg = switch_policy.load()
+        self.assertNotIn(H, {m for m, _ in switch_policy.settings(cfg)})
+        spec = cfg['models'][H]
+        self.assertEqual((spec['candidate'], spec['per_message_effort'], spec['candidate_efforts']), (False, False, ['medium']))
+        self.assertEqual((spec['request_factor'], spec['output_factor']), (2.11, 2.32))  # runs/haiku-policy-evidence-20261008
+        with self.assertRaisesRegex(ValueError, 'per_message_effort'):  # the client's own effort message would hold
+            switch_policy.with_overrides(cfg, {'models': {H: {'candidate': True}}})
+        on = switch_policy.with_overrides(cfg, {'models': {H: {'candidate': True, 'per_message_effort': True}}})
+        self.assertEqual([c for c in switch_policy.settings(on) if c[0] == H], [(H, 'medium')])  # the measured effort
+        with self.assertRaisesRegex(ValueError, 'candidate_efforts'):
+            switch_policy.with_overrides(cfg, {'models': {H: {'candidate_efforts': ['turbo']}}})
+
+    def test_a_sonnet_user_starting_on_low_concise_moves_to_haiku_medium(self):
+        for baseline in (f'{S}/medium', None):  # modelpilot-for-sonnet, and modelpilot without the floor
+            decision = self.decide(haiku_on(baseline), (S, 'low'))
+            self.assertEqual((decision['action'], decision['target'], decision['reason']),
+                             ('jump', [H, 'medium'], 'expected_cost_lower'), baseline)
+            haiku = next(c for c in decision['candidates'] if c['setting'] == f'{H}/medium')
+            self.assertTrue(haiku['measured_only'])  # Jev named Sonnet: weighed for its measured outcomes
+            self.assertAlmostEqual(haiku['p_measured'], 57 / 60)  # 56/58 with the uniform prior
+
+    def test_an_opus_user_never_weighs_haiku(self):
+        decision = self.decide(haiku_on(f'{O}/medium'), (O, 'medium'))
+        self.assertNotIn(f'{H}/medium', {c['setting'] for c in decision['candidates']})
+        self.assertEqual(decision['action'], 'stay')
+
+    def test_without_measured_candidates_haiku_waits_for_jev_to_name_it(self):
+        cfg = haiku_on(f'{S}/medium', measured=False)
+        self.assertNotIn(f'{H}/medium', {c['setting'] for c in self.decide(cfg, (S, 'low'))['candidates']})
+        named = {'model': {'choice': H, 'confidence': .9, 'probabilities': {H: .9, S: .08, O: .02}},
+                 'effort': USUAL['effort']}
+        self.assertEqual(self.decide(cfg, (S, 'low'), named)['target'], [H, 'medium'])
+
+    def test_measured_candidates_join_only_at_turn_starts_and_need_an_answer(self):
+        cfg = haiku_on(f'{S}/medium')
+        warm = switch_policy.profile(cfg, {'model': S, 'messages': [{'role': 'user', 'content': 'x' * 19800}]}, True)
+        step = switch_policy.decide(cfg, self.rates, USUAL, (S, 'low'), warm, 'step')
+        self.assertFalse(any(c.get('measured_only') for c in step['candidates']))
+        self.assertEqual(self.decide(cfg, (S, 'low'), None)['reason'], 'advice_unavailable')
+        gate = switch_policy.jev_gate(cfg, self.rates, (S, 'low'), self.prof, 'turn_start')
+        self.assertEqual((gate['can_change'], gate['reason']), (True, 'a_move_can_pay'))
+
+    def test_haikus_outcomes_would_lift_stronger_settings_under_the_floors_premise(self):
+        # Why the shipped config leaves them out (a question for the user, October 8): under "a stronger setting never
+        # misses more", Haiku 5.5 medium's two trials a task raise Sonnet 5.5 medium's measured rate and clear its parse
+        # miss against an Opus user. No setting's floor verdict changes.
+        base, cfg = switch_policy.load(), with_haiku_outcomes(switch_policy.load())
+        self.assertAlmostEqual(switch_policy.measured_ok(base, (S, 'medium')), 49 / 54)
+        self.assertAlmostEqual(switch_policy.measured_ok(cfg, (S, 'medium')), 57 / 60)
+        opus = copy.deepcopy(cfg)
+        opus['quality_floor'].update(enabled=True, baseline=f'{O}/medium')
+        self.assertEqual(switch_policy.floor_allows(opus, (S, 'medium'))['extra_misses'], ['tomli-decode-error-attrs'])
+        everything = [(m, e) for m in (H, S, O) for e in base['effort_order']]
+        for baseline in (f'{S}/medium', f'{O}/medium'):
+            before, after = copy.deepcopy(base), copy.deepcopy(cfg)
+            for c in (before, after):
+                c['quality_floor'].update(enabled=True, baseline=baseline)
+            self.assertEqual([switch_policy.floor_allows(before, c)['allowed'] for c in everything if c[0] != H],
+                             [switch_policy.floor_allows(after, c)['allowed'] for c in everything if c[0] != H], baseline)
+        sonnet = copy.deepcopy(cfg)
+        sonnet['quality_floor'].update(enabled=True, baseline=f'{S}/medium')
+        self.assertTrue(switch_policy.floor_allows(sonnet, (H, 'medium'))['allowed'])
+        self.assertEqual(switch_policy.floor_allows(sonnet, (H, 'low'))['extra_misses'], ['nx-classes-weak-views'])
 
 
 class ProbeTests(unittest.TestCase):

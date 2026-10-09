@@ -105,6 +105,16 @@ EFFORT_CASES = {'effort/control': ((S, 'medium'), 'control', 'medium', None),
                 'effort/pm_xhigh_at_start': ((S, 'medium'), 'pm_start', 'xhigh', 'before_result'),
                 'effort/opus_pm_low': ((TOP, 'medium'), 'pm', 'low', 'before_result')}
 EFFORT_STEPS, EFFORT_MAX_TOKENS = 3, 8192
+# The proxy move that reaches Haiku 5.5 (user decision, October 8): the client runs Sonnet 5.5 at low (the low concise
+# start) with its own effort message on the note after the prompt, as 2.1.284 sends it, and ActivePolicy forwards every
+# request to Haiku 5.5, from the first one on. Modes: move_control (Haiku at the client's effort, the reference),
+# move_top (the top-level effort set to medium; the client's effort message, later, is still there) and move_pm (the
+# top level left at the client's and an effort message for medium after the client's: ActivePolicy.carry at a turn
+# start). Thinking tokens by step show which effort holds; the policy needs move_pm to hold medium.
+# case: (client setting, mode, Haiku's effort, placement)
+HAIKU_EFFORT_CASES = {'haiku/move_control': ((S, 'low'), 'move_control', 'low', None),
+                      'haiku/move_top': ((S, 'low'), 'move_top', 'medium', None),
+                      'haiku/move_pm': ((S, 'low'), 'move_pm', 'medium', 'before_result')}
 
 
 def step_puzzle(step):
@@ -287,6 +297,13 @@ def plan(run_id, suite, repeats, client_shape):
                 # rewriting its requests, which keeps the client's headers. So their seeds carry Sonnet's shape and betas.
                 groups.append(_group(run_id, case, shape_name, repeat, source, target, client_shape,
                                      spec_model=S if source[0] in (TOP, H) else None))
+        if suite == 'haiku-5-5':
+            for case, (home, mode, effort, placement) in HAIKU_EFFORT_CASES.items():
+                g = _group(run_id, case, 'tool_continuation', repeat, home, (H, effort), client_shape)
+                g['request']['messages'][-1]['output_config'] = {'effort': home[1]}  # the client's own effort message
+                g.update(steps=['seed'] + [f'step{i}' for i in range(1, EFFORT_STEPS + 1)], effort_mode=mode,
+                         placement=placement)
+                groups.append(g)
     for g in groups:
         if 'switched' in g['steps']:
             # A refusal that does not depend on the reply (e.g. mid-history system messages for Haiku)
@@ -455,7 +472,9 @@ def max_reserve(groups):
         if not g['steps']:
             continue
         size = len(json.dumps(g['request']).encode())
-        total += estimate(size, g['request']['max_tokens'], g['request']['model'])
+        # A move group forwards every request, its seed included, to the target model (HAIKU_EFFORT_CASES).
+        sent_to = g['target'][0] if g.get('effort_mode', '').startswith('move_') else g['request']['model']
+        total += estimate(size, g['request']['max_tokens'], sent_to)
         if 'switched' in g['steps']:
             total += estimate(size + SEED_MAX_TOKENS*4, SWITCH_MAX_TOKENS, g['target'][0])
         # A return group: every later request carries all earlier replies at their maximum length.
@@ -463,7 +482,7 @@ def max_reserve(groups):
             model = g['target'][0] if role == 'away' else g['source'][0]
             total += estimate(size + step*SEED_MAX_TOKENS*4, SWITCH_MAX_TOKENS, model)
         for step in range(1, len(g['steps']) if 'effort_mode' in g else 1):  # a per-message-effort group
-            total += estimate(size + step*EFFORT_MAX_TOKENS*4, EFFORT_MAX_TOKENS, g['source'][0])
+            total += estimate(size + step*EFFORT_MAX_TOKENS*4, EFFORT_MAX_TOKENS, sent_to)
     return total
 
 
@@ -529,7 +548,7 @@ def effort_findings(verdict_rows):
     """Per effort case: accepted repeats, whether steps 2 and 3 kept the cache, and mean thinking tokens by step."""
     found = {}
     for v in verdict_rows:
-        if v['case'] not in EFFORT_CASES:
+        if v['case'] not in EFFORT_CASES and v['case'] not in HAIKU_EFFORT_CASES:
             continue
         f = found.setdefault(v['case'], {'repeats': 0, 'accepted': 0, 'verdicts': [], 'step2_cache': [],
                                          'step3_cache': [], 'thinking': []})
@@ -569,7 +588,7 @@ def execute(groups, out, budget, suite, repeats, transport=probe.send):
         result['verified_transitions'] = verified_transitions(result)
         if suite == 'returns':
             result['return_findings'] = return_findings(result['verdicts'])
-        if suite == 'per-message-effort':
+        if suite in ('per-message-effort', 'haiku-5-5'):
             result['effort_findings'] = effort_findings(result['verdicts'])
         tmp = out/'summary.tmp'
         tmp.write_text(json.dumps(result, indent=2)+'\n')
@@ -665,11 +684,17 @@ def execute(groups, out, budget, suite, repeats, transport=probe.send):
         def run_effort(group):
             home, target = tuple(group['source']), group['target'][1]
             mode, placement = group['effort_mode'], group['placement']
+            moving = mode.startswith('move_')  # every request forwarded to the target model (HAIKU_EFFORT_CASES)
             injections = []
-            if mode == 'pm_start':  # from the first request on, as ModelPilot would at a turn start
+            if mode in ('pm_start', 'move_pm'):  # from the first request on, as ModelPilot would at a turn start
                 injections.append((effort_anchor(group['request']['messages'], placement), target))
+
+            def moved(client):
+                out = transform_request(client, group['target'][0], target if mode == 'move_top' else home[1],
+                                        allow_thinking_history=True)
+                return with_effort_messages(out, injections) if mode == 'move_pm' else out
             client = group['request']
-            reply = send(group, 'seed', with_effort_messages(client, injections))
+            reply = send(group, 'seed', moved(client) if moving else with_effort_messages(client, injections))
             row = rows[-1]
             outcome = {'mode': mode, 'placement': placement, 'thinking': [_thinking_tokens(row)],
                        'reads': [row['usage'].get('cache_read_input_tokens') or 0], 'entries': [_entry_tokens(row['usage'])]}
@@ -679,7 +704,9 @@ def execute(groups, out, budget, suite, repeats, transport=probe.send):
             for step in range(1, EFFORT_STEPS + 1):
                 client = puzzle_request(group, client, reply, step)
                 forwarded = client
-                if step >= 2 and mode == 'top':
+                if moving:
+                    forwarded = moved(client)
+                elif step >= 2 and mode == 'top':
                     forwarded = transform_request(client, home[0], target, allow_thinking_history=True)
                 elif mode in ('pm', 'pm_start'):
                     if step == 2 and mode == 'pm':
@@ -784,6 +811,7 @@ def main(argv=None):
                     pricing_checked='2026-10-08' if args.suite == 'haiku-5-5' else '2026-09-24', shape=shape,
                     prompts=PROMPTS, follow_up=FOLLOW_UP, controls=dict(CONTROLS, **HAIKU_CONTROL), transitions=TRANSITIONS,
                     opus_5_5_cases=O55_CASES, return_cases=RETURN_CASES, next_step=NEXT_STEP, effort_cases=EFFORT_CASES,
+                    haiku_effort_cases=HAIKU_EFFORT_CASES,
                     step_puzzles=[step_puzzle(i) for i in range(1, EFFORT_STEPS + 1)], groups=groups,
                     method='Seed at the source setting; continue with its content passed back unchanged, transformed '
                            'by policy_actions.transform_request (Opus 5.5: effort edited directly). Switched requests '

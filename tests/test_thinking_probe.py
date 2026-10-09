@@ -80,8 +80,9 @@ class PlanTests(unittest.TestCase):
                           ('effort_up/sonnet', (S, 'medium'), (S, 'high')), ('effort_down/sonnet', (S, 'high'), (S, 'medium')),
                           ('model_up', (S, 'high'), (O, 'medium')), ('model_down', (O, 'medium'), (S, 'medium'))})
         # haiku-5-5: 2 repeats x 2 shapes x (the controls on its targets + 3 Haiku 5.5 transitions) x 2 requests.
-        self.assertEqual(tp.planned_calls(tp.plan('r', 'haiku-5-5', 2, SHAPE)), 40)
-        self.assertEqual({(g['case'], tuple(g['source']), tuple(g['target'])) for g in tp.plan('r', 'haiku-5-5', 1, SHAPE)},
+        self.assertEqual(tp.planned_calls(tp.plan('r', 'haiku-5-5', 2, SHAPE)), 40 + 24)  # and the moves (HaikuMoveTests)
+        self.assertEqual({(g['case'], tuple(g['source']), tuple(g['target'])) for g in tp.plan('r', 'haiku-5-5', 1, SHAPE)
+                          if 'effort_mode' not in g},
                          {('control/sonnet', (S, 'medium'), (S, 'medium')), ('control/haiku', (H, 'medium'), (H, 'medium')),
                           ('to_haiku/sonnet', (S, 'medium'), (H, 'medium')), ('from_haiku', (H, 'medium'), (S, 'medium')),
                           ('effort_up/haiku', (H, 'medium'), (H, 'high'))})
@@ -578,6 +579,46 @@ class EffortTransport:
         return {'model': p['model'], 'stop_reason': 'tool_use', 'usage': usage, 'content': [
             {'type': 'thinking', 'thinking': 'PRIVATE-THOUGHT', 'signature': 'SIG-SECRET'},
             {'type': 'tool_use', 'id': f'toolu_{turn + 1}', 'name': 'record_answer', 'input': {'value': 424242}}]}, 'req_fake'
+
+
+class HaikuMoveTests(unittest.TestCase):
+    """The proxy move to Haiku 5.5 (user decision, October 8): the client on Sonnet 5.5 low with its own effort message,
+    every request forwarded to Haiku 5.5; only an effort message after the client's sets Haiku's effort."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.groups = [g for g in tp.plan('r', 'haiku-5-5', 1, SHAPE) if 'effort_mode' in g]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_the_plan_mirrors_the_client_and_the_proxy(self):
+        self.assertEqual(tp.planned_calls(tp.plan('r', 'haiku-5-5', 2, SHAPE)), 40 + 2 * 3 * 4)
+        self.assertEqual({g['case']: (g['effort_mode'], tuple(g['source']), tuple(g['target'])) for g in self.groups},
+                         {'haiku/move_control': ('move_control', (S, 'low'), (H, 'low')),
+                          'haiku/move_top': ('move_top', (S, 'low'), (H, 'medium')),
+                          'haiku/move_pm': ('move_pm', (S, 'low'), (H, 'medium'))})
+        for g in self.groups:
+            self.assertEqual(g['request']['model'], S)  # the client's request; the probe forwards it
+            self.assertEqual(g['request']['messages'][-1]['output_config'], {'effort': 'low'})  # the client's own
+            self.assertEqual(g['betas'], SHAPE['requests'][S]['anthropic_beta'])
+
+    def test_only_the_proxys_effort_message_moves_haikus_effort(self):
+        fake = EffortTransport()
+        result = tp.execute(self.groups, Path(self.tmp.name), Budget(100), 'haiku-5-5', 1, transport=fake)
+        self.assertEqual(result['status'], 'complete')
+        self.assertTrue(all(p['model'] == H for p, _ in fake.calls))  # every request, the seed included
+        by_case = {}
+        for p, _ in fake.calls:  # each group's prefix starts with its own nonce
+            by_case.setdefault(p['system'][0]['text'], []).append(p)
+        sent = {g['case']: by_case[g['request']['system'][0]['text']] for g in self.groups}
+        for case, top in (('haiku/move_control', 'low'), ('haiku/move_top', 'medium'), ('haiku/move_pm', 'low')):
+            self.assertEqual({p['output_config']['effort'] for p in sent[case]}, {top}, case)
+        efforts = [[m['output_config']['effort'] for m in p['messages'] if m.get('output_config')] for p in sent['haiku/move_pm']]
+        self.assertEqual(efforts, [['low', 'medium']] * 4)  # the proxy's message after the client's, from the seed on
+        found = result['effort_findings']
+        # The fake follows the documented rule (the last effort message holds): the top level alone leaves Haiku at low.
+        self.assertEqual({c: found[c]['thinking'] for c in found},
+                         {'haiku/move_control': [[10] * 4], 'haiku/move_top': [[10] * 4], 'haiku/move_pm': [[100] * 4]})
 
 
 class PerMessageEffortTests(unittest.TestCase):

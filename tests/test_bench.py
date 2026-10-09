@@ -56,9 +56,9 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual((arm['served_models'], arm['models']), (['claude-opus-5-5', 'claude-sonnet-5-5'], POLICY_TIERS))
         self.assertNotIn('modelpilot-o55', bench.ARMS)  # the start is Jev's prediction now, not a tuned variant
         self.assertTrue(all(m in bench.rates() for m in arm['served_models']))
-        with self.assertRaises(ValueError):  # Haiku targets are not implemented
-            from modelpilot.modelpilot_adapter import ModelPilotAdapter
-            ModelPilotAdapter(mode='active', tools=True, model='claude-haiku-4-5-20251001', effort=None)
+        from modelpilot.modelpilot_adapter import ModelPilotAdapter
+        with self.assertRaisesRegex(ValueError, 'proxy move'):  # Haiku 5.5 is reached by a proxy move, never as the start
+            ModelPilotAdapter(mode='active', tools=True, model='claude-haiku-5-5', effort='medium')
         manifest = bench.modelpilot_manifest(['sonnet-5', 'modelpilot', 'modelpilot-delegate'], 1.0, 1)
         self.assertEqual([(manifest[a]['r5_tools'], manifest[a]['channel_declared'])
                           for a in ('modelpilot', 'modelpilot-delegate')], [(False, False), (True, True)])

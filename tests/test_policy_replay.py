@@ -62,7 +62,12 @@ class ReplayTests(unittest.TestCase):
             journal(run/'t-jumped'/'sonnet-5.5'/'0', [self.jump])  # not a ModelPilot trial: skipped
             (run/'t-jumped'/'sonnet-5.5'/'0'/'trial.json').write_text(json.dumps(dict(record('t-jumped'), arm='sonnet-5.5',
                                                                                      routing=None)))
-            rows = pr.replay_run(run, self.cfg, self.rates)
+            # Jev's candidates only: from Sonnet 5.5 medium a measured candidate (low concise) could pay under some
+            # answer, so with measured_candidates on the gate asks Jev at these turn starts (tests/test_switch_policy.py, MeasuredCandidateTests).
+            jev_only = sp.with_overrides(self.cfg, {'measured_candidates': {'enabled': False}})
+            rows = pr.replay_run(run, jev_only, self.rates)
+            measured = pr.replay_run(run, self.cfg, self.rates)
+        self.assertEqual(pr.summarize(measured)['gate']['asked'], {'turn_start:a_move_can_pay': 2})
         self.assertEqual([(r['task'], r['trigger'], r['status']) for r in rows],
                          [('t-jumped', 'turn_start', 'changed'), ('t-jumped', 'step', 'path_diverged'),
                           ('t-old', 'turn_start', 'not_replayable'), ('t-stayed', 'turn_start', 'same')])

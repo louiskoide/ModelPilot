@@ -2,6 +2,42 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 8, 2026 (night): Haiku 5.5's integration built and off; measured candidates on (offline)
+
+$0. The user asked for everything Haiku 5.5 needs in ModelPilot that doesn't need their decision, with the decisions asked first. User decisions:
+- Haiku may serve every ModelPilot arm. The quality floor still keeps it from an Opus user, because Haiku misses tomli and Opus doesn't.
+- A session reaches Haiku by a proxy move, never by starting the client on it.
+- At turn starts, measured settings are weighed beside Jev's pick.
+
+Haiku 5.5 stays `candidate: false` until its probes pass. Details: `docs/m6-modelpilot-policy.md`, "Haiku 5.5 and measured candidates".
+
+- **Measured candidates** (`measured_candidates`, on at turn starts). Settings with measured tuning outcomes are weighed beside Jev's pick, marked `measured_only`. A measured downgrade skips Jev's confidence check but pays the downgrade's extra hysteresis; without Jev's answer nothing moves. Replayed over the seven recorded ModelPilot runs (`runs/measured-candidates-replay-20261008.py` → `.json`), it changes no decision of `modelpilot`, `modelpilot-for-sonnet` or `modelpilot-for-opus` while Haiku is off.
+- **Haiku 5.5's pieces:**
+  - **Forecasts:** they price a model priced by prompt length request by request, at each request's tier (`switch_policy._segments`); switches, consults and notes are priced at their own prompt's tier. Replaces `_rate`'s refusal.
+  - **Candidate efforts:** `candidate_efforts` is the measured `medium`.
+  - **Run factors:** 2.11× requests and 2.32× output per request against Sonnet 5.5 medium, over both Haiku runs (`runs/haiku-policy-evidence-20261008.py` → `.json`).
+  - **Per-message flag:** an explicit `per_message_effort: false`.
+  - **Messages:** the adapter's refusal of a Haiku start now explains the proxy move; the active policy no longer lists "Haiku targets" as not implemented.
+- **Guard** (`_check_models`, at load and for arm overrides). Claude Code 2.1.284 puts its own effort in an effort message, and the last one holds, so a candidate without per-message effort would run at the client's effort. For Haiku from the low concise start that means low, which fails the floor. Such a candidate is refused.
+- **Probe:** `thinking_probe --suite haiku-5-5` gains the proxy move's effort cases (`haiku/move_control`, `move_top`, `move_pm`; 64 requests, bound $3.88, likely under $1). `move_pm` decides Haiku's `per_message_effort`.
+- **What turning Haiku on would do** (replayed with it a candidate, per-message effort on and its outcomes in):
+  - The Sonnet-start arms move 101 of 105 recorded turn starts to Haiku 5.5 medium, all as measured candidates; the other 4 had no Jev answer.
+  - The Opus-user arm never weighs Haiku.
+  - The gate would ask Jev at every turn start (it skips all 161 recorded points today): one TypeSafe call each, though Haiku's measured rate mostly decides.
+- **Held for the user: Haiku's outcomes as evidence for other settings.** Under the floor and calibration premise that a stronger setting never misses more:
+  - Haiku medium's 56/58, two trials a task, would lift every Sonnet 5.5 setting at medium or above from 48/52 to 57/60. Sonnet's 48/52 is weighted to the hard tasks by its repeats.
+  - It would also clear Sonnet's parse miss against an Opus user. No floor verdict changes.
+
+  So the shipped config leaves them out, and turning Haiku on needs them in (`CandidacyTests` records both effects).
+- **Second Haiku medium trial** (the user's run, `runs/haiku-medium-trial2-20261008.sh`): `runs/bench-20261008-214840`, seed 10, commit `2ddc388`, subscription, `--budget 40`, no retries; 29/29 complete, $0 API, $1.12 as sent, re-graded (`runs/regrade-bench-20261008-214840-20261008-225124`). 28/29 strict, missing tomli again.
+  - Pooled: 56/58, both misses on tomli, which Sonnet 5.5 medium misses too. The floor still allows Haiku 5.5 medium for a Sonnet user and not for an Opus one.
+  - At October 8 prices: $0.0338 a task, 119 s; 15.3 main-loop requests a trial. 5 of 58 sessions hit the 30-turn limit and passed; 62 requests crossed 100,000 prompt tokens (`runs/haiku-arms-analysis-20261008.json`).
+  - The evidence scripts were re-run and the config's run factors updated. The replay is unchanged: 101 of 105 turn starts would move to Haiku.
+- **Tests:** 706 offline tests pass on Python 3.12 with the pinned 2.1.284 client first on PATH (`runs/haiku-integration-regression-py312.log`). New: `MeasuredCandidateTests` (3) in `tests/test_switch_policy.py`, `CandidacyTests` (6) and a tiered-forecast test in `tests/test_haiku_5_5.py`, `HaikuMoveTests` (2) in `tests/test_thinking_probe.py` and a floor-skip test in `tests/test_policy_replay.py`. Tests that assumed Jev-only candidates now say so (`measured_candidates` off), and `H` in the switch-policy tests is Haiku 5.5.
+- **Next** (the user's calls):
+  - Haiku's outcomes as evidence for other settings.
+  - The probes, step 4: `runs/haiku-probes-20261008.sh`, API key, budgets $1.50 each, likely under $1.30 in all.
+
 ## October 8, 2026: Haiku 5.5 plan, steps 2-3, live: Haiku 5.5 medium meets the floor for a Sonnet user, at a third of the cost
 
 The user's go and run (`runs/haiku-arms-20261008.sh`): `runs/bench-20261008-195122`, the two Haiku 5.5 arms on the 29 tuning tasks, 1 trial each, seed 9, subscription token, `--budget 40`, no retries; $0 API, $1.37 as sent; 58/58 complete, no unknown cost, re-graded (`runs/regrade-bench-20261008-195122-20261008-212105`). The manifest names commit `2a51d38` with uncommitted changes: the run started at 19:51, before the commit at 19:59 (`4c100a9`), and no file under `modelpilot/`, `configs/` or `bench/` changed after 19:32, so it ran `4c100a9`'s code. Analysis ($0): `runs/haiku-arms-analysis-20261008.py` → `.json`, every recorded fixed-arm trial on the same 29 tasks at October 8 prices, cold-equivalent, strict grading.

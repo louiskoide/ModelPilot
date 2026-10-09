@@ -63,7 +63,7 @@ class DatedRateTests(unittest.TestCase):
         self.assertIsNone(cache_probe.dated(None))
 
     def test_forecasts_use_todays_prices(self):
-        self.assertEqual(switch_policy._rate(bench.rates(), S)['read'], .1)
+        self.assertEqual(switch_policy._rate(bench.rates(), S, 10_000)['read'], .1)
 
     def test_reports_price_recorded_rows_on_their_own_day(self):
         u = usage(100_000, 2000, hour=2000)  # a subscription row: the client marks writes 1h

@@ -224,14 +224,19 @@ Unlike Sonnet 5, **a Sonnet 5.5 effort change keeps the tools and system cached 
 
 Two things to watch. The docs don't say whether another model reads Haiku 5.5's thinking blocks (they say none reads Sonnet 5.5's), so expect `from_haiku` to drop them, unbilled. Haiku 5.5's blocks are also bound to the account that produced them, which holds here.
 
-The `haiku-5-5` suite is the three cases a Haiku 5.5 candidate needs (`to_haiku/sonnet`, `from_haiku`, `effort_up/haiku`) with the Sonnet and Haiku controls:
+The `haiku-5-5` suite is the three cases a Haiku 5.5 candidate needs (`to_haiku/sonnet`, `from_haiku`, `effort_up/haiku`) with the Sonnet and Haiku controls. Since the user's decision on October 8 (a session reaches Haiku by a proxy move from the low concise start), it also has three move cases. Each is a seed and three steps, tool continuation, all forwarded to Haiku 5.5 as ActivePolicy would. The client runs Sonnet 5.5 low and carries its own effort message on the note after the prompt, as 2.1.284 does:
+- `haiku/move_control`: Haiku at the client's low, the reference;
+- `haiku/move_top`: the top-level effort set to medium, the client's later effort message still there;
+- `haiku/move_pm`: the top level left at low and the proxy's effort message for medium after the client's, from the seed on (ActivePolicy.carry at a turn start).
+
+Claude Code's own effort message means a model the proxy moves to must take the proxy's effort message, or it runs at the client's effort. Low is the Haiku setting that fails the floor. So `move_pm` decides Haiku's `per_message_effort`: accepted, with more thinking than `move_control` and the cache kept from step to step.
 
 ```sh
 python3 -m modelpilot.thinking_probe --suite haiku-5-5                                  # plan only, $0
-python3 -m modelpilot.thinking_probe --suite haiku-5-5 --repeats 2 --live --budget 3    # 40 requests
+python3 -m modelpilot.thinking_probe --suite haiku-5-5 --repeats 2 --live --budget 1.5  # 64 requests
 ```
 
-The dry-run admission bound is $2.37, a conservative upper bound. Sixteen of the requests are on Sonnet 5.5 and the rest on Haiku 5.5, so expect well under $1. If the suite passes, add its run and pairs to `THINKING_HISTORY_VERIFIED` and to the evidence table in `tests/test_policy_actions.py`. Run it with the pinned client's captured shape (`tests/fixtures/claude-2.1.284-shape.json`, Sonnet 5.5's); what the client sends Haiku 5.5 itself is recorded in `tests/fixtures/claude-2.1.284-haiku-5-5-shape.json`.
+The dry-run admission bound is $3.88, a conservative upper bound (Haiku priced at its dearer tier). Sixteen of the requests are on Sonnet 5.5 and the rest on Haiku 5.5, so expect under $1. The budget is a stopping threshold on measured spend plus the next request's estimate. If the suite passes, add its run and pairs to `THINKING_HISTORY_VERIFIED` and to the evidence table in `tests/test_policy_actions.py`. Run it with the pinned client's captured shape (`tests/fixtures/claude-2.1.284-shape.json`, Sonnet 5.5's); what the client sends Haiku 5.5 itself is recorded in `tests/fixtures/claude-2.1.284-haiku-5-5-shape.json`.
 
 ## Returns to a warm setting (built September 29, run September 30)
 

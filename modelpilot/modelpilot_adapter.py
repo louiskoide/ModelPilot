@@ -70,7 +70,8 @@ class ModelPilotAdapter:
         from .policy_actions import MODELS,setting
         setting(model,effort)
         if model==MODELS[0]:
-            raise ValueError('The arm starts on Sonnet 5.5 or Opus 5.5; Haiku targets are not implemented')
+            raise ValueError('The arm starts on Sonnet 5.5 or Opus 5.5; Haiku 5.5 is reached by a proxy move (user decision, '
+                             'October 8), never by starting the client on it')
         self.arm_id,self.model,self.effort=arm_id,model,effort
         if mode not in ('dry-run','active'):
             raise ValueError('Mode must be dry-run or active')
