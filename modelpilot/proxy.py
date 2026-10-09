@@ -20,7 +20,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 import uuid
-from .cache_probe import priced_usage, tls_context
+from .cache_probe import priced_usage, tier, tls_context
 from .governor import Governor
 
 HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
@@ -227,7 +227,8 @@ def reservation_estimate(raw, request, rates):
     server-added tool prompts can exceed it); settlement always uses measured usage.
     """
     rate = rates.get(request.get('model'))
-    candidates = [rate] if rate else list(rates.values())
+    # The prompt's length isn't known before it is sent, so a model priced by length reserves at its dearest tier.
+    candidates = [tier(r) for r in ([rate] if rate else rates.values())]
     input_rate = max(max(r['input'], r['write_5m'], r['write_1h']) for r in candidates)
     output_rate = max(r['output'] for r in candidates)
     max_tokens = request.get('max_tokens')
@@ -245,10 +246,12 @@ def forecast(request, usage, rates):
         return {'action': 'hold', 'reason': 'missing_usage_or_rates', 'applied': False}
     prefix = usage['cache_read_input_tokens'] + usage['cache_creation_input_tokens']
     tail, output = usage['input_tokens'], usage['output_tokens']
+    base = tier(base, prefix + tail)
     scenarios = []
     for target, rate in rates.items():
         if target == source:
             continue
+        rate = tier(rate, prefix + tail)
         for steps in (1, 5, 20):
             stay = steps * (prefix * base['read'] + tail * base['input'] + output * base['output']) / 1e6
             # Assume target cold; retained target caches and future context growth are UNKNOWN.

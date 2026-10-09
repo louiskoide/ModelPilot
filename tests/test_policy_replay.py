@@ -62,7 +62,12 @@ class ReplayTests(unittest.TestCase):
             journal(run/'t-jumped'/'sonnet-5.5'/'0', [self.jump])  # not a ModelPilot trial: skipped
             (run/'t-jumped'/'sonnet-5.5'/'0'/'trial.json').write_text(json.dumps(dict(record('t-jumped'), arm='sonnet-5.5',
                                                                                      routing=None)))
-            rows = pr.replay_run(run, self.cfg, self.rates)
+            # Jev's candidates only: from Sonnet 5.5 medium a measured candidate (low concise) could pay under some
+            # answer, so with measured_candidates on the gate asks Jev at these turn starts (tests/test_switch_policy.py, MeasuredCandidateTests).
+            jev_only = sp.with_overrides(self.cfg, {'measured_candidates': {'enabled': False}})
+            rows = pr.replay_run(run, jev_only, self.rates)
+            measured = pr.replay_run(run, self.cfg, self.rates)
+        self.assertEqual(pr.summarize(measured)['gate']['asked'], {'turn_start:a_move_can_pay': 2})
         self.assertEqual([(r['task'], r['trigger'], r['status']) for r in rows],
                          [('t-jumped', 'turn_start', 'changed'), ('t-jumped', 'step', 'path_diverged'),
                           ('t-old', 'turn_start', 'not_replayable'), ('t-stayed', 'turn_start', 'same')])
@@ -77,6 +82,18 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual((summary['gate']['asked'], summary['gate']['skipped_but_moved']), ({}, 0))
         self.assertTrue(jumped['replayed']['gate']['skip'])
         self.assertIsNone(jumped['replayed']['quality_floor'])  # off in the shipped config
+
+    def test_points_below_the_quality_floor_are_counted_apart_from_gate_errors(self):
+        # modelpilot-for-opus from its old start: every point is below the floor, where the gate skips Jev and returns no
+        # closest_usd; the floor's moves are by design, not a skip that moved (October 8: summarize raised KeyError).
+        def row(action, reason, **gate):
+            return {'trigger': 'turn_start', 'status': 'same', 'replayed': {
+                'action': action, 'target': f'{S}/low', 'gate': dict(gate, can_change=False, reason=reason, skip=True)}}
+        rows = [row('jump', 'below_quality_floor'), row('stay', 'below_quality_floor'),
+                row('stay', 'every_answer_stays', closest_usd=-.01), row('jump', 'every_answer_stays', closest_usd=-.02)]
+        gate = pr.summarize(rows)['gate']
+        self.assertEqual(gate['below_floor'], {'decisions': 2, 'moved': 1})
+        self.assertEqual((gate['skipped_but_moved'], gate['closest_skipped_usd']), (1, -.01))
 
     def test_an_arms_start_replaces_the_recorded_one_until_the_path_diverges(self):
         stay = dict(self.jump, action='stay', target=[S, 'medium'])

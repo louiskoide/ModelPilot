@@ -16,6 +16,7 @@ import argparse
 import json
 from pathlib import Path
 import statistics
+from .cache_probe import prompt_tokens, tier
 
 ARM = 'modelpilot-explore'
 
@@ -26,7 +27,8 @@ def measured_switch_usd(rows, target_model, rates):
                    and r.get('model') == target_model), key=lambda r: r.get('started_unix', 0))
     if not main:
         return None
-    usage, rate = main[0].get('usage') or {}, rates.get(target_model)
+    usage = main[0].get('usage') or {}
+    rate = tier(rates.get(target_model), prompt_tokens(usage), main[0].get('started_unix'))
     split = usage.get('cache_creation') or {}
     if not rate or not split:
         return None

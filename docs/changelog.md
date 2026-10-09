@@ -2,6 +2,92 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 8, 2026 (night): Haiku 5.5's integration built and off; measured candidates on (offline)
+
+$0. The user asked for everything Haiku 5.5 needs in ModelPilot that doesn't need their decision, with the decisions asked first. User decisions:
+- Haiku may serve every ModelPilot arm. The quality floor still keeps it from an Opus user, because Haiku misses tomli and Opus doesn't.
+- A session reaches Haiku by a proxy move, never by starting the client on it.
+- At turn starts, measured settings are weighed beside Jev's pick.
+
+Haiku 5.5 stays `candidate: false` until its probes pass. Details: `docs/m6-modelpilot-policy.md`, "Haiku 5.5 and measured candidates".
+
+- **Measured candidates** (`measured_candidates`, on at turn starts). Settings with measured tuning outcomes are weighed beside Jev's pick, marked `measured_only`. A measured downgrade skips Jev's confidence check but pays the downgrade's extra hysteresis; without Jev's answer nothing moves. Replayed over the seven recorded ModelPilot runs (`runs/measured-candidates-replay-20261008.py` → `.json`), it changes no decision of `modelpilot`, `modelpilot-for-sonnet` or `modelpilot-for-opus` while Haiku is off.
+- **Haiku 5.5's pieces:**
+  - **Forecasts:** they price a model priced by prompt length request by request, at each request's tier (`switch_policy._segments`); switches, consults and notes are priced at their own prompt's tier. Replaces `_rate`'s refusal.
+  - **Candidate efforts:** `candidate_efforts` is the measured `medium`.
+  - **Run factors:** 2.11× requests and 2.32× output per request against Sonnet 5.5 medium, over both Haiku runs (`runs/haiku-policy-evidence-20261008.py` → `.json`).
+  - **Per-message flag:** an explicit `per_message_effort: false`.
+  - **Messages:** the adapter's refusal of a Haiku start now explains the proxy move; the active policy no longer lists "Haiku targets" as not implemented.
+- **Guard** (`_check_models`, at load and for arm overrides). Claude Code 2.1.284 puts its own effort in an effort message, and the last one holds, so a candidate without per-message effort would run at the client's effort. For Haiku from the low concise start that means low, which fails the floor. Such a candidate is refused.
+- **Probe:** `thinking_probe --suite haiku-5-5` gains the proxy move's effort cases (`haiku/move_control`, `move_top`, `move_pm`; 64 requests, bound $3.88, likely under $1). `move_pm` decides Haiku's `per_message_effort`.
+- **What turning Haiku on would do** (replayed with it a candidate, per-message effort on and its outcomes in):
+  - The Sonnet-start arms move 101 of 105 recorded turn starts to Haiku 5.5 medium, all as measured candidates; the other 4 had no Jev answer.
+  - The Opus-user arm never weighs Haiku.
+  - The gate would ask Jev at every turn start (it skips all 161 recorded points today): one TypeSafe call each, though Haiku's measured rate mostly decides.
+- **Held for the user: Haiku's outcomes as evidence for other settings.** Under the floor and calibration premise that a stronger setting never misses more:
+  - Haiku medium's 56/58, two trials a task, would lift every Sonnet 5.5 setting at medium or above from 48/52 to 57/60. Sonnet's 48/52 is weighted to the hard tasks by its repeats.
+  - It would also clear Sonnet's parse miss against an Opus user. No floor verdict changes.
+
+  So the shipped config leaves them out, and turning Haiku on needs them in (`CandidacyTests` records both effects).
+- **Second Haiku medium trial** (the user's run, `runs/haiku-medium-trial2-20261008.sh`): `runs/bench-20261008-214840`, seed 10, commit `2ddc388`, subscription, `--budget 40`, no retries; 29/29 complete, $0 API, $1.12 as sent, re-graded (`runs/regrade-bench-20261008-214840-20261008-225124`). 28/29 strict, missing tomli again.
+  - Pooled: 56/58, both misses on tomli, which Sonnet 5.5 medium misses too. The floor still allows Haiku 5.5 medium for a Sonnet user and not for an Opus one.
+  - At October 8 prices: $0.0338 a task, 119 s; 15.3 main-loop requests a trial. 5 of 58 sessions hit the 30-turn limit and passed; 62 requests crossed 100,000 prompt tokens (`runs/haiku-arms-analysis-20261008.json`).
+  - The evidence scripts were re-run and the config's run factors updated. The replay is unchanged: 101 of 105 turn starts would move to Haiku.
+- **Tests:** 706 offline tests pass on Python 3.12 with the pinned 2.1.284 client first on PATH (`runs/haiku-integration-regression-py312.log`). New: `MeasuredCandidateTests` (3) in `tests/test_switch_policy.py`, `CandidacyTests` (6) and a tiered-forecast test in `tests/test_haiku_5_5.py`, `HaikuMoveTests` (2) in `tests/test_thinking_probe.py` and a floor-skip test in `tests/test_policy_replay.py`. Tests that assumed Jev-only candidates now say so (`measured_candidates` off), and `H` in the switch-policy tests is Haiku 5.5.
+- **Next** (the user's calls):
+  - Haiku's outcomes as evidence for other settings.
+  - The probes, step 4: `runs/haiku-probes-20261008.sh`, API key, budgets $1.50 each, likely under $1.30 in all.
+
+## October 8, 2026: Haiku 5.5 plan, steps 2-3, live: Haiku 5.5 medium meets the floor for a Sonnet user, at a third of the cost
+
+The user's go and run (`runs/haiku-arms-20261008.sh`): `runs/bench-20261008-195122`, the two Haiku 5.5 arms on the 29 tuning tasks, 1 trial each, seed 9, subscription token, `--budget 40`, no retries; $0 API, $1.37 as sent; 58/58 complete, no unknown cost, re-graded (`runs/regrade-bench-20261008-195122-20261008-212105`). The manifest names commit `2a51d38` with uncommitted changes: the run started at 19:51, before the commit at 19:59 (`4c100a9`), and no file under `modelpilot/`, `configs/` or `bench/` changed after 19:32, so it ran `4c100a9`'s code. Analysis ($0): `runs/haiku-arms-analysis-20261008.py` → `.json`, every recorded fixed-arm trial on the same 29 tasks at October 8 prices, cold-equivalent, strict grading.
+
+| Arm | Strict passes | Tasks with a miss | $ a task | Wall s a task |
+| --- | --- | --- | --- | --- |
+| `haiku-5.5-low-concise` | 25/29 | 4 | $0.0109 | 43 |
+| `haiku-5.5` (medium) | 28/29 | 1 (tomli) | $0.0322 | 120 |
+| `sonnet-5.5-low-concise` | 55/60 | 3 | $0.0708 | 38 |
+| `sonnet-5.5` (medium) | 52/65 | 5 | $0.0891 | 45 |
+| `opus-5.5` (medium) | 38/40 | 1 | $0.2440 | 68 |
+
+- **Step 3, the quality floor's rule** (`switch_policy.floor_allows` with the Haiku outcomes added to a copy of the config). Haiku 5.5 medium adds no miss over Sonnet 5.5 medium on the 29 shared tasks: its one miss, `tomli-decode-error-attrs`, Sonnet medium misses too (0/2). So it **qualifies for a Sonnet user**, at 36% of Sonnet medium's cost and 45% of low concise's. Not for an Opus user (it adds tomli). Low concise Haiku fails for both: it adds `nx-classes-weak-views` (hidden tests), which Sonnet medium passes.
+- **Caveats.** One trial a task, where the Sonnet arms have up to 10 on the hard tasks; the floor counts any failed trial as a miss, so more Haiku trials can only add misses. Three Haiku medium trials hit the 30-turn limit (`nx-classes-weak-views`, `nx-connectivity-digraph-cuts`, `nx-ismags-monomorphism`) and passed because the fix was already in place. Haiku medium averaged 15.1 main-loop requests (Sonnet medium about 7), so it was 2.7× slower a task, not faster; low concise Haiku took 10.5 and about Sonnet's time. Its two longest sessions crossed 100,000 prompt tokens (26 requests, at the higher tier, included above). The client's own price peaked at $1.68 of the $40 stop: the usual $1 would have stopped sessions early.
+- **Next** (the plan's step 4 and the user's call): the probes, or first a second Haiku medium trial ($0 on the subscription) to firm up the floor.
+
+## October 8, 2026: the Haiku 5.5 plan, and step 1: Sonnet 5.5 prices by date (offline)
+
+$0, user decisions. The plan, in `docs/m6-benchmark-plan.md`, "Haiku 5.5": test Haiku 5.5 as a cheap default and work toward making it a routing candidate, quality first; the client's 40× price handled with a raised `--budget` (no repin); Sonnet 5.5 priced by date; up to $3 of paid spend before results. Steps: (1) dated Sonnet rates, (2) the two Haiku arms on the 29 tuning tasks on the subscription, (3) the quality floor's rule decides, (4) only if Haiku passes, the two probes, (5) only if they pass, Haiku becomes a candidate. `CLAUDE.md` plan item 14.
+
+Step 1, done:
+- **Prices by date** (`configs/sonnet-5-5-rates.json`, `cache_probe.dated`). Sonnet 5.5's cache reads are $0.20 until October 7 and $0.10 from then (release notes; no time of day given). The boundary is the start of October 7, Pacific time, the release note's date. Billed traffic on record falls clear of the unknown hour: the API-key `m0-replication-ttl-1h` run ended at 22:03 PDT on October 6. The one run later that day, `late-fix-20261007-160727` (16:30 PDT), was on the subscription, so its dollars are API-key equivalents, not a bill. A dated entry has no rates of its own, so code that doesn't pick a date fails rather than prices at the wrong one.
+  - Recorded rows are priced on their own day (`started_unix`): the report's components, attribution, write sources and subscription repricing, and `exploration`. Live requests, reservations and forecasts use today's prices. `cache_replication` and `thinking_probe` now read the rate file instead of their own copy.
+  - `bench_report --price-at DATE` prices every request at one day's prices (`on_date`, `repriced`), so runs from either side of a cut compare. Without it, dollars stay as recorded. Step 2's Haiku runs are compared with the October 3–6 Sonnet runs on October 8 prices.
+- **What it changes** (`runs/sonnet-reads-repriced-20261008.json`, $0):
+  - `sonnet-5.5-low-concise` costs $0.0635 a task on the 23 tuning tasks at October 8 prices, against $0.0689 as recorded. On the 29 tasks of `bench-20261006-134508` it is $0.0720 against $0.0786, and `modelpilot` $0.0750 against $0.0822. That is 8% lower, not the "around 20%" Anthropic quotes for agentic work: these short tasks spend more on cache writes than on reads.
+  - The policy's Sonnet 5.5 medium forecast drops from $0.090 to $0.0825. Replayed over the seven ModelPilot runs, every decision of `modelpilot` and `modelpilot-for-sonnet` is the same as on the previous commit. Only the gate's closest skipped move changed, from −$0.0116 to −$0.0108.
+  - Found and fixed (user request): `policy_replay --arm modelpilot-for-opus` failed with `KeyError: 'closest_usd'` in `summarize`, on the previous commit too. Below the quality floor the gate skips Jev and returns no margin; `summarize` also counted the floor's own moves as skips that moved, i.e. as gate errors. They are now counted apart (`gate.below_floor`). Replayed: 161 decisions, 3 below the floor (all moved, as designed), no gate errors.
+- **Step 2 ready:** `runs/haiku-arms-20261008.sh` (not committed, as with the item 8 script): both Haiku arms on the 29 tasks, seed 9, `--budget 40`, subscription token from the environment or a hidden prompt, then the $0 re-grade. Its plan-only check passed ($0): the 29 references grade, 58 trials planned.
+- **Tests:** 694 offline tests pass on Python 3.12 with the pinned 2.1.284 client first on PATH (`runs/sonnet-dated-rates-regression-py312.log`). New: `tests/test_dated_rates.py` (6). The switch-policy tests now price Sonnet 5.5 at today's $0.10 reads. The bench's rate-provenance test checks today's prices and covers Haiku 5.5; it was the one failure of the first full run (`runs/sonnet-dated-rates-regression-py312-first.log`).
+
+## October 8, 2026: Haiku 5.5 replaces Haiku 4.5 as the bottom tier (offline)
+
+$0, user request: bring in Haiku 5.5 (`claude-haiku-5-5`, released October 7) for high-volume, cost- and latency-sensitive work. It replaces Haiku 4.5, as Sonnet 5.5 and Opus 5.5 replaced their predecessors; the `haiku-4.5` fixed arm stays registered for its earlier runs. Details: `docs/m6-modelpilot-policy.md`, "Tier set".
+
+- **Prices** (`configs/haiku-5-5-rates.json`, pricing page retrieved today). By prompt length: up to 100,000 tokens $0.10 input, $0.50 output, $0.125 / $0.20 cache writes, $0.01 reads; over 100,000, five times that. Either way cheaper per token than Haiku 4.5 ($1 / $5), but it uses the newer tokenizer (about 30% more tokens for the same text).
+  - Which tokens count toward the 100,000 isn't stated. Priced on the whole prompt (uncached input, cache writes and reads), as Anthropic's earlier long-context tiers were. Unconfirmed.
+  - `cache_probe.tier` picks a request's tier from its usage; pre-send estimates take the dearest. A tiered entry has no flat rates, so code that doesn't pick a tier fails rather than underprices. Wired into `cost` (so the proxy, workers and repricing), the report's components, attribution and write sources, `exploration`, the proxy's reservation and forecast, `policy_actions.prepare_action`, `spec_tests` and both probes' admission. `switch_policy` refuses a tiered model (`_rate`): forecasts don't model a price that changes mid-session.
+- **Tier set.** `configs/modelpilot-policy.json` now lists Haiku 5.5 at rank 0: all five efforts, mid-history system messages accepted. **Not a candidate**, so the arms behave as before. Missing: thinking-history evidence, cache replication (`effort_switch_rewrite` is the pessimistic `full`), run factors and pass rates. With the quality floor on it ranks below either baseline anyway. The model-constrained Jev arms and the ModelPilot arms' advisor now discover Haiku 5.5 instead of Haiku 4.5. Compat Jev strips thinking and effort from any Haiku it routes to (its `src/config.mjs`, unchanged), so Haiku 5.5 runs there at the API default, medium.
+- **Built, awaiting the user's go** (paid, `--live`):
+  - Fixed arms `haiku-5.5` (the client's medium) and `haiku-5.5-low-concise`: is Haiku 5.5 enough on the tuning tasks?
+  - `thinking_probe --suite haiku-5-5`: Sonnet 5.5 → Haiku 5.5, back, and Haiku's effort rung, both shapes, 2 repeats, 40 requests, admission bound $2.37. The probe's "haiku" now means Haiku 5.5. The `transitions` suite's Haiku cases are buildable now (Haiku 4.5's were refused at plan time), and the single-request Haiku control is gone.
+  - `cache_replication --suite haiku-5-5`: Haiku 5.5 at home, its effort changes, moves to Sonnet 5.5 and Opus 5.5 and back, its lifetime: 111 requests, admission bound $3.18.
+- **Found at $0 against the owned fixture** (`runs/client-haiku-5-5-20261008.json`; fixture `tests/fixtures/claude-2.1.284-haiku-5-5-shape.json`). The pinned 2.1.284 has no entry for Haiku 5.5.
+  - It prices it at its unknown-model rate, Opus 5.5's: $0.00096 for the usage Sonnet 5.5 costs $0.00048 and Haiku 4.5 $0.00024. That is about 40× Haiku 5.5's real price. So the client's `--max-budget-usd` stop falls at about 1/40 of the same real spend. `bench` records such arms in the manifest (`client_unpriced_arms`).
+  - It sends Haiku 5.5 the Haiku-family request: about 40 KB with `max_tokens` 32,000, like Haiku 4.5, against about 11 KB and 128,000 for Sonnet 5.5. That is about 10,000 more tokens per request, which brings the 100,000 threshold closer.
+  - The shape Haiku 5.5 needs is right: adaptive thinking, top-level effort, mid-history system messages, no sampling parameters. Unlike Sonnet 5.5, there is no effort message on its system note. `fixture_dispatch.haiku_5_5_shape` encodes what the migration guide says Haiku 5.5 rejects.
+- **Found:** the pricing page now lists Sonnet 5.5 cache reads at $0.10 (0.05× input), not the $0.20 in `configs/sonnet-5-5-rates.json`; the cut dates from October 7. Priced by date since (the entry above).
+- **Tests:** 688 offline tests pass on Python 3.12 with the pinned 2.1.284 client first on PATH (`runs/haiku-5-5-regression-py312.log`). New: `tests/test_haiku_5_5.py` (12) and a manifest test in `tests/test_bench.py`. The thinking-probe and policy-transform tests are retargeted: the transform's paths for a tier without effort or mid-history system messages are now tested against a patched-in Haiku 4.5. The first full run (`runs/haiku-5-5-regression-py312-first.log`) failed 8 real-client tests: 7 because the test account catalog (`tests/test_bench_jev.ACCOUNT_CATALOG`) had no Haiku 5.5, so the filtered catalog was incomplete (catalog fixed); 1 was the timing-sensitive timeout test, which passed 3 of 3 alone and in the full rerun.
+
 ## October 8, 2026: the quality floor replaces the price of a miss (offline)
 
 $0, user decision. A missed bug can cost anything from a re-prompt to an incident, so no single damage figure is assumed. ModelPilot now promises quality no worse than the user's own model. The code will later say how much a change matters; that part is planned. Details: `docs/m6-modelpilot-policy.md`, "Quality floor".

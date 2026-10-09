@@ -12,6 +12,7 @@ import json
 import math
 from pathlib import Path
 import sys
+from .cache_probe import tier
 from .governor import Governor
 from .governed_session import hook_settings, OWNER
 from .hooks import REVIEW_AT_STOP, channel_declaration
@@ -27,6 +28,7 @@ def switch_decision(source, target, prefix_tokens, output_tokens, horizon, avail
         return result
     if source not in rates or target not in rates or available_usd is None:
         return result
+    rates={m:tier(rates[m],prefix_tokens) for m in (source,target)}  # a model priced by prompt length
     if isinstance(available_usd,bool) or not math.isfinite(available_usd) or available_usd<0:
         return result
     for model in (source,target):
@@ -68,7 +70,8 @@ class ModelPilotAdapter:
         from .policy_actions import MODELS,setting
         setting(model,effort)
         if model==MODELS[0]:
-            raise ValueError('The arm starts on Sonnet 5.5 or Opus 5.5; Haiku targets are not implemented')
+            raise ValueError('The arm starts on Sonnet 5.5 or Opus 5.5; Haiku 5.5 is reached by a proxy move (user decision, '
+                             'October 8), never by starting the client on it')
         self.arm_id,self.model,self.effort=arm_id,model,effort
         if mode not in ('dry-run','active'):
             raise ValueError('Mode must be dry-run or active')

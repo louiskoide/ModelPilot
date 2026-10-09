@@ -8,7 +8,7 @@ import urllib.error
 from modelpilot import thinking_probe as tp
 from modelpilot.cache_replication import Budget
 
-S, H = 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001'  # S: the policy's middle tier since September 28
+S, H = 'claude-sonnet-5-5', 'claude-haiku-5-5'  # the policy's middle tier since September 28, bottom since October 8
 O, O5, S5 = 'claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5'  # O: the top rung; O5, S5: earlier runs' tiers
 SHAPE = json.loads(tp.SHAPE_FIXTURE.read_text())
 USAGE = {'input_tokens': 50, 'output_tokens': 200, 'cache_creation_input_tokens': 7000, 'cache_read_input_tokens': 0,
@@ -65,9 +65,9 @@ def group(groups, name, shape='tool_continuation', repeat=0):
 class PlanTests(unittest.TestCase):
     def test_plan_counts_and_unique_prefixes(self):
         self.assertEqual(tp.planned_calls(tp.plan('r', 'smoke', 1, SHAPE)), 4)
-        # 2 repeats x (2 shapes x 9 two-request groups + 1 Haiku control) = 74, less the 4 Haiku
-        # transition groups per repeat (8 requests) that the transform refuses at plan time: nothing is sent.
-        self.assertEqual(tp.planned_calls(tp.plan('r', 'transitions', 2, SHAPE)), 58)
+        # 2 repeats x 2 shapes x (3 controls + 9 transitions) x 2 requests: Haiku 5.5 takes the client's mid-history
+        # system messages, so no transition is refused at plan time (Haiku 4.5's four were).
+        self.assertEqual(tp.planned_calls(tp.plan('r', 'transitions', 2, SHAPE)), 96)
         self.assertEqual(tp.planned_calls(tp.plan('r', 'opus-5-5-effort', 2, SHAPE)), 12)
         # top-rung: 2 repeats x 2 shapes x (2 controls + 3 Opus 5.5 transitions) x 2 requests.
         self.assertEqual(tp.planned_calls(tp.plan('r', 'top-rung', 2, SHAPE)), 40)
@@ -79,6 +79,13 @@ class PlanTests(unittest.TestCase):
                          {('control/sonnet', (S, 'medium'), (S, 'medium')), ('control/opus', (O, 'medium'), (O, 'medium')),
                           ('effort_up/sonnet', (S, 'medium'), (S, 'high')), ('effort_down/sonnet', (S, 'high'), (S, 'medium')),
                           ('model_up', (S, 'high'), (O, 'medium')), ('model_down', (O, 'medium'), (S, 'medium'))})
+        # haiku-5-5: 2 repeats x 2 shapes x (the controls on its targets + 3 Haiku 5.5 transitions) x 2 requests.
+        self.assertEqual(tp.planned_calls(tp.plan('r', 'haiku-5-5', 2, SHAPE)), 40 + 24)  # and the moves (HaikuMoveTests)
+        self.assertEqual({(g['case'], tuple(g['source']), tuple(g['target'])) for g in tp.plan('r', 'haiku-5-5', 1, SHAPE)
+                          if 'effort_mode' not in g},
+                         {('control/sonnet', (S, 'medium'), (S, 'medium')), ('control/haiku', (H, 'medium'), (H, 'medium')),
+                          ('to_haiku/sonnet', (S, 'medium'), (H, 'medium')), ('from_haiku', (H, 'medium'), (S, 'medium')),
+                          ('effort_up/haiku', (H, 'medium'), (H, 'high'))})
         for suite in tp.SUITES:  # every run gets a fresh run id, so uniqueness matters within a plan
             firsts = [g['request']['system'][0]['text'].split('\n', 1)[0] for g in tp.plan('r', suite, 2, SHAPE)]
             self.assertEqual(len(firsts), len(set(firsts)), suite)
@@ -88,15 +95,13 @@ class PlanTests(unittest.TestCase):
             tp.plan('r', 'transitions', 0, SHAPE)
 
     def test_seeds_mirror_the_captured_client_shape(self):
-        for g in tp.plan('r', 'transitions', 1, SHAPE) + tp.plan('r', 'top-rung', 1, SHAPE) + tp.plan('r', 'sonnet-5-5', 1, SHAPE):
-            if g['case'] == 'control/haiku':
-                continue
+        groups = [g for suite in ('transitions', 'top-rung', 'sonnet-5-5', 'haiku-5-5') for g in tp.plan('r', suite, 1, SHAPE)]
+        for g in groups:
             model, effort = g['source']
-            # The arm's client is Sonnet 5.5: an Opus 5.5 request is its request rewritten, with its headers.
-            spec = SHAPE['requests'][S if model == O else model]
+            # The arm's client is Sonnet 5.5: an Opus 5.5 or Haiku 5.5 request is its request rewritten, with its headers.
+            spec = SHAPE['requests'][S if model in (O, H) else model]
             p = g['request']
             self.assertEqual((p['model'], p['output_config']), (model, {'effort': effort}))
-            self.assertNotEqual(model, H)
             self.assertEqual(p['thinking'], spec['thinking'])
             self.assertEqual(p['context_management'], spec['context_management'])
             self.assertEqual(g['betas'], spec['anthropic_beta'])
@@ -105,24 +110,20 @@ class PlanTests(unittest.TestCase):
             self.assertEqual(p['messages'][-1]['content'][-1]['cache_control'], {'type': 'ephemeral'})
             self.assertEqual([t['name'] for t in p['tools']], ['record_answer'])
 
-    def test_unbuildable_transitions_are_refused_at_plan_time(self):
-        refused = [g for g in tp.plan('r', 'transitions', 1, SHAPE) if not g['steps']]
-        self.assertEqual(sorted((g['case'], g['shape']) for g in refused),
-                         [(case, shape) for case in ('to_haiku/opus', 'to_haiku/sonnet') for shape in ('new_turn', 'tool_continuation')])
-        for g in refused:
-            self.assertIn('Only trailing system messages', g['refused'])
+    def test_every_transition_is_buildable_at_plan_time(self):
+        for suite in tp.SUITES:
+            self.assertEqual([g['name'] for g in tp.plan('r', suite, 1, SHAPE) if not g['steps']], [], suite)
 
-    def test_haiku_control_goes_through_the_real_transform(self):
-        g = group(tp.plan('r', 'transitions', 1, SHAPE), 'control/haiku', shape='single_turn')
+    def test_haiku_control_is_a_two_request_group_on_sonnets_shape(self):
+        # Haiku 4.5's control was a single request with the system note relocated; Haiku 5.5 continues like the others.
+        g = group(tp.plan('r', 'transitions', 1, SHAPE), 'control/haiku')
         p = g['request']
-        self.assertEqual(p['model'], H)
-        self.assertNotIn('thinking', p)
-        self.assertNotIn('output_config', p)
-        self.assertNotIn('context_management', p)  # its only edit was clear_thinking
-        self.assertEqual([m['role'] for m in p['messages']], ['user'])  # trailing system note relocated
-        self.assertEqual(p['messages'][0]['content'][-1]['text'], tp.SYSTEM_NOTE)
+        self.assertEqual((p['model'], p['output_config'], p['thinking']), (H, {'effort': 'medium'}, {'type': 'adaptive'}))
+        self.assertEqual(p['context_management'], SHAPE['requests'][S]['context_management'])
+        self.assertEqual([m['role'] for m in p['messages']], ['user', 'system'])
         self.assertEqual(g['betas'], SHAPE['requests'][S]['anthropic_beta'])
-        self.assertEqual(len(g['steps']), 1)
+        self.assertEqual(g['steps'], ['seed', 'switched'])
+        self.assertNotIn('control/haiku', {g['case'] for g in tp.plan('r', 'sonnet-5-5', 1, SHAPE)})
 
 
 class SwitchedRequestTests(unittest.TestCase):
@@ -151,10 +152,15 @@ class SwitchedRequestTests(unittest.TestCase):
         self.assertEqual((p['model'], p['output_config']['effort']), (S, 'medium'))
         self.assertEqual(p['messages'][3], {'role': 'user', 'content': [{'type': 'text', 'text': tp.FOLLOW_UP}]})
 
-    def test_haiku_targets_hit_the_transform_refusal_for_mid_history_system_messages(self):
+    def test_haiku_targets_keep_thinking_and_mid_history_system_messages(self):
         g = group(self.groups, 'to_haiku/sonnet')
-        with self.assertRaises(ValueError):
-            tp.switched_request(g, seed_response(S))
+        response = seed_response(S)
+        p = tp.switched_request(g, response)
+        self.assertEqual((p['model'], p['output_config']['effort'], p['thinking']), (H, 'medium', {'type': 'adaptive'}))
+        self.assertEqual([m['role'] for m in p['messages']], ['user', 'system', 'assistant', 'user', 'system'])
+        self.assertEqual(p['messages'][2]['content'], response['content'])
+        back = tp.switched_request(group(self.groups, 'from_haiku'), seed_response(H))
+        self.assertEqual((back['model'], back['output_config']['effort']), (S, 'medium'))
 
     def test_opus_5_5_effort_is_edited_directly(self):
         groups = tp.plan('r', 'opus-5-5-effort', 1, SHAPE)
@@ -185,13 +191,14 @@ class ExecuteTests(unittest.TestCase):
         result = self.run_probe(tp.plan('r', 'transitions', 1, SHAPE), fake)
         self.assertEqual(result['status'], 'complete')
         self.assertTrue(result['cost_complete'])
-        self.assertEqual(self.verdict(result, 'to_haiku/sonnet')['verdict'], 'transform_refused')
+        self.assertEqual(self.verdict(result, 'to_haiku/sonnet')['verdict'], 'accepted')
         self.assertEqual(self.verdict(result, 'model_up', 'new_turn')['verdict'], 'accepted')
-        self.assertEqual(result['verified_transitions'], [[O, O], [O, S], [S, O], [S, S]])
-        # The 4 Haiku transitions are refused at plan time, so neither their seeds nor switches are sent.
-        self.assertEqual(len(fake.calls), 29)
-        self.assertEqual((result['calls'], result['planned_calls'], result['transform_refused']), (29, 29, 4))
-        self.assertEqual(sum(p['model'] == H for p, _ in fake.calls), 1)  # only the Haiku control
+        self.assertEqual(result['verified_transitions'], [[H, H], [H, S], [O, H], [O, O], [O, S], [S, H], [S, O], [S, S]])
+        # 2 shapes x 12 two-request groups, nothing refused at plan time.
+        self.assertEqual(len(fake.calls), 48)
+        self.assertEqual((result['calls'], result['planned_calls'], result['transform_refused']), (48, 48, 0))
+        # On Haiku: the control's and effort_up/haiku's two requests, from_haiku's seed and the two to_haiku switches.
+        self.assertEqual(sum(p['model'] == H for p, _ in fake.calls), 2 * (2 + 2 + 1 + 1 + 1))
 
     def test_switched_request_carries_the_source_models_betas(self):
         fake = Fake()
@@ -471,7 +478,7 @@ class VerifiedTransitionTests(unittest.TestCase):
 
     def test_every_repeat_and_both_shapes_are_required(self):
         s = self.summary()
-        self.assertEqual(tp.verified_transitions(s), [[O, H], [O, O], [O, S], [S, H], [S, O], [S, S]])
+        self.assertEqual(tp.verified_transitions(s), [[H, H], [H, S], [O, H], [O, O], [O, S], [S, H], [S, O], [S, S]])
         s['verdicts'][0]['verdict'] = 'rejected'  # effort_up/sonnet, one repeat, one shape
         self.assertNotIn([S, S], tp.verified_transitions(s))
         s = self.summary()
@@ -499,7 +506,14 @@ class VerifiedTransitionTests(unittest.TestCase):
             v['target'] = [O5 if m == O else m for m in v['target'][:1]] + v['target'][1:]
             if O5 in (v['source'][0], v['target'][0]):
                 v['verdict'] = 'inconclusive'
-        self.assertEqual(tp.verified_transitions(s), [[S, H], [S, S]])
+        self.assertEqual(tp.verified_transitions(s), [[H, H], [H, S], [S, H], [S, S]])
+
+    def test_haiku_5_5_suite_verifies_only_its_pairs(self):
+        s = self.summary(suite='haiku-5-5')
+        s['verdicts'] = [v for v in s['verdicts'] if v['case'] in tp.HAIKU_5_5_CASES]
+        self.assertEqual(tp.verified_transitions(s), [[H, H], [H, S], [S, H]])
+        s['verdicts'] = [v for v in s['verdicts'] if not (v['case'] == 'from_haiku' and v['shape'] == 'new_turn')]
+        self.assertEqual(tp.verified_transitions(s), [[H, H], [S, H]])
 
     def test_sonnet_5_5_suite_verifies_only_its_pairs(self):
         s = self.summary(suite='sonnet-5-5')
@@ -526,7 +540,7 @@ class MainTests(unittest.TestCase):
             tp.main(['--suite', 'transitions', '--repeats', '2', '--out', str(Path(tmp)/'run')])
             send.assert_not_called()
             plan = json.loads((Path(tmp)/'run'/'plan.json').read_text())
-            self.assertEqual((plan['suite'], plan['repeats'], plan['calls'], plan['live']), ('transitions', 2, 58, False))
+            self.assertEqual((plan['suite'], plan['repeats'], plan['calls'], plan['live']), ('transitions', 2, 96, False))
             self.assertGreater(plan['max_reserve_usd'], 0)
             self.assertEqual(plan['shape']['client_version'], '2.1.284 (Claude Code)')
 
@@ -565,6 +579,46 @@ class EffortTransport:
         return {'model': p['model'], 'stop_reason': 'tool_use', 'usage': usage, 'content': [
             {'type': 'thinking', 'thinking': 'PRIVATE-THOUGHT', 'signature': 'SIG-SECRET'},
             {'type': 'tool_use', 'id': f'toolu_{turn + 1}', 'name': 'record_answer', 'input': {'value': 424242}}]}, 'req_fake'
+
+
+class HaikuMoveTests(unittest.TestCase):
+    """The proxy move to Haiku 5.5 (user decision, October 8): the client on Sonnet 5.5 low with its own effort message,
+    every request forwarded to Haiku 5.5; only an effort message after the client's sets Haiku's effort."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.groups = [g for g in tp.plan('r', 'haiku-5-5', 1, SHAPE) if 'effort_mode' in g]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_the_plan_mirrors_the_client_and_the_proxy(self):
+        self.assertEqual(tp.planned_calls(tp.plan('r', 'haiku-5-5', 2, SHAPE)), 40 + 2 * 3 * 4)
+        self.assertEqual({g['case']: (g['effort_mode'], tuple(g['source']), tuple(g['target'])) for g in self.groups},
+                         {'haiku/move_control': ('move_control', (S, 'low'), (H, 'low')),
+                          'haiku/move_top': ('move_top', (S, 'low'), (H, 'medium')),
+                          'haiku/move_pm': ('move_pm', (S, 'low'), (H, 'medium'))})
+        for g in self.groups:
+            self.assertEqual(g['request']['model'], S)  # the client's request; the probe forwards it
+            self.assertEqual(g['request']['messages'][-1]['output_config'], {'effort': 'low'})  # the client's own
+            self.assertEqual(g['betas'], SHAPE['requests'][S]['anthropic_beta'])
+
+    def test_only_the_proxys_effort_message_moves_haikus_effort(self):
+        fake = EffortTransport()
+        result = tp.execute(self.groups, Path(self.tmp.name), Budget(100), 'haiku-5-5', 1, transport=fake)
+        self.assertEqual(result['status'], 'complete')
+        self.assertTrue(all(p['model'] == H for p, _ in fake.calls))  # every request, the seed included
+        by_case = {}
+        for p, _ in fake.calls:  # each group's prefix starts with its own nonce
+            by_case.setdefault(p['system'][0]['text'], []).append(p)
+        sent = {g['case']: by_case[g['request']['system'][0]['text']] for g in self.groups}
+        for case, top in (('haiku/move_control', 'low'), ('haiku/move_top', 'medium'), ('haiku/move_pm', 'low')):
+            self.assertEqual({p['output_config']['effort'] for p in sent[case]}, {top}, case)
+        efforts = [[m['output_config']['effort'] for m in p['messages'] if m.get('output_config')] for p in sent['haiku/move_pm']]
+        self.assertEqual(efforts, [['low', 'medium']] * 4)  # the proxy's message after the client's, from the seed on
+        found = result['effort_findings']
+        # The fake follows the documented rule (the last effort message holds): the top level alone leaves Haiku at low.
+        self.assertEqual({c: found[c]['thinking'] for c in found},
+                         {'haiku/move_control': [[10] * 4], 'haiku/move_top': [[10] * 4], 'haiku/move_pm': [[100] * 4]})
 
 
 class PerMessageEffortTests(unittest.TestCase):

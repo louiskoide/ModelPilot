@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Updated October 7, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
+Updated October 8, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
 
 ## Objective
 
@@ -75,12 +75,13 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 
 Built offline first; any live run needs the user's approval. 1–4 done October 6 (`docs/changelog.md`); 4 found no pre-run miss signal.
 
-5. Dropped (user decision, October 8): the quality floor replaces pricing a miss.
+5. Dropped for the quality floor (user decision, October 8).
 6. Long sessions: built offline; 1h TTL probe and sequence runs await approval.
-7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`); the floor needs no damage price.
+7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
 8. 30 labelling tasks: built offline; runs await approval.
-9. Caveman: parked (user decision); its $0 pass found about 1% at most, all lossy.
+9. Caveman: parked (user decision); its $0 pass found at most 1%, all lossy.
 10. Per-task floor evidence (a predictor) only if 8 shows misses predictable; never edit Jev. Next: blast radius at the first edit (`exposure`).
 11. 4b held (user decision); on record its trial-count rule gives n=1.
 12. Governor: live evidence for turn-end delivery and observed rebuilds; dry-run meanwhile.
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
+14. Haiku 5.5: built, off; your call on its outcomes, then probes.

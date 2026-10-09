@@ -2,6 +2,7 @@
 """Direct Anthropic Messages API cache experiments. Offline planning is default."""
 import argparse
 import copy
+from datetime import datetime
 import hashlib
 import json
 import math
@@ -98,12 +99,43 @@ def experiments(c, suite, run_id):
     return groups
 
 
-def cost(usage, rates, ttl):
+def prompt_tokens(usage):
+    """The whole prompt one request sent: uncached input, cache writes and cache reads."""
+    return sum(usage.get(k) or 0 for k in ('input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens'))
+
+
+def dated(rate, when=None):
+    """A model's rates on one date (unix seconds; None: now). A model whose prices changed (Sonnet 5.5's cache reads on
+    October 7, configs/sonnet-5-5-rates.json) lists them oldest first, each from its ISO timestamp (the first from None),
+    and has no rates of its own, so code that doesn't pick a date fails rather than prices at the wrong one."""
+    if not isinstance(rate, dict) or 'dated' not in rate:
+        return rate
+    when = time.time() if when is None else when
+    return [r for r in rate['dated'] if r['from'] is None or datetime.fromisoformat(r['from']).timestamp() <= when][-1]
+
+
+def tier(rate, prompt=None, when=None):
+    """The flat rates one request pays: on its date (dated, when; None: now) and for its prompt length. A model priced
+    by prompt length (Haiku 5.5, configs/haiku-5-5-rates.json) lists its tiers cheapest first, each for prompts up to
+    max_prompt_tokens (None: any length), and has no flat rates of its own, so code that doesn't pick a tier fails
+    rather than underprices. An unknown prompt length (pre-send estimates) pays the dearest tier."""
+    rate = dated(rate, when)
+    if not isinstance(rate, dict) or 'tiers' not in rate:
+        return rate
+    tiers = rate['tiers']
+    if prompt is None:
+        return tiers[-1]
+    return next(t for t in tiers if t['max_prompt_tokens'] is None or prompt <= t['max_prompt_tokens'])
+
+
+def cost(usage, rates, ttl, when=None):
+    """One response's dollars at a model's rates on its date (when, unix seconds; None: now) and for its prompt."""
     if rates is None:
         return None
     for key in ('input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens'):
         if key not in usage:
             raise ValueError(f'Missing usage field: {key}')
+    rates = tier(rates, prompt_tokens(usage), when)
     creation = usage.get('cache_creation')
     total = usage['cache_creation_input_tokens']
     if creation is None:

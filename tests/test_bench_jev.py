@@ -17,11 +17,13 @@ from tests.test_bench import OfflineTrialTests
 
 ROOT = Path(__file__).resolve().parents[1]
 SONNET, OPUS, HAIKU = 'claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5-20251001'
-OPUS_5_5, SONNET_5_5 = 'claude-opus-5-5', 'claude-sonnet-5-5'  # the policy's tiers with HAIKU
+OPUS_5_5, SONNET_5_5 = 'claude-opus-5-5', 'claude-sonnet-5-5'
+HAIKU_5_5 = 'claude-haiku-5-5'  # the policy's tiers are HAIKU_5_5, SONNET_5_5 and OPUS_5_5 (HAIKU until October 8)
 RATES = {SONNET: dict(input=2, output=10, read=.2, write_5m=2.5, write_1h=4)}
 # An account catalog, newest first, as GET /v1/models returns it.
-ACCOUNT_CATALOG = {'data': [{'id': m, 'type': 'model'} for m in (OPUS_5_5, SONNET_5_5, OPUS, SONNET, 'claude-sonnet-4-6',
-                                                                  HAIKU, 'claude-fable-5-1')], 'has_more': False}
+ACCOUNT_CATALOG = {'data': [{'id': m, 'type': 'model'} for m in (HAIKU_5_5, OPUS_5_5, SONNET_5_5, OPUS, SONNET,
+                                                                  'claude-sonnet-4-6', HAIKU, 'claude-fable-5-1')],
+                   'has_more': False}
 AUTH = '[jev] routing failed, keeping claude-opus-5: 401 Cannot authenticate with the server.'
 
 
@@ -296,7 +298,7 @@ class JevTrialTests(unittest.TestCase):
 
     def test_the_aligned_arm_filters_and_prefetches_the_catalog(self):
         record = self.aligned(ACCOUNT_CATALOG, SONNET_5_5)
-        self.assertEqual(record['catalog'], {'status': 200, 'models': [OPUS_5_5, SONNET_5_5, HAIKU]})
+        self.assertEqual(record['catalog'], {'status': 200, 'models': [HAIKU_5_5, OPUS_5_5, SONNET_5_5]})
         routing = record['routing']
         self.assertEqual((routing['model_set'], routing['outside_model_set']), (list(POLICY_TIERS), []))
         self.assertNotIn('benchmark_eligible', routing)
@@ -314,7 +316,7 @@ class JevTrialTests(unittest.TestCase):
     def test_an_incomplete_catalog_makes_the_trial_ineligible(self):
         partial = dict(ACCOUNT_CATALOG, data=[m for m in ACCOUNT_CATALOG['data'] if m['id'] != OPUS_5_5])
         record = self.aligned(partial, SONNET_5_5)
-        self.assertEqual(record['catalog']['models'], [SONNET_5_5, HAIKU])
+        self.assertEqual(record['catalog']['models'], [HAIKU_5_5, SONNET_5_5])
         self.assertEqual((record['routing']['benchmark_eligible'], record['routing']['ineligible_reason']),
                          (False, 'catalog_incomplete'))
 
@@ -405,7 +407,7 @@ class OfflineJevTrialTests(unittest.TestCase):
         with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
             record = self.trial('jev-compat-o55', 'aligned', self.FIX, jev_stub=OPUS_5_5)
         self.assertTrue(record['passed'], record['grade'])
-        self.assertEqual(record['catalog'], {'status': 200, 'models': [OPUS_5_5, SONNET_5_5, HAIKU]})
+        self.assertEqual(record['catalog'], {'status': 200, 'models': [HAIKU_5_5, OPUS_5_5, SONNET_5_5]})
         routing = record['routing']
         self.assertTrue(routing['routed'], routing)
         # Jev's real proxy resolved the stub's choice from the filtered catalog, not its static claude-opus-5.

@@ -9,7 +9,8 @@ with that of each direct move:
 - run(c): the remaining work on c: horizon requests, each reading the prefix, writing what it adds to
   the cache (its new input and the previous reply) and paying for its output; on a cold cache the first
   request also writes the prefix. Effort and model scale the number of requests and the output per
-  request (measured factors in the config). The prefix grows by each request's input and output.
+  request (measured factors in the config). The prefix grows by each request's input and output. A model
+  priced by prompt length (Haiku 5.5) is priced request by request at the tier its prompt reaches.
 - switch: the one-time cache rewrite, beyond the read it replaces. A model change rewrites the whole
   prefix; an effort change rewrites what that model rewrites (config: full, messages or none); a
   cold cache costs nothing extra, since staying would write it too. With return_reuse enabled, a move
@@ -17,9 +18,11 @@ with that of each direct move:
   newest breakpoint (return_reuse.max_positions content positions), writes only what that entry doesn't
   cover.
 - candidates: staying and Jev's setting; when Jev is unsure of the model (or the effort), also Jev's
-  effort (or model) alone, so a move can take the part Jev is sure of. Effort changes only where
-  effort_changes_at allows (a turn start): inside a turn's tool loop it does not take effect, so at a
-  mid-task step or on stuck evidence only the model moves, at the turn's effort.
+  effort (or model) alone, so a move can take the part Jev is sure of. With measured_candidates on (user
+  decision, October 8), at its decision points every runnable setting with measured tuning outcomes too, whether
+  or not Jev names it. Effort changes only where effort_changes_at allows (a turn start): inside a turn's tool
+  loop it does not take effect, so at a mid-task step or on stuck evidence only the model moves, at the turn's
+  effort. A candidate model runs only at its candidate_efforts when the config lists them (the measured ones).
 - P_ok(c): Jev's model answer is the cheapest model that can finish in one pass, and its effort
   answer the lowest effort that can. So c is enough when both are at or below c's, treated as
   independent. With calibration, at the decision points it names, that estimate is blended with
@@ -49,7 +52,7 @@ with that of each direct move:
 A move goes straight to its target and never climbs. It must beat staying by the hysteresis, scaled
 by how plausible the current setting is: the margin protects a setting that may well be enough from
 marginal moves, not one that is almost certain to fail. Downgrades also need a multiple of their
-rewrite and enough confidence. Models, efforts, cache behaviour and the cost
+rewrite and, when they are Jev's pick, enough confidence. Models, efforts, cache behaviour and the cost
 model come from configs/modelpilot-policy.json and prices from the rate table; nothing here names
 a model.
 """
@@ -57,6 +60,7 @@ import hashlib
 import itertools
 import json
 from pathlib import Path
+from .cache_probe import dated, tier
 
 CONFIG = Path(__file__).resolve().parents[1]/'configs/modelpilot-policy.json'
 TRIGGERS = ('turn_start', 'stuck_evidence', 'step')
@@ -109,14 +113,30 @@ def load(path=CONFIG):
         raise ValueError('per_message_effort: enabled is a boolean, placement before_result or after_result, beta null '
                          'or one header value')
     _check_delegation(cfg)
+    _check_models(cfg)
+    return cfg
+
+
+def _check_models(cfg):
+    """The models' settings and the candidates they make, for load() and an arm's overrides alike."""
+    pme = cfg['per_message_effort']
     for model, spec in cfg['models'].items():
-        if any(e not in order for e in spec['efforts']):
+        if any(e not in cfg['effort_order'] for e in spec['efforts']):
             raise ValueError(f'{model}: an effort is not in effort_order')
         if spec['effort_switch_rewrite'] not in REWRITES:
             raise ValueError(f'{model}: effort_switch_rewrite must be one of {REWRITES}')
+        if not set(spec.get('candidate_efforts') or []) <= set(spec['efforts']):
+            raise ValueError(f'{model}: candidate_efforts must be among its efforts')
+        # Claude Code puts its own effort in an effort message on every turn (2.1.284), and the last one holds: with
+        # per-message effort on, a model the proxy can't carry an effort message to would run at the client's effort.
+        if spec['candidate'] and pme['enabled'] and spec['efforts'] and not spec.get('per_message_effort'):
+            raise ValueError(f'{model}: a candidate needs per_message_effort while per-message effort is on, or the '
+                             "client's own effort message would set its effort")
+    measured = cfg.get('measured_candidates') or {'enabled': False, 'at': []}
+    if type(measured['enabled']) is not bool or not set(measured['at']) <= set(TRIGGERS):
+        raise ValueError(f'measured_candidates: enabled is a boolean, at among {TRIGGERS}')
     if not settings(cfg):
         raise ValueError('No candidate settings')
-    return cfg
 
 
 FORCE_CAUSES = ('tests_now_pass', 'tests_now_fail', 'spend_overrun', 'tests_pass', 'agent_finish')
@@ -157,6 +177,7 @@ def with_overrides(cfg, overrides):
     _check_delegation(out)
     _check_exploration(out)
     _check_floor(out)
+    _check_models(out)
     return out
 
 
@@ -270,9 +291,11 @@ def _effort_index(cfg, effort):
 
 
 def settings(cfg):
-    """Every (model, effort) the policy may run: candidate models at each effort they accept."""
+    """Every (model, effort) the policy may run: candidate models at each effort they accept, or only at their
+    candidate_efforts (the measured ones; Haiku 5.5, October 8)."""
     models = sorted((m for m, spec in cfg['models'].items() if spec['candidate']), key=lambda m: _rank(cfg, m))
-    return [(m, e) for m in models for e in (cfg['models'][m]['efforts'] or [None])]
+    return [(m, e) for m in models for e in (cfg['models'][m].get('candidate_efforts') or cfg['models'][m]['efforts']
+                                             or [None])]
 
 
 def _smoothed(probabilities, labels, weight):
@@ -355,16 +378,46 @@ def _scale(cfg, setting, prof):
     return requests, output
 
 
+def _rate(rates, model, prompt):
+    """A model's flat rates today (cache_probe.dated) for a request of about prompt tokens (cache_probe.tier; Haiku 5.5
+    costs more over 100,000)."""
+    return tier(dated(rates[model]), prompt)
+
+
+def _segments(rate, start, growth, horizon):
+    """(requests, flat rates) over a horizon of requests whose prefix grows by growth a request from start: the whole
+    horizon at one price, or, for a model priced by prompt length, a run of requests per tier their prompts reach (a
+    request's prompt: its prefix and what it adds)."""
+    if 'tiers' not in rate:
+        return [(horizon, rate)]
+    out, done = [], 0.0
+    for t in rate['tiers']:
+        limit = t['max_prompt_tokens']
+        fits = horizon if limit is None else (max(0.0, (limit - start) / growth) if growth > 0 else
+                                              (horizon if start <= limit else 0.0))
+        n = min(horizon, fits) - done
+        if n > 0:
+            out.append((n, t))
+            done += n
+        if done >= horizon:
+            break
+    return out
+
+
 def run_cost(cfg, rates, setting, prof):
-    rate = rates[setting[0]]
     requests, output = _scale(cfg, setting, prof)
     horizon = max(1.0, prof['horizon_requests'] * requests)
     reply = prof['output_tokens'] * output
     growth = prof['new_input_tokens'] + reply  # written to the cache by the next request
-    prefix = prof['prefix_tokens'] + (horizon - 1) / 2 * growth  # average prefix over the remaining requests
-    write = rate[write_rate(cfg, prof)]
-    cold = 0.0 if prof['warm'] else prof['prefix_tokens'] * (write - rate['read'])  # the first request writes it
-    return (horizon * (prefix * rate['read'] + growth * write + reply * rate['output']) + cold) / 1e6
+    key, start, total = write_rate(cfg, prof), prof['prefix_tokens'], 0.0
+    segments = _segments(dated(rates[setting[0]]), start, growth, horizon)
+    for count, rate in segments:
+        prefix = start + (count - 1) / 2 * growth  # average prefix over these requests
+        total += count * (prefix * rate['read'] + growth * rate[key] + reply * rate['output'])
+        start += count * growth
+    first = segments[0][1]
+    cold = 0.0 if prof['warm'] else prof['prefix_tokens'] * (first[key] - first['read'])  # the first request writes it
+    return (total + cold) / 1e6
 
 
 def switch_cost(cfg, rates, current, target, prof, warm=None, reuse=False):
@@ -374,7 +427,7 @@ def switch_cost(cfg, rates, current, target, prof, warm=None, reuse=False):
     warm = prof['warm'] if warm is None else warm
     if not warm or tuple(current) == tuple(target):
         return 0.0
-    rate = rates[target[0]]
+    rate = _rate(rates, target[0], prof['prefix_tokens'])
     extra = rate[write_rate(cfg, prof)] - rate['read']
     if current[0] != target[0]:
         tokens = prof['prefix_tokens']
@@ -404,7 +457,7 @@ def consult_cost(cfg, rates, current, target, prof):
     base = prof.get('output_effort')
     output = spec['output_tokens'] * (cfg['effort_output_factor'][target[1]] / cfg['effort_output_factor'][base]
                                       if target[1] and base else 1.0)
-    rt, rc = rates[target[0]], rates[current[0]]
+    rt, rc = _rate(rates, target[0], brief), _rate(rates, current[0], prof['prefix_tokens'])
     advice = spec['advice_tokens'] * (rc[write] + (_horizon(cfg, current, prof) - 1) * rc['read'])
     return (brief * rt['input'] + output * rt['output'] + advice) / 1e6
 
@@ -416,7 +469,8 @@ def note_cost(cfg, rates, current, target, prof):
     spec = delegation(cfg, 'handoff_note')
     if not spec['enabled'] or current[0] == target[0] or not prof.get('history'):
         return 0.0
-    rc, rt, write = rates[current[0]], rates[target[0]], write_rate(cfg, prof)
+    rc, rt = _rate(rates, current[0], prof['prefix_tokens']), _rate(rates, target[0], prof['prefix_tokens'])
+    write = write_rate(cfg, prof)
     return (prof['prefix_tokens'] * rc['read'] + spec['output_tokens'] * rc['output'] +
             spec['note_tokens'] * (rt[write] + (_horizon(cfg, target, prof) - 1) * rt['read'])) / 1e6
 
@@ -618,6 +672,12 @@ def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None):
     pick = moves[0] if moves[0] in runnable else None
     if trigger in ('turn_start', 'step'):
         candidates += [c for c in dict.fromkeys(moves) if c in runnable and c != current]
+    # Measured settings join Jev's (user decision, October 8): Jev doesn't predict the misses (calibration.jev_weight),
+    # so a setting with measured tuning outcomes is weighed whether or not Jev names it.
+    measured, added = cfg.get('measured_candidates') or {'enabled': False, 'at': []}, []
+    if measured['enabled'] and trigger in measured['at'] and calibrated:
+        added = [c for c in runnable if _label(c) in cal['outcomes'] and c not in candidates]
+        candidates += added
 
     wasted = cfg['recovery']['wasted_fraction']
     every = settings(cfg)
@@ -660,6 +720,8 @@ def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None):
         note = note_cost(cfg, rates, current, c, prof)  # the handoff note the model being left writes, if on
         row = {'setting': _label(c), 'p_ok': p, 'switch_usd': switch + note, 'run_usd': run, 'recover_usd': recover,
                'expected_usd': switch + note + p * run + (1 - p) * recover, '_setting': c}
+        if c in added:
+            row['measured_only'] = True  # weighed for its measured outcomes, not because Jev named it
         if note:
             row['note_usd'] = note
         if calibrated:
@@ -692,7 +754,7 @@ def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None):
         return dict(out, action='consult', consult=list(adviser), reason='expected_cost_lower')
     target = best['_setting']
     downgrade = is_downgrade(cfg, target, current)
-    if downgrade:
+    if downgrade and target not in added:  # Jev's pick needs Jev sure of it; a measured one has its evidence
         confidence = (out['jev']['model_confidence'] if target[0] != current[0] else out['jev']['effort_confidence'])
         if not isinstance(confidence, (int, float)) or confidence < cfg['min_confidence_to_downgrade']:
             return dict(out, action='stay', reason='low_confidence_no_downgrade')

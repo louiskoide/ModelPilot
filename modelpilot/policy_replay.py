@@ -22,7 +22,9 @@ Databases are opened read-only; nothing is called.
 
 With the config's jev_gate on, each replayed decision also says whether the gate would have skipped Jev there
 (replayed.gate); the decision itself is still replayed on the answer Jev gave. A skipped point whose recorded answer
-replays to anything but a stay would mean the gate is wrong: summary gate.skipped_but_moved counts them.
+replays to anything but a stay would mean the gate is wrong: summary gate.skipped_but_moved counts them. A point below
+the quality floor skips Jev by design and moves on measured pass rates alone; gate.below_floor counts those apart
+(decisions, and how many moved).
 
 With the quality floor on (an arm's overrides), each replayed decision carries the floor's verdict (quality_floor).
 """
@@ -140,13 +142,17 @@ def replay_run(run_dir, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_
 
 def summarize(rows):
     gated = [r for r in rows if (r['replayed'] or {}).get('gate')]
+    # Below the quality floor the gate skips Jev because the floor moves without its answer: not a gate error.
+    floor = [r for r in gated if r['replayed']['gate']['reason'] == 'below_quality_floor']
     gate = {'decisions': len(gated),
             'skipped': dict(Counter(r['trigger'] for r in gated if r['replayed']['gate']['skip'])),
             'asked': dict(Counter(f"{r['trigger']}:{r['replayed']['gate']['reason']}" for r in gated
                                   if not r['replayed']['gate']['skip'])),
-            'skipped_but_moved': sum(r['replayed']['gate']['skip'] and r['replayed']['action'] != 'stay' for r in gated),
-            'closest_skipped_usd': max((r['replayed']['gate']['closest_usd'] for r in gated if r['replayed']['gate']['skip']
-                                        and r['replayed']['gate']['closest_usd'] is not None), default=None)}
+            'skipped_but_moved': sum(r['replayed']['gate']['skip'] and r['replayed']['action'] != 'stay'
+                                     for r in gated if r not in floor),
+            'below_floor': {'decisions': len(floor), 'moved': sum(r['replayed']['action'] != 'stay' for r in floor)},
+            'closest_skipped_usd': max((r['replayed']['gate'].get('closest_usd') for r in gated if r['replayed']['gate']['skip']
+                                        and r['replayed']['gate'].get('closest_usd') is not None), default=None)}
     return {'decisions': len(rows), 'status': dict(Counter(r['status'] for r in rows)),
             **({'gate': gate} if gated else {}),
             'by_trigger': {t: dict(Counter(r['status'] for r in rows if r['trigger'] == t))

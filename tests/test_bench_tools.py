@@ -268,8 +268,8 @@ class ToolTrialTests(unittest.TestCase):
         self.assertEqual([(d['trigger'], d['action']) for d in policy['decisions']],
                          [('turn_start', 'jump'), ('stuck_evidence', 'jump')])
         self.assertEqual((routing['advisor']['calls'], routing['advisor']['failures'], routing['advisor']['live']), (2, 0, False))
-        self.assertEqual(record['catalog'], {'status': 200, 'models': ['claude-opus-5-5', 'claude-sonnet-5-5',
-                                                                      'claude-haiku-4-5-20251001']})
+        self.assertEqual(record['catalog'], {'status': 200, 'models': ['claude-haiku-5-5', 'claude-opus-5-5',
+                                                                      'claude-sonnet-5-5']})
         self.assertTrue(routing['accounting_matches'], routing)
         self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
         self.assertEqual(record['accounting']['cost_scope'], 'complete')  # a stub costs nothing; live Jev is unpriced

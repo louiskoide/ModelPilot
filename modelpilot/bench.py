@@ -77,7 +77,14 @@ ARMS = {
                                   'append_system_prompt': 'bench/prompts/concise.md', 'prompt_cache_ttl': '5m'},
     'sonnet-5.5-low-concise-1h': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low',
                                   'append_system_prompt': 'bench/prompts/concise.md', 'prompt_cache_ttl': '1h'},
-    'haiku-4.5': {'kind': 'fixed', 'model': 'claude-haiku-4-5-20251001'},
+    'haiku-4.5': {'kind': 'fixed', 'model': 'claude-haiku-4-5-20251001'},  # kept so its earlier runs reproduce
+    # Haiku 5.5 (October 8): the policy's cheapest tier in place of Haiku 4.5, and cheaper per token at any prompt length
+    # than every other tier. Is it enough on the tuning tasks? Without an effort the client sends medium (2.1.284, checked
+    # at $0); low concise mirrors the cheapest Sonnet arm. 2.1.284 has no price for it, so the client's own cost won't
+    # match the proxy's (client_cost_matches); reports use the proxy's.
+    'haiku-5.5': {'kind': 'fixed', 'model': 'claude-haiku-5-5'},
+    'haiku-5.5-low-concise': {'kind': 'fixed', 'model': 'claude-haiku-5-5', 'effort': 'low',
+                              'append_system_prompt': 'bench/prompts/concise.md'},
     # Jev picks the served model per turn; the client only sends the sentinel.
     'jev-stock': {'kind': 'jev', 'variant': 'stock', 'model': 'jev-router', 'checkout': 'work/jev-router-baseline',
                   'patch': None},
@@ -143,6 +150,10 @@ AUTHS = ('api_key', 'subscription')
 # cache writes, so dollars are reported API-key equivalent (bench_report.api_key_equivalent), as-sent alongside.
 SUBSCRIPTION_KINDS = ('fixed',)
 IDLE_SECONDS = 130  # the proxy's upstream socket timeout (120 s) bounds any request still in flight
+# Models the pinned client (2.1.284) has no price for, checked at $0 against the owned fixture: it charges them its
+# unknown-model rate, Opus 5.5's, so its --max-budget-usd stop and its own cost are in those dollars (Haiku 5.5: about
+# 40x the wire cost, so the default $1 stops at about $0.025 of real spend).
+CLIENT_UNPRICED = ('claude-haiku-5-5',)
 # Client result subtypes, pinned by the offline tests against Claude Code 2.1.281.
 STOPS = {'error_max_turns': 'turn_limit', 'error_max_budget_usd': 'budget_stop'}
 # ModelPilot arm: why its proxy refused a request, which ends the session.
@@ -160,11 +171,13 @@ class PreflightError(RuntimeError):
 
 
 def rates():
-    """Rates for every benchmark model: the 5-family table, the policy's Sonnet 5.5 and Opus 5.5 tiers and M0's 4.6 entries."""
+    """Rates for every benchmark model: the 5-family table, the policy's tiers and M0's 4.6 entries. Haiku 5.5's are
+    priced by prompt length (cache_probe.tier)."""
     merged = json.loads((ROOT/'configs/m0.json').read_text())['rates']
     merged.update(json.loads((ROOT/'configs/jev-rates.json').read_text())['rates'])
     merged.update(json.loads((ROOT/'configs/opus-5-5-rates.json').read_text())['rates'])
     merged.update(json.loads((ROOT/'configs/sonnet-5-5-rates.json').read_text())['rates'])
+    merged.update(json.loads((ROOT/'configs/haiku-5-5-rates.json').read_text())['rates'])
     return merged
 
 
@@ -979,7 +992,11 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
                 'sequence_preamble': long_session.PREAMBLE if sequences else None,
                 'compact': compact if sequences else None, 'autocompact': autocompact if sequences else None,
                 'prompt_cache_ttl': {a: ARMS[a]['prompt_cache_ttl'] for a in arms if ARMS[a].get('prompt_cache_ttl')} or None,
-                'note': 'Stop thresholds are not billing caps: per session, and the run threshold between sessions. No retries.'}
+                'client_unpriced_arms': {a: ARMS[a]['model'] for a in arms if ARMS[a]['model'] in CLIENT_UNPRICED} or None,
+                'note': 'Stop thresholds are not billing caps: per session, and the run threshold between sessions. No retries.'
+                        + (' The client prices client_unpriced_arms\' models at its unknown-model rate (Opus 5.5\'s), so '
+                           'their per-session stop falls at a fraction of the same dollars of real spend.'
+                           if any(ARMS[a]['model'] in CLIENT_UNPRICED for a in arms) else '')}
     with (out/'manifest.json').open('x') as f:
         json.dump(manifest, f, indent=2)
 

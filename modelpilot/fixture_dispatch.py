@@ -14,6 +14,21 @@ from .proxy import request_effort, reservation_estimate
 from .policy_actions import escalation_proposal, prepare_action, transform_request
 
 
+def haiku_5_5_shape(request):
+    """What Haiku 5.5 rejects with a 400 (its migration guide, retrieved October 8): a thinking budget, thinking
+    disabled at xhigh or max, sampling parameters other than their defaults (temperature 1, top_p 0.99, never both,
+    never top_k) and an assistant prefill. Mid-history system messages and effort are accepted."""
+    thinking=(request.get('thinking') or {}).get('type')
+    effort=request.get('output_config',{}).get('effort')
+    if thinking=='enabled' or (thinking=='disabled' and effort in ('xhigh','max')):
+        raise ValueError('Unsupported Haiku 5.5 thinking')
+    if ('top_k' in request or request.get('temperature',1)!=1 or request.get('top_p',.99)!=.99
+            or ('temperature' in request and 'top_p' in request)):
+        raise ValueError('Unsupported Haiku 5.5 sampling')
+    if request['messages'] and request['messages'][-1].get('role')=='assistant':
+        raise ValueError('Haiku 5.5 rejects an assistant prefill')
+
+
 class StrictFixture:
     """Checks the candidate request shape and returns fixed synthetic usage, not model output."""
     def __init__(self):self.calls=0
@@ -24,6 +39,7 @@ class StrictFixture:
             raise ValueError('Unconverted system message')
         if request['model']=='claude-haiku-4-5-20251001' and ('thinking' in request or request.get('output_config',{}).get('effort')):
             raise ValueError('Unsupported Haiku setting')
+        if request['model']=='claude-haiku-5-5':haiku_5_5_shape(request)
         return {'model':request['model'],'usage':{'input_tokens':100,'output_tokens':4,
                 'cache_creation_input_tokens':0,'cache_read_input_tokens':0,
                 'service_tier':'standard','inference_geo':'global'}}

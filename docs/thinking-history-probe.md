@@ -218,6 +218,26 @@ Unlike Sonnet 5, **a Sonnet 5.5 effort change keeps the tools and system cached 
 **`runs/thinking-probe-sonnet-5-5-20260928-150023`: not evidence.** It served 46 requests ($0.9522298 known), then the account's credit ran out. The API answered one switched request (model_up) and the next seed with HTTP 400 "Your credit balance is too low", and the run stopped. The probe recorded that switched request as a *rejected transition*, which it wasn't. Fixed: `cache_probe.send` now keeps the API's error type, and `cache_probe.account_problem` recognises billing and authentication failures. A switched request that fails that way now stops the run with no verdict (`tests/test_thinking_probe.py`).
 
 
+## Haiku 5.5 as the bottom tier (built October 8; not yet run)
+
+`policy_actions.MODELS` is now Haiku 5.5, Sonnet 5.5 and Opus 5.5 (see `docs/m6-modelpilot-policy.md`, "Tier set"). The probe's "haiku" is Haiku 5.5. Haiku 4.5 rejected Claude Code's mid-history system messages, so its transitions were refused at plan time and a single-request control checked its shape alone. Haiku 5.5 takes those messages, so its cases run like the others: a two-request `control/haiku`, `to_haiku/sonnet`, `to_haiku/opus` and, new, `from_haiku` (Haiku 5.5 medium → Sonnet 5.5 medium, an escalation or correction reset) and `effort_up/haiku` (Haiku 5.5 medium → high). Haiku seeds carry Sonnet 5.5's captured shape and betas, as Opus seeds do: the arm's client is Sonnet 5.5 and the proxy keeps its headers. A suite plans only the controls on its transitions' targets (unchanged for the existing suites).
+
+Two things to watch. The docs don't say whether another model reads Haiku 5.5's thinking blocks (they say none reads Sonnet 5.5's), so expect `from_haiku` to drop them, unbilled. Haiku 5.5's blocks are also bound to the account that produced them, which holds here.
+
+The `haiku-5-5` suite is the three cases a Haiku 5.5 candidate needs (`to_haiku/sonnet`, `from_haiku`, `effort_up/haiku`) with the Sonnet and Haiku controls. Since the user's decision on October 8 (a session reaches Haiku by a proxy move from the low concise start), it also has three move cases. Each is a seed and three steps, tool continuation, all forwarded to Haiku 5.5 as ActivePolicy would. The client runs Sonnet 5.5 low and carries its own effort message on the note after the prompt, as 2.1.284 does:
+- `haiku/move_control`: Haiku at the client's low, the reference;
+- `haiku/move_top`: the top-level effort set to medium, the client's later effort message still there;
+- `haiku/move_pm`: the top level left at low and the proxy's effort message for medium after the client's, from the seed on (ActivePolicy.carry at a turn start).
+
+Claude Code's own effort message means a model the proxy moves to must take the proxy's effort message, or it runs at the client's effort. Low is the Haiku setting that fails the floor. So `move_pm` decides Haiku's `per_message_effort`: accepted, with more thinking than `move_control` and the cache kept from step to step.
+
+```sh
+python3 -m modelpilot.thinking_probe --suite haiku-5-5                                  # plan only, $0
+python3 -m modelpilot.thinking_probe --suite haiku-5-5 --repeats 2 --live --budget 1.5  # 64 requests
+```
+
+The dry-run admission bound is $3.88, a conservative upper bound (Haiku priced at its dearer tier). Sixteen of the requests are on Sonnet 5.5 and the rest on Haiku 5.5, so expect under $1. The budget is a stopping threshold on measured spend plus the next request's estimate. If the suite passes, add its run and pairs to `THINKING_HISTORY_VERIFIED` and to the evidence table in `tests/test_policy_actions.py`. Run it with the pinned client's captured shape (`tests/fixtures/claude-2.1.284-shape.json`, Sonnet 5.5's); what the client sends Haiku 5.5 itself is recorded in `tests/fixtures/claude-2.1.284-haiku-5-5-shape.json`.
+
 ## Returns to a warm setting (built September 29, run September 30)
 
 The policy's `return_reuse` (off) would price a move back to a setting whose own cache entry is still warm as writing only what that entry misses. M0 measured such returns without thinking history only. The `returns` suite measures them in the pinned client's request shape, with thinking history, and tests one rule from the API documentation: a breakpoint looks back at most 20 content positions for an earlier entry (a run of `tool_use` blocks, or of `tool_result` blocks, is one position). Each Claude Code step adds about four (the reply's thinking and tool call, the tool result and the client's system note). So a return after a few steps may not reach the home setting's entry, even though that entry is warm.

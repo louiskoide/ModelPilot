@@ -5,8 +5,9 @@ import json
 import tempfile
 import unittest
 from modelpilot import bench, switch_policy as sp
+from modelpilot.cache_probe import dated
 
-H, S, O = 'claude-haiku-4-5-20251001', 'claude-sonnet-5-5', 'claude-opus-5-5'
+H, S, O = 'claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'  # the policy's tiers (Haiku 5.5 since October 8)
 MODELS, EFFORTS = [H, S, O], ['low', 'medium', 'high', 'xhigh', 'max']
 
 
@@ -127,8 +128,8 @@ class SwitchPolicyTests(unittest.TestCase):
         cfg = copy.deepcopy(off)
         cfg['models'][S]['effort_switch_rewrite'] = 'full'  # as Sonnet 5 did
         self.assertAlmostEqual(sp.switch_cost(cfg, self.rates, (S, 'medium'), (S, 'high'), prof),
-                               prof['prefix_tokens'] * (2.5 - .2) / 1e6)
-        self.assertAlmostEqual(sonnet_effort, prof['messages_tokens'] * (2.5 - .2) / 1e6)  # so does Sonnet 5.5 (probe)
+                               prof['prefix_tokens'] * (2.5 - .1) / 1e6)  # Sonnet 5.5 reads $0.10 since October 7
+        self.assertAlmostEqual(sonnet_effort, prof['messages_tokens'] * (2.5 - .1) / 1e6)  # so does Sonnet 5.5 (probe)
         self.assertLess(opus_effort, model_change)
         self.assertEqual(sp.switch_cost(self.cfg, self.rates, (S, 'medium'), (O, 'medium'), dict(prof, warm=False)), 0)
 
@@ -187,7 +188,7 @@ class SwitchPolicyTests(unittest.TestCase):
         prof = sp.profile(self.cfg, request_, warm=True)
         covered = prof['prefix_tokens'] - 1000  # Sonnet medium ran until 1,000 tokens ago
         prof = sp.profile(self.cfg, request_, warm=True, entries={f'{S}/medium': covered})
-        extra = (2.5 - .2) / 1e6
+        extra = (2.5 - .1) / 1e6  # Sonnet 5.5's write less its read, $0.10 since October 7
         on, off = self.off(), self.off()  # effort rewrites, to see what a warm entry saves
         on['return_reuse']['enabled'], off['return_reuse']['enabled'] = True, False
         self.assertTrue(self.cfg['return_reuse']['enabled'])  # on since the returns probe (September 30)
@@ -215,7 +216,7 @@ class SwitchPolicyTests(unittest.TestCase):
         # A return to a warm model counts its newest entry, whatever effort it ran at.
         prof = sp.profile(on, request_, warm=True, entries={f'{S}/*': prof['prefix_tokens'] - 1000})
         self.assertAlmostEqual(sp.switch_cost(on, self.rates, (O, 'xhigh'), (S, 'low'), prof, reuse=True),
-                               1000 * (2.5 - .2) / 1e6)
+                               1000 * (2.5 - .1) / 1e6)
 
     def test_a_bad_config_is_refused(self):
         for change in ({'effort_switch_rewrite': 'partial'}, {'efforts': ['medium', 'extreme']}):
@@ -283,7 +284,7 @@ class CostModelTests(unittest.TestCase):
         self.prof = dict(self.cfg['defaults'], prefix_tokens=7100, messages_tokens=1500, warm=False, warm_entries={})
 
     def expected(self, model, requests, reply, warm=False):
-        rate, d = self.rates[model], self.cfg['defaults']
+        rate, d = dated(self.rates[model]), self.cfg['defaults']  # today's prices, as forecasts use
         growth = d['new_input_tokens'] + reply
         prefix = 7100 + (requests - 1) / 2 * growth
         cold = 0 if warm else 7100 * (rate['write_5m'] - rate['read'])
@@ -296,7 +297,8 @@ class CostModelTests(unittest.TestCase):
         warm = dict(self.prof, warm=True)
         self.assertAlmostEqual(sp.run_cost(self.cfg, self.rates, (S, 'medium'), warm),
                                self.expected(S, d['horizon_requests'], d['output_tokens'], warm=True))
-        # The measured shape forecasts what a Sonnet 5.5 and an Opus 5.5 medium task cost on the tuning split.
+        # The measured shape forecasts what a Sonnet 5.5 and an Opus 5.5 medium task cost on the tuning split (Sonnet
+        # 5.5 about $0.090 at its $0.20 reads before October 7, $0.0825 at $0.10).
         self.assertAlmostEqual(sp.run_cost(self.cfg, self.rates, (S, 'medium'), self.prof), .085, delta=.01)
         self.assertAlmostEqual(sp.run_cost(self.cfg, self.rates, (O, 'medium'), self.prof), .219, delta=.02)
 
@@ -508,7 +510,8 @@ class QualityFloorTests(unittest.TestCase):
     def test_a_move_below_the_floor_is_never_weighed(self):
         prof = sp.profile(self.base, request(20), False)
         sure_low = advice(S, 'low', .99, .99)
-        free = sp.decide(self.base, self.rates, sure_low, (O, 'medium'), prof, 'turn_start')
+        jev_only_candidates = sp.with_overrides(self.base, {'measured_candidates': {'enabled': False}})
+        free = sp.decide(jev_only_candidates, self.rates, sure_low, (O, 'medium'), prof, 'turn_start')
         self.assertEqual((free['action'], free['target']), ('jump', [S, 'low']))  # the floor off: down it goes
         held = sp.decide(self.cfg(f'{O}/medium'), self.rates, sure_low, (O, 'medium'), prof, 'turn_start')
         self.assertEqual(held['action'], 'stay')
@@ -542,6 +545,40 @@ class QualityFloorTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class MeasuredCandidateTests(unittest.TestCase):
+    """User decision, October 8: at turn starts, settings with measured tuning outcomes are weighed beside Jev's pick."""
+    def setUp(self):
+        self.cfg, self.rates = sp.load(), bench.rates()
+        self.prof = sp.profile(self.cfg, request(20), False)
+
+    def test_measured_settings_join_jevs_pick_and_a_measured_downgrade_needs_no_jev_confidence(self):
+        unsure_opus = advice(O, 'medium', model_p=.1)  # Jev stays on Opus, unsure
+        decision = sp.decide(self.cfg, self.rates, unsure_opus, (O, 'medium'), self.prof, 'turn_start')
+        measured = {c['setting'] for c in decision['candidates'] if c.get('measured_only')}
+        self.assertEqual(measured, {f'{S}/low', f'{S}/medium'})  # the runnable measured settings Jev didn't name
+        self.assertEqual((decision['action'], decision['downgrade']), ('jump', True))
+        self.assertIn(sp._label(decision['target']), measured)
+        self.assertGreater(decision['benefit_usd'], decision['required_usd'])
+        off = sp.with_overrides(self.cfg, {'measured_candidates': {'enabled': False}})
+        self.assertEqual(sp.decide(off, self.rates, unsure_opus, (O, 'medium'), self.prof, 'turn_start')['action'], 'stay')
+
+    def test_jevs_own_downgrade_still_needs_its_confidence(self):
+        unsure_low = advice(S, 'low', model_p=.1, effort_p=.1)
+        cfg = sp.with_overrides(self.cfg, {'measured_candidates': {'enabled': False}})
+        decision = sp.decide(cfg, self.rates, unsure_low, (O, 'medium'), self.prof, 'turn_start')
+        self.assertEqual((decision['action'], decision['reason']), ('stay', 'low_confidence_no_downgrade'))
+
+    def test_only_at_their_decision_points_and_never_without_an_answer(self):
+        warm = sp.profile(self.cfg, request(20), True)
+        step = sp.decide(self.cfg, self.rates, advice(O, 'medium', model_p=.1), (O, 'medium'), warm, 'step')
+        self.assertFalse(any(c.get('measured_only') for c in step['candidates']))
+        self.assertEqual(sp.decide(self.cfg, self.rates, None, (O, 'medium'), self.prof, 'turn_start')['reason'],
+                         'advice_unavailable')
+        for bad in ({'enabled': 'yes'}, {'at': ['sometime']}):
+            with self.assertRaises(ValueError):
+                sp.with_overrides(self.cfg, {'measured_candidates': bad})
 
 
 class ExplorationPlanTests(unittest.TestCase):

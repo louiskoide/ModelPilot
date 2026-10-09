@@ -1,8 +1,9 @@
 """M0 replication on current models. Planning is free; --live prompts for a local key.
 
-Suites: three-model (Haiku 4.5, Sonnet 5, Opus 5; run September 24), opus-5-5, and ttl-1h (plan item 6): the
-one-hour lifetime on Sonnet 5.5 and Opus 5.5, and what a request marked with one lifetime does to an entry written
-with the other (TTL_1H_KINDS).
+Suites: three-model (Haiku 4.5, Sonnet 5, Opus 5; run September 24), opus-5-5, haiku-5-5 (the same questions with
+Haiku 5.5 at home: its effort changes, moves to Sonnet 5.5 and Opus 5.5 and back, its lifetime), and ttl-1h (plan
+item 6): the one-hour lifetime on Sonnet 5.5 and Opus 5.5, and what a request marked with one lifetime does to an
+entry written with the other (TTL_1H_KINDS).
 """
 import argparse
 import getpass
@@ -18,15 +19,21 @@ from . import cache_probe as probe
 
 ROOT = Path(__file__).resolve().parents[1]
 HAIKU, SONNET_5_5, OPUS_5_5 = 'claude-haiku-4-5-20251001', 'claude-sonnet-5-5', 'claude-opus-5-5'
+HAIKU_5_5 = 'claude-haiku-5-5'
 MODELS = [HAIKU, 'claude-sonnet-5', 'claude-opus-5']
 RATES = {m: dict(input=i, output=o, write_5m=i*1.25, write_1h=i*2, read=i*.1)
          for m, i, o in zip(MODELS, [1, 2, 5], [5, 10, 25])}
 # Opus 5.5 reads are 0.05x input, not 0.1x; writes use the standard multipliers (derived; confirm at launch).
 RATES[OPUS_5_5] = dict(input=4, output=20, write_5m=5, write_1h=8, read=.2)
-# Sonnet 5.5: Sonnet 5's prices, as stated at launch (configs/sonnet-5-5-rates.json).
-RATES[SONNET_5_5] = dict(input=2, output=10, write_5m=2.5, write_1h=4, read=.2)
+# Sonnet 5.5: Sonnet 5's prices at launch, cache reads $0.10 from October 7 (configs/sonnet-5-5-rates.json;
+# cache_probe.dated).
+RATES[SONNET_5_5] = json.loads((ROOT/'configs/sonnet-5-5-rates.json').read_text())['rates'][SONNET_5_5]
+# Haiku 5.5: priced by prompt length (cache_probe.tier); every probe prompt here is far below its 100,000 tokens.
+RATES[HAIKU_5_5] = json.loads((ROOT/'configs/haiku-5-5-rates.json').read_text())['rates'][HAIKU_5_5]
 SOURCE = 'https://platform.claude.com/docs/en/build-with-claude/prompt-caching'
-SUITES = ('three-model', 'opus-5-5', 'ttl-1h', 'ttl-1h-long')
+SUITES = ('three-model', 'opus-5-5', 'haiku-5-5', 'ttl-1h', 'ttl-1h-long')
+# Suites with one model always "a", so every model group tests a return to it: (home, the models it moves to).
+HOMES = {'opus-5-5': (OPUS_5_5, MODELS), 'haiku-5-5': (HAIKU_5_5, (SONNET_5_5, OPUS_5_5))}
 # ttl-1h: each kind is an independent prefix, touched at these (lifetime marked, seconds after the previous request
 # started) steps. The first request writes; the question is whether the last one reads.
 TTL_1H_KINDS = {
@@ -72,23 +79,24 @@ def plan(run_id, suite='three-model'):
                                 for i, (ttl, delay) in enumerate(steps)]
                     groups.append(dict(name=name, steps=requests))
         return groups
-    if suite == 'opus-5-5':
-        # Opus 5.5 is always "a", so every model group tests a return to Opus, which the
+    if suite in HOMES:
+        # The home model is always "a", so every model group tests a return to it, which the
         # three-model order never did. `thinking` is omitted, as in the three-model suite.
+        home, others = HOMES[suite]
         for repeat in range(3):
             for layer in ('system', 'messages'):
-                add(f'effort/{repeat}/{OPUS_5_5}/{layer}',
-                    [(label, 0, OPUS_5_5, effort) for label, effort in
+                add(f'effort/{repeat}/{home}/{layer}',
+                    [(label, 0, home, effort) for label, effort in
                      [('cold','low'), ('warm','low'), ('changed','high'),
                       ('changed_warm','high'), ('return','low')]], layer)
-                for b in MODELS:
-                    add(f'model/{repeat}/{OPUS_5_5}/{b}/{layer}',
+                for b in others:
+                    add(f'model/{repeat}/{home}/{b}/{layer}',
                         [(label, 0, model, 'low') for label, model in
-                         [('a_cold',OPUS_5_5), ('a_warm',OPUS_5_5), ('b_cold',b), ('b_warm',b),
-                          ('a_return',OPUS_5_5)]], layer)
+                         [('a_cold',home), ('a_warm',home), ('b_cold',b), ('b_warm',b),
+                          ('a_return',home)]], layer)
             for kind, gaps in [('before',[0,240]), ('after',[0,330]), ('refresh',[0,180,180])]:
-                add(f'ttl/{repeat}/{OPUS_5_5}/{kind}',
-                    [(f'touch_{i}', gap, OPUS_5_5, 'low') for i, gap in enumerate(gaps)], 'messages')
+                add(f'ttl/{repeat}/{home}/{kind}',
+                    [(f'touch_{i}', gap, home, 'low') for i, gap in enumerate(gaps)], 'messages')
         return groups
     for repeat in range(3):
         for layer in ('system', 'messages'):
@@ -180,7 +188,7 @@ def execute(groups, out, budget, transport=probe.send):
                     time.sleep(min(30, due-time.time()))
                 group = groups[i]
                 label, delay, p = group['steps'][step]
-                rate = RATES[p['model']]
+                rate = probe.tier(RATES[p['model']])  # priced by prompt length: the dearest tier
                 # Conservative admission estimate: UTF-8 bytes as tokens plus framing allowance.
                 # Estimated, not a provider-enforced billing ceiling.
                 estimate = ((len(json.dumps(p).encode())+1024)*rate['write_5m'] + p['max_tokens']*rate['output'])/1e6
@@ -237,9 +245,10 @@ def main():
     out = args.out or ROOT/'runs'/(prefix+time.strftime('%Y%m%d-%H%M%S'))
     out.mkdir(parents=True, exist_ok=False)
     manifest = dict(run_id=rid, suite=args.suite, live=args.live, calls=calls, budget_usd=args.budget,
-                    rates=RATES, pricing_source=SOURCE, pricing_checked='2026-09-24', groups=groups,
-                    thinking='The thinking parameter is omitted: Sonnet 5, Opus 5 and Opus 5.5 then run '
-                             'adaptive thinking by default (Opus 5.5 cannot disable it); Haiku runs '
+                    rates=RATES, pricing_source=SOURCE,
+                    pricing_checked='2026-10-08' if args.suite == 'haiku-5-5' else '2026-09-24', groups=groups,
+                    thinking='The thinking parameter is omitted: Sonnet 5, Opus 5, Opus 5.5 and Haiku 5.5 then '
+                             'run adaptive thinking by default (Opus 5.5 cannot disable it); Haiku 4.5 runs '
                              'without thinking and has no effort parameter.',
                     timing='Independent prefixes interleaved; TTL gaps from request start, actual gaps logged.')
     (out/'plan.json').write_text(json.dumps(manifest, indent=2)+'\n')

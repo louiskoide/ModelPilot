@@ -1,0 +1,11 @@
+{
+  "source": "Pricing page (https://platform.claude.com/docs/en/about-claude/pricing) and the Claude Haiku 5.5 model page, retrieved 2026-10-08: Haiku 5.5 (released October 7) is priced by prompt length, $0.10 input / $0.50 output per MTok, 5-minute cache writes $0.125, 1-hour cache writes $0.20 and cache reads $0.01 for prompts up to 100,000 tokens; five times that ($0.50 / $2.50 / $0.625 / $1 / $0.05) for prompts over 100,000 tokens. Stated rates, not derived; not invoice-reconciled. The pages don't say which tokens count toward the 100,000: these rates are applied on the whole prompt (uncached input, cache writes and cache reads; cache_probe.prompt_tokens), the rule Anthropic's earlier long-context prices used. Unconfirmed for Haiku 5.5.",
+  "retrieved": "2026-10-08",
+  "units": "USD per million tokens",
+  "rates": {
+    "claude-haiku-5-5": {"tiers": [
+      {"max_prompt_tokens": 100000, "input": 0.1, "output": 0.5, "write_5m": 0.125, "write_1h": 0.2, "read": 0.01},
+      {"max_prompt_tokens": null, "input": 0.5, "output": 2.5, "write_5m": 0.625, "write_1h": 1, "read": 0.05}
+    ]}
+  }
+}

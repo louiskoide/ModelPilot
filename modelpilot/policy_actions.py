@@ -4,11 +4,12 @@ import copy
 import json
 import math
 from pathlib import Path
+from .cache_probe import tier
 from .proxy import effective_effort, reservation_estimate  # effective_effort: re-exported
 
 # The policy's models, cheapest first, and what each accepts, from configs/modelpilot-policy.json so the tier set
-# can change without code. Opus 5.5 replaced Opus 5 on September 26 and Sonnet 5.5 replaced Sonnet 5 on
-# September 28 (docs/m6-modelpilot-policy.md, "Tier set").
+# can change without code. Opus 5.5 replaced Opus 5 on September 26, Sonnet 5.5 replaced Sonnet 5 on September 28 and
+# Haiku 5.5 replaced Haiku 4.5 on October 8 (docs/m6-modelpilot-policy.md, "Tier set").
 POLICY_CONFIG=Path(__file__).resolve().parents[1]/'configs/modelpilot-policy.json'
 _CONFIG=json.loads(POLICY_CONFIG.read_text())
 MODELS=tuple(sorted(_CONFIG['models'],key=lambda m:_CONFIG['models'][m]['rank']))
@@ -20,7 +21,8 @@ LADDER_EFFORTS=('low','medium','high')  # the fixture-only ladder (ProxyPolicy);
 # thinking_probe evidence only; the same model twice means an effort change (docs/thinking-history-probe.md).
 # Opus 5.5 effort: 4/4 in runs/thinking-probe-top-rung-20260926-153723. Sonnet 5.5 effort and Sonnet 5.5 <-> Opus 5.5:
 # 8/8, 4/4 and 4/4 in runs/thinking-probe-sonnet-5-5-20260928-133426 (the API drops the other model's thinking on a
-# switch, unbilled). The Sonnet 5 pairs left with that tier. Haiku targets are refused by the transform itself.
+# switch, unbilled). The Sonnet 5 pairs left with that tier. No Haiku 5.5 pair is probed yet (thinking_probe --suite
+# haiku-5-5), so a move to or from it with thinking history is refused.
 THINKING_HISTORY_VERIFIED=frozenset({('claude-opus-5-5','claude-opus-5-5'),('claude-sonnet-5-5','claude-sonnet-5-5'),
                                      ('claude-sonnet-5-5','claude-opus-5-5'),('claude-opus-5-5','claude-sonnet-5-5')})
 
@@ -46,7 +48,7 @@ def transform_request(request,model,effort,allow_thinking_history=False):
         raise ValueError('Thinking history across setting changes is not validated')
     out=copy.deepcopy(request)
     out['model']=model
-    if not MODEL_EFFORTS[model]:  # no effort or adaptive thinking (Haiku 4.5)
+    if not MODEL_EFFORTS[model]:  # no effort or adaptive thinking: none of today's tiers (Haiku 4.5 until October 8)
         out.pop('thinking',None)
         if 'output_config' in out:
             out['output_config'].pop('effort',None)
@@ -58,8 +60,9 @@ def transform_request(request,model,effort,allow_thinking_history=False):
             if not context:out.pop('context_management',None)
     else:
         out.setdefault('output_config',{})['effort']=effort
-    # Claude Code 2.1.284 itself sends system-role messages (after every user turn) to Sonnet 5.5 and Opus 5.5,
-    # as 2.1.282 did to Sonnet 5 and Opus 5, so they are kept. Haiku rejects them (Jev finding): relocate trailing ones only.
+    # Claude Code 2.1.284 itself sends system-role messages (after every user turn) to Sonnet 5.5, Opus 5.5 and Haiku 5.5,
+    # as 2.1.282 did to Sonnet 5 and Opus 5, so they are kept. Haiku 4.5 rejected them (Jev finding): for a tier that
+    # does, trailing ones are relocated, and only those.
     if not MID_CONVERSATION_SYSTEM[model]:
         messages=out['messages'];tail=[]
         while messages and messages[-1].get('role')=='system':tail.insert(0,messages.pop())
@@ -156,7 +159,7 @@ def prepare_action(state,proposal,owner,request,available_usd,rates,reserve_outp
             or not math.isfinite(available_usd) or available_usd<0):
         result['reason']='unknown_or_invalid_budget';return result
     transformed=transform_request(request,proposal['target_model'],proposal['target_effort'])
-    rate=rates.get(transformed['model'])
+    rate=tier(rates.get(transformed['model']))  # priced by prompt length: the dearest tier, as the reservation
     if not rate or any(isinstance(rate.get(k),bool) or not isinstance(rate.get(k),(float,int)) or not math.isfinite(rate[k]) or rate[k]<0
                        for k in ('input','write_5m','write_1h','output')):
         result['reason']='unknown_rates';return result
