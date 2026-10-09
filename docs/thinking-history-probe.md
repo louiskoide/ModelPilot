@@ -261,6 +261,22 @@ python3 -m modelpilot.thinking_probe --suite haiku-effort --repeats 10 --live --
 
 The admission bound is $12.56, a conservative upper bound. The first run's move calls cost $0.00055 each, so expect about $0.10–0.25.
 
+**Ran October 9** (`runs/thinking-probe-haiku-effort-20261009-130808`, the user's run, commit `582f748`): 200 of 200 requests, $0.12, 9 minutes, no rejections or refusals. Every repeat was accepted, with the cache kept at every step. Verdict: **holds**. Mean thinking tokens a repeat (seed plus three steps), with the range over the 10 repeats:
+
+| case | mean | range |
+| --- | --- | --- |
+| `move_control` (the client's low) | 1,185 | 1,065–1,299 |
+| `native_medium` | 1,260 | 1,119–1,418 |
+| `move_pm` (the proxy's medium) | 1,324 | 1,157–1,535 |
+| `native_xhigh` | 1,849 | 1,621–2,100 |
+| `move_pm_xhigh` (the proxy's xhigh) | 1,996 | 1,833–2,251 |
+
+- **The message works:** native xhigh is 1.56× low, so the probe tells efforts apart. Every `move_pm_xhigh` repeat thought more than every low repeat, and the case lands at native xhigh's level, so the proxy's message sets Haiku's effort.
+- **Medium:** native medium is only 1.06× low on these puzzles, below the 1.15 the rule needs to read medium on its own. `move_pm` (1,324) is in native medium's range.
+- **Result:** Haiku's `per_message_effort` is on (`configs/modelpilot-policy.json`).
+
+The same day, the first run's other results went in: Sonnet 5.5 → Haiku 5.5, Haiku 5.5 → Sonnet 5.5 and Haiku → Haiku are in `THINKING_HISTORY_VERIFIED`. With thinking, Haiku's effort change (`effort_up/haiku`) read the tools and system and rewrote only the messages, 4/4. Not probed: Haiku 5.5 ↔ Opus 5.5 (`docs/m6-modelpilot-policy.md`, "Haiku 5.5 on").
+
 ## Returns to a warm setting (built September 29, run September 30)
 
 The policy's `return_reuse` (off) would price a move back to a setting whose own cache entry is still warm as writing only what that entry misses. M0 measured such returns without thinking history only. The `returns` suite measures them in the pinned client's request shape, with thinking history, and tests one rule from the API documentation: a breakpoint looks back at most 20 content positions for an earlier entry (a run of `tool_use` blocks, or of `tool_result` blocks, is one position). Each Claude Code step adds about four (the reply's thinking and tool call, the tool result and the client's system note). So a return after a few steps may not reach the home setting's entry, even though that entry is warm.

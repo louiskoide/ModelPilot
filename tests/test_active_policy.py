@@ -13,6 +13,7 @@ from modelpilot.proxy import ProxyServer
 from tests.test_policy_session import O, RATES, S, Upstream
 
 H = 'claude-haiku-4-5-20251001'
+H55 = 'claude-haiku-5-5'  # the bottom tier since October 8, a candidate since October 9
 
 ONE = 100*2/1e6 + 4*10/1e6  # one scripted Sonnet 5.5 reply: 100 input and 4 output tokens
 
@@ -193,10 +194,11 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertEqual(self.dispatches(), [])
 
     def test_jev_is_asked_only_where_some_answer_could_move(self):
-        # The shipped, calibrated policy with Jev's candidates only: from this Sonnet 5.5 medium start its measured
-        # candidates (low concise) could pay, so it asks Jev here; the arms start on low concise, where it still doesn't
-        # (runs/measured-candidates-replay-20261008.json).
-        self.start(config=switch_policy.with_overrides(switch_policy.load(), {'measured_candidates': {'enabled': False}}))
+        # The shipped, calibrated policy with Jev's candidates only and Haiku 5.5 off: from this Sonnet 5.5 medium start
+        # its measured candidates (low concise) could pay, so it asks Jev here, and since October 9 the move to Haiku 5.5
+        # medium can pay at every turn start (runs/haiku-on-replay-20261009.json).
+        self.start(config=switch_policy.with_overrides(switch_policy.load(), {'measured_candidates': {'enabled': False},
+                                                                            'models': {H55: {'candidate': False}}}))
         self.advisor.answer = {'model': {'choice': O, 'confidence': .99, 'probabilities': {O: 1}},
                                'effort': {'choice': 'max', 'confidence': .99, 'probabilities': {'max': 1}}}
         self.assertEqual(self.post()[0], 200)
@@ -342,6 +344,27 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
                          [[(1, 'medium'), (2, 'xhigh')], [(1, 'medium'), (2, 'xhigh')]])
         self.assertEqual([policy_actions.effective_effort(b) for b in bodies], ['xhigh', 'xhigh'])
         self.assertEqual([r.get('effective_effort') for r in self.rows()], ['xhigh', 'xhigh'])
+
+    def test_the_low_concise_start_moves_to_haiku_5_5_medium_by_the_proxy(self):
+        """The shipped policy (October 9): from the client's Sonnet 5.5 low, a turn start moves the session to Haiku 5.5
+        medium. The client's request keeps its model and effort; the proxy rewrites the model and adds its effort message
+        after the client's (thinking-probe-haiku-effort-20261009-130808: that message holds on Haiku)."""
+        self.start(config=switch_policy.load())
+        self.advisor.answer = {'model': {'choice': S, 'confidence': .91, 'probabilities': {S: .95, H55: .02, O: .03}},
+                               'effort': {'choice': 'medium', 'confidence': .55,
+                                          'probabilities': {'low': 0, 'medium': .64, 'high': .33, 'xhigh': .03, 'max': 0}}}
+        note = {'role': 'system', 'content': 'env', 'output_config': {'effort': 'low'}}  # the client's own, at low
+        first = self.convo(0) + [note]
+        later = first + self.convo(1)[1:]
+        for messages in (first, later):
+            self.post(messages=messages, thinking=self.ADAPTIVE, output_config={'effort': 'low'})
+        bodies = self.forwarded()
+        self.assertEqual([(b['model'], b['output_config']['effort']) for b in bodies], [(H55, 'low')] * 2)
+        self.assertEqual([self.effort_positions(b) for b in bodies], [[(1, 'low'), (2, 'medium')]] * 2)
+        self.assertEqual([policy_actions.effective_effort(b) for b in bodies], ['medium'] * 2)
+        turn, = self.decisions()
+        self.assertEqual((turn['action'], turn['target'], turn['reason']), ('jump', [H55, 'medium'], 'expected_cost_lower'))
+        self.assertTrue(next(c for c in turn['candidates'] if c['setting'] == f'{H55}/medium')['measured_only'])
 
     def test_effort_changes_at_the_next_user_turn_not_at_a_step(self):
         """Inside a turn's tool loop an effort change doesn't take effect (per-message-effort probe): a mid-task step

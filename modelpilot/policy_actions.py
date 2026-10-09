@@ -24,7 +24,9 @@ LADDER_EFFORTS=('low','medium','high')  # the fixture-only ladder (ProxyPolicy);
 # switch, unbilled). The Sonnet 5 pairs left with that tier. No Haiku 5.5 pair is probed yet (thinking_probe --suite
 # haiku-5-5), so a move to or from it with thinking history is refused.
 THINKING_HISTORY_VERIFIED=frozenset({('claude-opus-5-5','claude-opus-5-5'),('claude-sonnet-5-5','claude-sonnet-5-5'),
-                                     ('claude-sonnet-5-5','claude-opus-5-5'),('claude-opus-5-5','claude-sonnet-5-5')})
+                                     ('claude-sonnet-5-5','claude-opus-5-5'),('claude-opus-5-5','claude-sonnet-5-5'),
+                                     ('claude-sonnet-5-5','claude-haiku-5-5'),('claude-haiku-5-5','claude-sonnet-5-5'),
+                                     ('claude-haiku-5-5','claude-haiku-5-5')})
 
 
 def setting(model,effort):

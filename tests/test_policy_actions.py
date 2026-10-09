@@ -18,9 +18,11 @@ def legacy_haiku():
 # the pairs whose models are both current tiers.
 EVIDENCE={'thinking-probe-transitions-20260926-131953':('349303b64a924350bf911fe189ad95c9635ee58aca6a1d82f5615f0c955b7c32',{(S5,S5)}),
           'thinking-probe-top-rung-20260926-153723':('08ba4941f6d2b2c1a6b0780b1359675fcf200db623c78f4dfae359d25d5d642d',{(S5,O),(O,S5),(O,O)}),
-          'thinking-probe-sonnet-5-5-20260928-133426':('6632f4e2184f1169bab69d4b124337792c5b488b944bba4353b4bf1f2d2bc176',{(S,S),(S,O),(O,S)})}
-# Every move between the current tiers, including the Opus 5.5 -> Sonnet 5.5 correction reset.
-SONNET_5_5_PAIRS=frozenset({(S,S),(S,O),(O,S),(O,O)})
+          'thinking-probe-sonnet-5-5-20260928-133426':('6632f4e2184f1169bab69d4b124337792c5b488b944bba4353b4bf1f2d2bc176',{(S,S),(S,O),(O,S)}),
+          'thinking-probe-haiku-5-5-20261009-124512':('ab4bb89a03148db9fcf0f21576a92d9af83c6a6ba3e611e78df407f40c072fd6',{(S,H),(H,S),(H,H)})}
+# Every move between Sonnet 5.5 and Opus 5.5, including the Opus 5.5 -> Sonnet 5.5 correction reset, and since October 9
+# between Sonnet 5.5 and Haiku 5.5 and Haiku's own effort rung. Haiku 5.5 <-> Opus 5.5 is not probed.
+VERIFIED_PAIRS=frozenset({(S,S),(S,O),(O,S),(O,O),(S,H),(H,S),(H,H)})
 class TransformTests(unittest.TestCase):
     def request(self):
         return dict(model=O,max_tokens=32,thinking={'type':'adaptive'},output_config={'effort':'high','format':{'type':'json_schema'}},
@@ -53,12 +55,12 @@ class TransformTests(unittest.TestCase):
         self.assertEqual(out['messages'][0],old['messages'][0])
         self.assertEqual((out['model'],out['output_config']['effort']),(S,'medium'))
     def test_verified_pairs_come_from_the_probe_evidence(self):
-        # Every move between Sonnet 5.5 and Opus 5.5; the Sonnet 5 pairs left with that tier. No Haiku 5.5 pair is
-        # probed yet (Haiku 4.5's targets were refused by the transform) and never Opus 5.
+        # Every move between Sonnet 5.5 and Opus 5.5, and between Sonnet 5.5 and Haiku 5.5 (October 9); the Sonnet 5
+        # pairs left with that tier, and never Opus 5. Haiku 4.5's targets were refused by the transform.
         tiers=set(policy_actions.MODELS)
         self.assertEqual(policy_actions.THINKING_HISTORY_VERIFIED,
                          frozenset(p for pairs in EVIDENCE.values() for p in pairs[1] if set(p)<=tiers))
-        self.assertEqual(policy_actions.THINKING_HISTORY_VERIFIED,SONNET_5_5_PAIRS)
+        self.assertEqual(policy_actions.THINKING_HISTORY_VERIFIED,VERIFIED_PAIRS)
         import hashlib,json
         from modelpilot.thinking_probe import verified_transitions
         for run,(digest,pairs) in EVIDENCE.items():
