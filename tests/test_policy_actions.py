@@ -21,7 +21,8 @@ EVIDENCE={'thinking-probe-transitions-20260926-131953':('349303b64a924350bf911fe
           'thinking-probe-sonnet-5-5-20260928-133426':('6632f4e2184f1169bab69d4b124337792c5b488b944bba4353b4bf1f2d2bc176',{(S,S),(S,O),(O,S)}),
           'thinking-probe-haiku-5-5-20261009-124512':('ab4bb89a03148db9fcf0f21576a92d9af83c6a6ba3e611e78df407f40c072fd6',{(S,H),(H,S),(H,H)})}
 # Every move between Sonnet 5.5 and Opus 5.5, including the Opus 5.5 -> Sonnet 5.5 correction reset, and since October 9
-# between Sonnet 5.5 and Haiku 5.5 and Haiku's own effort rung. Haiku 5.5 <-> Opus 5.5 is not probed.
+# between Sonnet 5.5 and Haiku 5.5 and Haiku's own effort rung. Haiku 5.5 <-> Opus 5.5 is not probed: refused whether
+# the Haiku or Opus thinking comes from the request's model or an earlier one (history_models).
 VERIFIED_PAIRS=frozenset({(S,S),(S,O),(O,S),(O,O),(S,H),(H,S),(H,H)})
 class TransformTests(unittest.TestCase):
     def request(self):
@@ -84,7 +85,26 @@ class TransformTests(unittest.TestCase):
             self.assertEqual(out['messages'][0],p['messages'][0])
         p['model']=O
         self.assertEqual(transform_request(p,S,'medium')['messages'][0],p['messages'][0])  # correction reset
-        with self.assertRaises(ValueError):transform_request(p,H,'medium')  # no Haiku 5.5 pair is probed yet
+        with self.assertRaises(ValueError):transform_request(p,H,'medium')  # Opus 5.5 -> Haiku 5.5 is not probed
+    def test_every_model_in_the_history_must_pair_with_the_target(self):
+        # A session that was on Haiku 5.5 holds its thinking after it moves on: Sonnet 5.5 -> Opus 5.5 is verified,
+        # Haiku 5.5 -> Opus 5.5 is not.
+        p=self.with_thinking(); p['model']=S; p['output_config']={'effort':'medium'}
+        self.assertEqual(transform_request(p,O,'medium',history_models=(S,))['model'],O)
+        with self.assertRaisesRegex(ValueError,'^Thinking history'):transform_request(p,O,'medium',history_models=(H,S))
+        self.assertEqual(transform_request(p,H,'medium',history_models=(H,))['model'],H)
+        with self.assertRaisesRegex(ValueError,'^Thinking history'):transform_request(p,H,'medium',history_models=(O,))
+        p['messages'].pop(0)  # without thinking in the history the models in it don't matter
+        self.assertEqual(transform_request(p,O,'medium',history_models=(H,))['model'],O)
+        with self.assertRaisesRegex(ValueError,'Unknown source model'):transform_request(p,O,'medium',history_models=(H45,))
+    def test_a_move_that_thinks_needs_a_verified_pair_back(self):
+        # The session goes back to the client's model on a deferral or correction, with the target's thinking.
+        p=self.request(); p['model']=O; p['output_config']={'effort':'medium'}  # adaptive thinking, none in the history
+        with self.assertRaisesRegex(ValueError,'^Thinking history.*way back to '+O):transform_request(p,H,'medium',returns_to=O)
+        self.assertEqual(transform_request(p,S,'medium',returns_to=O)['model'],S)
+        self.assertEqual(transform_request(p,O,'high',returns_to=O)['model'],O)  # an effort change: no way back needed
+        del p['thinking']  # a request that can't think leaves no thinking to carry back
+        self.assertEqual(transform_request(p,H,'medium',returns_to=O)['model'],H)
     def test_only_verified_pairs_allow_thinking_history(self):
         with mock.patch.object(policy_actions,'THINKING_HISTORY_VERIFIED',frozenset({(O,S)})):
             self.assertEqual(transform_request(self.with_thinking(),S,'medium')['model'],S)
@@ -173,6 +193,19 @@ class EscalationTests(unittest.TestCase):
         with mock.patch.object(policy_actions,'THINKING_HISTORY_VERIFIED',frozenset()):
             with self.assertRaises(ValueError):prepare_action(self.state,proposal,'worker',p,1,rates)
         self.assertEqual(self.state.get(self.task)['level'],0)
+
+    def test_a_jump_is_gated_on_the_models_it_carries(self):
+        # The active policy's jump names the models in the session's history and the client's model to return to.
+        p={'model':S,'max_tokens':32,'output_config':{'effort':'medium'},
+           'messages':[{'role':'user','content':'test'},
+                       {'role':'assistant','content':[{'type':'thinking','thinking':'x','signature':'s'}]},
+                       {'role':'user','content':'more'}]}
+        rates={O:dict(input=5,write_5m=6.25,write_1h=10,read=.5,output=25)}
+        base=escalation_proposal(self.state,self.task,1,'worker',S,'medium')
+        jump=dict(base,action='jump',trigger='turn_start',decision='1/turn/2',target_model=O,target_effort='high',returns_to=S)
+        self.assertEqual(prepare_action(self.state,dict(jump,history_models=[S]),'worker',p,1,rates)['action'],'prepared_offline')
+        with self.assertRaisesRegex(ValueError,'^Thinking history'):
+            prepare_action(self.state,dict(jump,history_models=[H,S]),'worker',p,1,rates)
 
     def test_tampered_proposal_cannot_skip_to_stronger_model(self):
         p=self.proposal();p['target_model']=O

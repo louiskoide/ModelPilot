@@ -84,4 +84,4 @@ Built offline first; live runs need the user's approval. 1–4 done October 6; 4
 11. 4b held (user decision; its trial-count rule gives n=1).
 12. Governor: live evidence for turn-end delivery and observed rebuilds; dry-run meanwhile.
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
-14. Haiku 5.5: on, not run live; Haiku/Opus thinking pairs: your call.
+14. Haiku 5.5: on; gate checks thinking history; live run: your go.
