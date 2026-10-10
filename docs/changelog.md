@@ -2,6 +2,34 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 9, 2026 (afternoon): Haiku 5.5 on: probes passed, the stronger effort check held
+
+$0.82 of the user's API-key runs. The user ran the two Haiku probes, then (user decision) a stronger effort check, built and committed before it ran. Haiku 5.5 is now a candidate at medium in every ModelPilot arm. The quality floor still keeps it from `modelpilot-for-opus`. Not yet run live in an arm.
+
+- **`thinking_probe --suite haiku-5-5`** (`runs/thinking-probe-haiku-5-5-20261009-124512`; 64 requests, $0.31, no rejections or refusals):
+  - `to_haiku/sonnet`, `from_haiku` and `effort_up/haiku` were accepted in both shapes and repeats. Sonnet 5.5 → Haiku 5.5, Haiku 5.5 → Sonnet 5.5 and Haiku → Haiku went into `THINKING_HISTORY_VERIFIED`, and the run into the evidence table in `tests/test_policy_actions.py`.
+  - The move cases were accepted with the cache kept. But `move_pm` thought only 9% more than `move_control`, with the repeats overlapping, so the run couldn't show that the proxy's effort message sets Haiku's effort.
+- **`cache_replication --suite haiku-5-5`** (`runs/m0-replication-haiku-5-5-20261009-124740`; 111 requests, $0.39):
+  - Returns to Haiku read their entry 12/12, and an entry lived the 5-minute sliding window.
+  - Without thinking, effort changes read everything (6/6). With thinking (`effort_up/haiku` above), they kept tools and system and rewrote the messages, 4/4. So `effort_switch_rewrite` is `messages`, as for Sonnet 5.5 and Opus 5.5.
+- **The stronger effort check** (`thinking_probe --suite haiku-effort`, commit `582f748`; `runs/thinking-probe-haiku-effort-20261009-130808`; 200 requests, $0.12):
+  - Native medium and xhigh references were added, plus `move_pm` at xhigh, 10 repeats each. The rule (`move_effort_verdict`) was committed before the run.
+  - Verdict **holds**. Mean thinking: the client's low 1,185; the proxy's xhigh 1,996, every repeat above every low repeat; native xhigh 1,849.
+  - Native medium was only 1.06× low on these puzzles, so the xhigh pair decided. `move_pm` at medium read 1,324, in native medium's range. Haiku's `per_message_effort` is on.
+- **Config:** Haiku 5.5 now has `candidate: true` and `per_message_effort: true`, `effort_switch_rewrite: messages`, and evidence fields in place of `why_not_candidate`. `runs/haiku-apply-evidence-20261008.py` now refuses to run, since it would undo this.
+- **Replay** (`runs/haiku-on-replay-20261009.py` → `.json`, the seven recorded ModelPilot runs):
+  - `modelpilot` and `modelpilot-for-sonnet` move 101 of 105 turn starts to Haiku 5.5 medium; the other 4 had no Jev answer. `modelpilot-for-opus` changes nothing.
+  - The gate now asks Jev at all 105 turn starts and 46 of 56 steps (it skipped all 161 before). Each ask is a TypeSafe call, unpriced (plan item 13).
+- **Not probed: Haiku 5.5 ↔ Opus 5.5 with thinking history.**
+  - The transform gates on (the request's model, the target), and the request's model is always the client's Sonnet 5.5. So a session on Haiku that moves to Opus, or one on Opus that drops to Haiku, passes as a verified Sonnet pair while its history holds the other model's thinking.
+  - What-ifs in the replay: from Haiku 5.5 medium, every recorded point stays on Haiku. From Opus 5.5 medium, 101 turn starts would drop to Haiku and 48 steps move to Sonnet.
+  - The benchmark's single-prompt tasks have one turn start each, so this needs a multi-turn session that reached Opus. Left for the user.
+- **Tests:** 711 offline tests on Python 3.12 with the pinned 2.1.284 client, run in the worktree (`runs/haiku-on-regression-py312.log`). 710 pass; the one failure is the known checkout-path test with `work/` symlinked in.
+  - New: `HaikuEffortCheckTests` (3) in `tests/test_thinking_probe.py`, and `test_the_low_concise_start_moves_to_haiku_5_5_medium_by_the_proxy` in `tests/test_active_policy.py`. The latter drives the move end to end: model rewritten, the client's low kept at the top level and in its message, the proxy's medium message after it.
+  - Tests of the Sonnet and Opus mechanics pin Haiku off (`test_switch_policy.haiku_off`) and also assert the Haiku-on decision.
+  - Two fixture rate tables gained Haiku 5.5: without its rates, a decision that prices it raised `KeyError`, and the proxy recorded `policy_error` and forwarded the client's request unchanged. The bench prices with `bench.rates()`, which has Haiku 5.5.
+- **Next** (the user's calls): the Haiku/Opus thinking pairs (probe them, or gate on the session's real source model); a live ModelPilot-arm run with Haiku on (API key).
+
 ## October 9, 2026: Haiku 5.5's outcomes in, for its own settings only (offline)
 
 $0. User decision: "Haiku only". Haiku 5.5's tuning outcomes go into `calibration.outcomes` and the floor's evidence, but they don't stand for Sonnet's or Opus's settings. Under "a stronger setting never misses more" they would have lifted Sonnet 5.5 medium and every Sonnet setting above it from 48/52 to Haiku's 56/58, and cleared Sonnet's parse miss against an Opus user. On these tasks the premise fails from Haiku up: Haiku medium passed `parse-decimal-grouping` and `nx-ismags-monomorphism` on both trials, which Sonnet medium missed. Built in a separate worktree while the user ran the Haiku probes, so the probe's checkout stayed clean.

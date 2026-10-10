@@ -29,6 +29,12 @@ def jev_only(cfg=None):
     return cfg
 
 
+def haiku_off(cfg=None):
+    """The shipped config with Haiku 5.5 not a candidate, as until October 9: for the Sonnet and Opus mechanics. What
+    Haiku 5.5 changes is in tests/test_haiku_5_5.py, CandidacyTests."""
+    return sp.with_overrides(cfg or sp.load(), {'models': {H: {'candidate': False}}})
+
+
 class SwitchPolicyTests(unittest.TestCase):
     def setUp(self):
         self.cfg, self.rates = jev_only(), bench.rates()
@@ -39,9 +45,9 @@ class SwitchPolicyTests(unittest.TestCase):
 
     def test_the_settings_come_from_the_config(self):
         settings = sp.settings(self.cfg)
-        self.assertNotIn(H, {m for m, _ in settings})  # not a candidate: the config says why
+        self.assertEqual([c for c in settings if c[0] == H], [(H, 'medium')])  # a candidate at its measured effort only
         self.assertIn((O, 'xhigh'), settings)
-        self.assertEqual(len(settings), 10)
+        self.assertEqual(len(settings), 11)
         cfg = copy.deepcopy(self.cfg)  # a new model is a config entry and a rate, not code
         cfg['models']['claude-next'] = dict(cfg['models'][O], rank=3)
         rates = dict(self.rates, **{'claude-next': self.rates[O]})
@@ -355,9 +361,12 @@ class CalibrationTests(unittest.TestCase):
         self.assertGreater(stay['p_ok'], .75)
 
     def test_the_recorded_harder_task_advice_now_stays_where_it_jumped(self):
-        self.assertEqual(self.decide(self.TLRU)['action'], 'stay')
-        before = self.decide(self.TLRU, cfg=jev_only(self.cfg))
+        off = haiku_off(self.cfg)
+        self.assertEqual(self.decide(self.TLRU, cfg=off)['action'], 'stay')
+        before = self.decide(self.TLRU, cfg=jev_only(off))
         self.assertEqual((before['action'], before['target']), ('jump', [S, 'high']))
+        # Since October 9 the measured Haiku 5.5 medium is cheaper at a higher measured rate.
+        self.assertEqual(self.decide(self.TLRU)['target'], [H, 'medium'])
 
     def test_a_setting_with_nothing_measured_as_weak_keeps_jevs_estimate(self):
         cfg = copy.deepcopy(self.cfg)
@@ -374,6 +383,9 @@ class CalibrationTests(unittest.TestCase):
                         'probabilities': {'low': 0, 'medium': .64, 'high': .33, 'xhigh': .03, 'max': 0}}}
 
     def test_the_low_concise_start_holds_against_jevs_usual_medium_answer(self):
+        # Among the Sonnet and Opus settings; since October 9 it moves to Haiku 5.5 medium (CandidacyTests).
+        self.assertEqual(self.decide(self.USUAL, current=(S, 'low'))['target'], [H, 'medium'])
+        self.cfg = haiku_off(self.cfg)
         decision = self.decide(self.USUAL, current=(S, 'low'))
         self.assertEqual((decision['action'], decision['target']), ('stay', [S, 'low']))
         stay = decision['candidates'][0]
@@ -404,16 +416,20 @@ class JevGateTests(unittest.TestCase):
         return sp.jev_gate(cfg, self.rates, current, sp.profile(cfg, request(kb), warm), trigger)
 
     def test_at_the_shipped_weight_no_answer_moves_a_turn_start_or_a_step(self):
+        # Among the Sonnet and Opus settings. With Haiku 5.5 a candidate (October 9) a turn start is asked: the move to
+        # Haiku 5.5 medium can pay, though its measured rate mostly decides; a step still isn't (Haiku runs at medium only).
         for trigger in ('turn_start', 'step'):
-            gate = self.gate(trigger=trigger)
+            gate = self.gate(cfg=haiku_off(), trigger=trigger)
             self.assertEqual((gate['can_change'], gate['reason']), (False, 'every_answer_stays'), trigger)
             self.assertLess(gate['closest_usd'], 0)
             self.assertEqual(gate['shapes'], 3 * 2 * (1 + 5 * 2))
+        self.assertEqual((self.gate()['can_change'], self.gate()['reason']), (True, 'a_move_can_pay'))
+        self.assertEqual(self.gate(trigger='step')['reason'], 'every_answer_stays')
 
     def test_where_jevs_answer_is_the_whole_estimate_it_is_always_asked(self):
         self.assertEqual(self.gate(cfg=jev_only())['reason'], 'uncalibrated')
         self.assertEqual(self.gate(trigger='stuck_evidence')['reason'], 'uncalibrated')
-        delegate = sp.with_overrides(self.cfg, bench.ARMS['modelpilot-delegate']['policy_overrides'])
+        delegate = sp.with_overrides(haiku_off(), bench.ARMS['modelpilot-delegate']['policy_overrides'])
         self.assertEqual(self.gate(cfg=delegate, trigger='step')['reason'], 'consult_possible')  # its target is Jev's
         self.assertFalse(self.gate(cfg=delegate)['can_change'])  # no consult at a turn start
         partial = copy.deepcopy(self.cfg)
@@ -560,7 +576,7 @@ class MeasuredCandidateTests(unittest.TestCase):
         unsure_opus = advice(O, 'medium', model_p=.1)  # Jev stays on Opus, unsure
         decision = sp.decide(self.cfg, self.rates, unsure_opus, (O, 'medium'), self.prof, 'turn_start')
         measured = {c['setting'] for c in decision['candidates'] if c.get('measured_only')}
-        self.assertEqual(measured, {f'{S}/low', f'{S}/medium'})  # the runnable measured settings Jev didn't name
+        self.assertEqual(measured, {f'{H}/medium', f'{S}/low', f'{S}/medium'})  # runnable, measured, not Jev's pick
         self.assertEqual((decision['action'], decision['downgrade']), ('jump', True))
         self.assertIn(sp._label(decision['target']), measured)
         self.assertGreater(decision['benefit_usd'], decision['required_usd'])

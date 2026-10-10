@@ -17,7 +17,7 @@ Switching model OR effort wrote a new cache prefix in tested M0 conditions. Retu
 - M0 cache harness and M1 pass-through proxy: verified, including an 8-hour soak. Missing: one-hour TTL, other request shapes, broad proxy compatibility.
 - M2 ledger, M3 workers, M4 verifier, M5 controls: bounded harnesses, small live checks; not integrated.
 - M6 benchmark: fixed, Jev and ModelPilot arms run live on 29 tuning tasks; the final split is locked, not yet run.
-- ModelPilot arm: starts at low concise; Jev advises, `switch_policy` decides; delegation off. Quality floor (October 8): no worse than the user's own model; arms `modelpilot-for-sonnet`/`-for-opus`.
+- ModelPilot arm: starts at low concise; Haiku 5.5 medium a candidate (Oct 9); Jev advises, `switch_policy` decides; delegation off. Quality floor (October 8): no worse than the user's own model; arms `modelpilot-for-sonnet`/`-for-opus`.
 - Governor: dry-run surface wired into the proxy and hooks; one live governed session passed. Missing: live turn-end delivery, observed rebuilds, fallback, active mode.
 
 The project is a tested set of components and bounded harnesses, not an operational end-to-end governor. Never present the toy benchmark as proof of production quality or savings.
@@ -73,7 +73,7 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 
 ## Plan, in order
 
-Built offline first; any live run needs the user's approval. 1–4 done October 6 (`docs/changelog.md`); 4 found no pre-run miss signal.
+Built offline first; live runs need the user's approval. 1–4 done October 6; 4 found no pre-run miss signal.
 
 5. Dropped for the quality floor (user decision, October 8).
 6. Long sessions: built offline; 1h TTL probe and sequence runs await approval.
@@ -81,7 +81,7 @@ Built offline first; any live run needs the user's approval. 1–4 done October 
 8. 30 labelling tasks: built offline; runs await approval.
 9. Caveman: parked (user decision); its $0 pass found at most 1%, all lossy.
 10. Per-task floor evidence (a predictor) only if 8 shows misses predictable; never edit Jev. Next: blast radius at the first edit (`exposure`).
-11. 4b held (user decision); on record its trial-count rule gives n=1.
+11. 4b held (user decision; its trial-count rule gives n=1).
 12. Governor: live evidence for turn-end delivery and observed rebuilds; dry-run meanwhile.
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
-14. Haiku 5.5: built, off; outcomes in (Haiku only); probes next.
+14. Haiku 5.5: on, not run live; Haiku/Opus thinking pairs: your call.

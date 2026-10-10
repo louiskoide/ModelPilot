@@ -218,7 +218,7 @@ Unlike Sonnet 5, **a Sonnet 5.5 effort change keeps the tools and system cached 
 **`runs/thinking-probe-sonnet-5-5-20260928-150023`: not evidence.** It served 46 requests ($0.9522298 known), then the account's credit ran out. The API answered one switched request (model_up) and the next seed with HTTP 400 "Your credit balance is too low", and the run stopped. The probe recorded that switched request as a *rejected transition*, which it wasn't. Fixed: `cache_probe.send` now keeps the API's error type, and `cache_probe.account_problem` recognises billing and authentication failures. A switched request that fails that way now stops the run with no verdict (`tests/test_thinking_probe.py`).
 
 
-## Haiku 5.5 as the bottom tier (built October 8; not yet run)
+## Haiku 5.5 as the bottom tier (built October 8; run October 9)
 
 `policy_actions.MODELS` is now Haiku 5.5, Sonnet 5.5 and Opus 5.5 (see `docs/m6-modelpilot-policy.md`, "Tier set"). The probe's "haiku" is Haiku 5.5. Haiku 4.5 rejected Claude Code's mid-history system messages, so its transitions were refused at plan time and a single-request control checked its shape alone. Haiku 5.5 takes those messages, so its cases run like the others: a two-request `control/haiku`, `to_haiku/sonnet`, `to_haiku/opus` and, new, `from_haiku` (Haiku 5.5 medium → Sonnet 5.5 medium, an escalation or correction reset) and `effort_up/haiku` (Haiku 5.5 medium → high). Haiku seeds carry Sonnet 5.5's captured shape and betas, as Opus seeds do: the arm's client is Sonnet 5.5 and the proxy keeps its headers. A suite plans only the controls on its transitions' targets (unchanged for the existing suites).
 
@@ -237,6 +237,45 @@ python3 -m modelpilot.thinking_probe --suite haiku-5-5 --repeats 2 --live --budg
 ```
 
 The dry-run admission bound is $3.88, a conservative upper bound (Haiku priced at its dearer tier). Sixteen of the requests are on Sonnet 5.5 and the rest on Haiku 5.5, so expect under $1. The budget is a stopping threshold on measured spend plus the next request's estimate. If the suite passes, add its run and pairs to `THINKING_HISTORY_VERIFIED` and to the evidence table in `tests/test_policy_actions.py`. Run it with the pinned client's captured shape (`tests/fixtures/claude-2.1.284-shape.json`, Sonnet 5.5's); what the client sends Haiku 5.5 itself is recorded in `tests/fixtures/claude-2.1.284-haiku-5-5-shape.json`.
+
+### The stronger effort check (`--suite haiku-effort`, built October 9 before its run)
+
+**First run, October 9** (`runs/thinking-probe-haiku-5-5-20261009-124512`, the user's run, 64 of 64 requests, $0.31, no rejections or refusals). `to_haiku/sonnet`, `from_haiku` and `effort_up/haiku` were accepted in both shapes and repeats. The move cases were accepted, with the cache kept at every step. But `move_pm` thought only about 9% more than `move_control` (1,250 against 1,151 mean thinking tokens over the seed and three steps), with the repeats overlapping on 3 of 4 steps. `move_top` showed the same small gap. So these puzzles barely separate Haiku's low from medium, and the run can't show that the proxy's message sets Haiku's effort. User decision: run a stronger check before setting `per_message_effort`.
+
+The `haiku-effort` suite has five move cases, each a seed and three steps, with every request forwarded to Haiku 5.5:
+- `haiku/move_control` and `haiku/move_pm`, as above;
+- `haiku/native_medium` and `haiku/native_xhigh`: the client itself at that effort, moved to Haiku, so the top level and the client's message agree. These are the references;
+- `haiku/move_pm_xhigh`: like `move_pm`, with the proxy's message for xhigh. Its wider gap from low shows whether the message works at all.
+
+**The rule** (`thinking_probe.move_effort_verdict`, fixed before the run). T is a case's mean over repeats of thinking tokens, summed over the seed and three steps.
+- **Invalid:** any repeat wasn't accepted, or a `move_pm` repeat rewrote the cache.
+- **Inconclusive:** T(native_xhigh) < 1.5 × T(move_control).
+- **Holds:** T(move_pm_xhigh) is nearer T(native_xhigh) than T(move_control). In addition, when the medium reference separates from low (T(native_medium) ≥ 1.15 × T(move_control)), T(move_pm) must be nearer T(native_medium). Otherwise the xhigh pair decides alone.
+- **Does not hold:** otherwise.
+- Haiku's `per_message_effort` is set only on **holds**.
+
+```sh
+python3 -m modelpilot.thinking_probe --suite haiku-effort --repeats 10                         # plan only, $0
+python3 -m modelpilot.thinking_probe --suite haiku-effort --repeats 10 --live --budget 1       # 200 requests
+```
+
+The admission bound is $12.56, a conservative upper bound. The first run's move calls cost $0.00055 each, so expect about $0.10–0.25.
+
+**Ran October 9** (`runs/thinking-probe-haiku-effort-20261009-130808`, the user's run, commit `582f748`): 200 of 200 requests, $0.12, 9 minutes, no rejections or refusals. Every repeat was accepted, with the cache kept at every step. Verdict: **holds**. Mean thinking tokens a repeat (seed plus three steps), with the range over the 10 repeats:
+
+| case | mean | range |
+| --- | --- | --- |
+| `move_control` (the client's low) | 1,185 | 1,065–1,299 |
+| `native_medium` | 1,260 | 1,119–1,418 |
+| `move_pm` (the proxy's medium) | 1,324 | 1,157–1,535 |
+| `native_xhigh` | 1,849 | 1,621–2,100 |
+| `move_pm_xhigh` (the proxy's xhigh) | 1,996 | 1,833–2,251 |
+
+- **The message works:** native xhigh is 1.56× low, so the probe tells efforts apart. Every `move_pm_xhigh` repeat thought more than every low repeat, and the case lands at native xhigh's level, so the proxy's message sets Haiku's effort.
+- **Medium:** native medium is only 1.06× low on these puzzles, below the 1.15 the rule needs to read medium on its own. `move_pm` (1,324) is in native medium's range.
+- **Result:** Haiku's `per_message_effort` is on (`configs/modelpilot-policy.json`).
+
+The same day, the first run's other results went in: Sonnet 5.5 → Haiku 5.5, Haiku 5.5 → Sonnet 5.5 and Haiku → Haiku are in `THINKING_HISTORY_VERIFIED`. With thinking, Haiku's effort change (`effort_up/haiku`) read the tools and system and rewrote only the messages, 4/4. Not probed: Haiku 5.5 ↔ Opus 5.5 (`docs/m6-modelpilot-policy.md`, "Haiku 5.5 on").
 
 ## Returns to a warm setting (built September 29, run September 30)
 
