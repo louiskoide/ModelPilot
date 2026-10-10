@@ -21,8 +21,10 @@ LADDER_EFFORTS=('low','medium','high')  # the fixture-only ladder (ProxyPolicy);
 # thinking_probe evidence only; the same model twice means an effort change (docs/thinking-history-probe.md).
 # Opus 5.5 effort: 4/4 in runs/thinking-probe-top-rung-20260926-153723. Sonnet 5.5 effort and Sonnet 5.5 <-> Opus 5.5:
 # 8/8, 4/4 and 4/4 in runs/thinking-probe-sonnet-5-5-20260928-133426 (the API drops the other model's thinking on a
-# switch, unbilled). The Sonnet 5 pairs left with that tier. No Haiku 5.5 pair is probed yet (thinking_probe --suite
-# haiku-5-5), so a move to or from it with thinking history is refused.
+# switch, unbilled). The Sonnet 5 pairs left with that tier. Sonnet 5.5 <-> Haiku 5.5 and Haiku's effort: accepted in
+# both shapes in runs/thinking-probe-haiku-5-5-20261009-124512. Haiku 5.5 <-> Opus 5.5 is not probed, so it is refused.
+# A pair is (a model whose thinking may be in the history, the target): not only the request's model, since a session
+# that has moved holds every earlier model's thinking (history_models).
 THINKING_HISTORY_VERIFIED=frozenset({('claude-opus-5-5','claude-opus-5-5'),('claude-sonnet-5-5','claude-sonnet-5-5'),
                                      ('claude-sonnet-5-5','claude-opus-5-5'),('claude-opus-5-5','claude-sonnet-5-5'),
                                      ('claude-sonnet-5-5','claude-haiku-5-5'),('claude-haiku-5-5','claude-sonnet-5-5'),
@@ -34,20 +36,32 @@ def setting(model,effort):
         raise ValueError('Unsupported model/effort combination')
 
 
-def transform_request(request,model,effort,allow_thinking_history=False):
-    """allow_thinking_history is for thinking_probe only; the policy relies on THINKING_HISTORY_VERIFIED."""
+def has_thinking(messages):
+    return any(block.get('type') in ('thinking','redacted_thinking')
+               for message in messages for block in (message.get('content') if isinstance(message.get('content'),list) else [])
+               if isinstance(block,dict))
+
+
+def transform_request(request,model,effort,allow_thinking_history=False,history_models=(),returns_to=None):
+    """allow_thinking_history is for thinking_probe only; the policy relies on THINKING_HISTORY_VERIFIED.
+    history_models: models besides the request's whose thinking may be in its history (those a session's requests
+    went to). returns_to: for a move, the model the session goes back to on a deferral or correction (the client's),
+    which then gets the target's thinking; the pair back must be verified too, whenever the request can think."""
     setting(model,effort)
-    if request.get('model') not in MODELS:
+    if request.get('model') not in MODELS or any(m not in MODELS for m in history_models):
         raise ValueError('Unknown source model')
     source_effort=request.get('output_config',{}).get('effort')
     changed=request['model']!=model or source_effort!=effort
     messages=request.get('messages')
     if not isinstance(messages,list):raise ValueError('Messages must be an array')
-    gated=not (allow_thinking_history or (request['model'],model) in THINKING_HISTORY_VERIFIED)
-    if changed and gated and any(block.get('type') in ('thinking','redacted_thinking')
-            for message in messages for block in (message.get('content') if isinstance(message.get('content'),list) else [])
-            if isinstance(block,dict)):
+    sources={request['model'],*history_models}
+    gated=not (allow_thinking_history or all((m,model) in THINKING_HISTORY_VERIFIED for m in sources))
+    if changed and gated and has_thinking(messages):
         raise ValueError('Thinking history across setting changes is not validated')
+    thinks=(request.get('thinking') or {}).get('type') not in (None,'disabled') or has_thinking(messages)
+    if (changed and returns_to is not None and returns_to!=model and thinks and not allow_thinking_history
+            and (model,returns_to) not in THINKING_HISTORY_VERIFIED):
+        raise ValueError('Thinking history across setting changes is not validated: no verified way back to '+returns_to)
     out=copy.deepcopy(request)
     out['model']=model
     if not MODEL_EFFORTS[model]:  # no effort or adaptive thinking: none of today's tiers (Haiku 4.5 until October 8)
@@ -160,7 +174,8 @@ def prepare_action(state,proposal,owner,request,available_usd,rates,reserve_outp
     if (available_usd is None or isinstance(available_usd,bool) or not isinstance(available_usd,(float,int))
             or not math.isfinite(available_usd) or available_usd<0):
         result['reason']='unknown_or_invalid_budget';return result
-    transformed=transform_request(request,proposal['target_model'],proposal['target_effort'])
+    transformed=transform_request(request,proposal['target_model'],proposal['target_effort'],
+                                  history_models=tuple(proposal.get('history_models') or ()),returns_to=proposal.get('returns_to'))
     rate=tier(rates.get(transformed['model']))  # priced by prompt length: the dearest tier, as the reservation
     if not rate or any(isinstance(rate.get(k),bool) or not isinstance(rate.get(k),(float,int)) or not math.isfinite(rate[k]) or rate[k]<0
                        for k in ('input','write_5m','write_1h','output')):

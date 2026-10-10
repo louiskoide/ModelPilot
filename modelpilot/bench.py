@@ -152,7 +152,9 @@ SUBSCRIPTION_KINDS = ('fixed',)
 IDLE_SECONDS = 130  # the proxy's upstream socket timeout (120 s) bounds any request still in flight
 # Models the pinned client (2.1.284) has no price for, checked at $0 against the owned fixture: it charges them its
 # unknown-model rate, Opus 5.5's, so its --max-budget-usd stop and its own cost are in those dollars (Haiku 5.5: about
-# 40x the wire cost, so the default $1 stops at about $0.025 of real spend).
+# 40x the wire cost, so the default $1 stops at about $0.025 of real spend). A proxy move doesn't change the client's
+# price: it prices every reply as the model it asked for, whatever model the reply names, so a ModelPilot session moved
+# to Haiku 5.5 is charged at Sonnet 5.5's rates, about 13x (runs/client-proxy-move-price-20261010.json).
 CLIENT_UNPRICED = ('claude-haiku-5-5',)
 # Client result subtypes, pinned by the offline tests against Claude Code 2.1.281.
 STOPS = {'error_max_turns': 'turn_limit', 'error_max_budget_usd': 'budget_stop'}
