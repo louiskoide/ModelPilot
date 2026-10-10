@@ -17,6 +17,52 @@ $0, user decisions: Haiku 5.5 no longer a session setting ("if Haiku passes, the
 - **Tests:** `tests.test_bench_tasks`, `tests.test_regrade`, `tests.test_bench`, `tests.test_bench_report` and `tests.test_long_session` pass (143 tests, Python 3.12, worktree).
 - **Next:** the screen (`runs/sqlglot-screen-20261010.sh`, the user's go): low concise and Opus 5.5 × 1 on the 8 tasks, subscription.
 
+## October 10, 2026: the thinking gate checks the whole history; the live Haiku-arm run planned (offline)
+
+$0. User request: gate Haiku 5.5 ↔ Opus 5.5 on the session's real models (option (a), not a probe), then plan the live run.
+
+- **The gap was narrower than the October 9 entry says.** A move's own hop was always checked: `ActivePolicy._plan` rewrites the client's request to the session's setting first, and `prepare_action` checks the move from that. So a session on Haiku moving straight to Opus was already refused. The gap was earlier hops: a conversation keeps every model's thinking. After Haiku → Sonnet → Opus, or a correction that puts the session back on the client's Sonnet and then a move to Opus, Opus would get Haiku's thinking under the verified Sonnet → Opus pair. Found by the other session working on #44 too.
+- **Fix** (`policy_actions.transform_request`, `ActivePolicy`):
+  - `history_models`: every model the task's main-loop requests went to (`ActivePolicy.models_sent`, recorded as each request leaves, deferrals at the client's model included), plus the client's. Each (model, target) pair must be in `THINKING_HISTORY_VERIFIED`. Never reset: a correction keeps the conversation, so after a compaction it is conservative.
+  - `returns_to`: a move also needs (target, the client's model) whenever the request can think, since a deferral or correction sends the session back to the client's model with the target's thinking. An Opus 5.5 client can't move to Haiku 5.5, which the quality floor already excludes.
+  - Jumps and exploration carry both in the proposal (`ActivePolicy.move`), and `prepare_action` passes them on. A refused move is journaled as decided and deferred (`refused:Thinking history…`, counted as `thinking_history_unverified`); the session stays on its setting.
+  - Effect on the benchmark: none expected. Replayed from Haiku 5.5 medium, every recorded point stays on Haiku in the Sonnet-start arms (`runs/haiku-on-replay-20261009.json`). Probing Haiku 5.5 ↔ Opus 5.5 would lift the refusal.
+- **Client price after a proxy move** ($0, `runs/client-proxy-move-price-20261010.py` → `.json`): the pinned client prices every reply as the model it asked for. Asked for Sonnet 5.5, it charged the same whether the reply named Sonnet, Haiku or Opus. So a session moved to Haiku counts against `--max-budget-usd` at Sonnet's rates. Priced that way (`runs/haiku-client-stop-20261010.py` → `.json`), the 58 recorded Haiku medium sessions cost 13.2× their Haiku price: 7 reach $1, all passing sessions of 26–31 requests, and none reaches $2 (most $1.33; $0.12 at Haiku's rates).
+- **The live run, planned** (`runs/haiku-arm-live-20261010.sh`, not committed, as with earlier run scripts): `modelpilot-for-sonnet`, the 29 tuning tasks, 1 trial, seed 11, API key and TypeSafe key, `--budget 2` (for the client's Sonnet pricing above; it also sets the governor's wire limit to $2 a session), `--run-budget 3`, no retries, then the $0 re-grade. Estimate about $1–1.50 plus unpriced TypeSafe calls, an hour of sessions after a 10-minute preflight. The script refuses to start with uncommitted code. Plan-only check: `runs/haiku-arm-live-plan-20261010.txt`.
+- **Tests:** 716 offline tests pass on Python 3.12 with the pinned 2.1.284 client first on PATH (`runs/haiku-source-model-regression-py312.log`). New: `test_haikus_thinking_never_reaches_opus_after_a_correction` and `test_a_move_needs_a_verified_way_back_to_the_clients_model` in `tests/test_active_policy.py` (both fail on the previous code), and three gate tests in `tests/test_policy_actions.py`. After the last doc edits and a comment in `bench.py`, the modules that read the docs were rerun and pass (184 tests, `runs/haiku-source-model-final-tree-py312.log`).
+- **Two intermittent CI failures fixed** (tests only). Neither came from this change; the first failed this PR's first CI run.
+  - A synthetic test repository's git could still be writing into `.git` after a commit while tearDown removed it ("Directory not empty: 'pack'" today, "'.git'" on October 7 on `long-session`). The test git environment now turns off background maintenance and gc (`tests/test_bench_tasks.ENV`).
+  - The proxy logs a request after its reply, a refusal too, so `ActivePolicyTests.rows()` could read the log before the last row was written (`test_side_requests_meet_the_same_limit` on 3.14, today on `haiku-only-outcomes`). It now waits for `ProxyServer.wait_idle` first. The affected modules pass (220 tests).
+- **Next** (the user's call): the live run, from `main` once #44 and this branch are merged.
+
+## October 9, 2026 (afternoon): Haiku 5.5 on: probes passed, the stronger effort check held
+
+$0.82 of the user's API-key runs. The user ran the two Haiku probes, then (user decision) a stronger effort check, built and committed before it ran. Haiku 5.5 is now a candidate at medium in every ModelPilot arm. The quality floor still keeps it from `modelpilot-for-opus`. Not yet run live in an arm.
+
+- **`thinking_probe --suite haiku-5-5`** (`runs/thinking-probe-haiku-5-5-20261009-124512`; 64 requests, $0.31, no rejections or refusals):
+  - `to_haiku/sonnet`, `from_haiku` and `effort_up/haiku` were accepted in both shapes and repeats. Sonnet 5.5 → Haiku 5.5, Haiku 5.5 → Sonnet 5.5 and Haiku → Haiku went into `THINKING_HISTORY_VERIFIED`, and the run into the evidence table in `tests/test_policy_actions.py`.
+  - The move cases were accepted with the cache kept. But `move_pm` thought only 9% more than `move_control`, with the repeats overlapping, so the run couldn't show that the proxy's effort message sets Haiku's effort.
+- **`cache_replication --suite haiku-5-5`** (`runs/m0-replication-haiku-5-5-20261009-124740`; 111 requests, $0.39):
+  - Returns to Haiku read their entry 12/12, and an entry lived the 5-minute sliding window.
+  - Without thinking, effort changes read everything (6/6). With thinking (`effort_up/haiku` above), they kept tools and system and rewrote the messages, 4/4. So `effort_switch_rewrite` is `messages`, as for Sonnet 5.5 and Opus 5.5.
+- **The stronger effort check** (`thinking_probe --suite haiku-effort`, commit `582f748`; `runs/thinking-probe-haiku-effort-20261009-130808`; 200 requests, $0.12):
+  - Native medium and xhigh references were added, plus `move_pm` at xhigh, 10 repeats each. The rule (`move_effort_verdict`) was committed before the run.
+  - Verdict **holds**. Mean thinking: the client's low 1,185; the proxy's xhigh 1,996, every repeat above every low repeat; native xhigh 1,849.
+  - Native medium was only 1.06× low on these puzzles, so the xhigh pair decided. `move_pm` at medium read 1,324, in native medium's range. Haiku's `per_message_effort` is on.
+- **Config:** Haiku 5.5 now has `candidate: true` and `per_message_effort: true`, `effort_switch_rewrite: messages`, and evidence fields in place of `why_not_candidate`. `runs/haiku-apply-evidence-20261008.py` now refuses to run, since it would undo this.
+- **Replay** (`runs/haiku-on-replay-20261009.py` → `.json`, the seven recorded ModelPilot runs):
+  - `modelpilot` and `modelpilot-for-sonnet` move 101 of 105 turn starts to Haiku 5.5 medium; the other 4 had no Jev answer. `modelpilot-for-opus` changes nothing.
+  - The gate now asks Jev at all 105 turn starts and 46 of 56 steps (it skipped all 161 before). Each ask is a TypeSafe call, unpriced (plan item 13).
+- **Not probed: Haiku 5.5 ↔ Opus 5.5 with thinking history.**
+  - The transform gates on (the request's model, the target), and the request's model is always the client's Sonnet 5.5. So a session on Haiku that moves to Opus, or one on Opus that drops to Haiku, passes as a verified Sonnet pair while its history holds the other model's thinking.
+  - What-ifs in the replay: from Haiku 5.5 medium, every recorded point stays on Haiku. From Opus 5.5 medium, 101 turn starts would drop to Haiku and 48 steps move to Sonnet.
+  - The benchmark's single-prompt tasks have one turn start each, so this needs a multi-turn session that reached Opus. Left for the user.
+- **Tests:** 711 offline tests on Python 3.12 with the pinned 2.1.284 client, run in the worktree (`runs/haiku-on-regression-py312.log`). 710 pass; the one failure is the known checkout-path test with `work/` symlinked in.
+  - New: `HaikuEffortCheckTests` (3) in `tests/test_thinking_probe.py`, and `test_the_low_concise_start_moves_to_haiku_5_5_medium_by_the_proxy` in `tests/test_active_policy.py`. The latter drives the move end to end: model rewritten, the client's low kept at the top level and in its message, the proxy's medium message after it.
+  - Tests of the Sonnet and Opus mechanics pin Haiku off (`test_switch_policy.haiku_off`) and also assert the Haiku-on decision.
+  - Two fixture rate tables gained Haiku 5.5: without its rates, a decision that prices it raised `KeyError`, and the proxy recorded `policy_error` and forwarded the client's request unchanged. The bench prices with `bench.rates()`, which has Haiku 5.5.
+- **Next** (the user's calls): the Haiku/Opus thinking pairs (probe them, or gate on the session's real source model); a live ModelPilot-arm run with Haiku on (API key).
+
 ## October 9, 2026: Haiku 5.5's outcomes in, for its own settings only (offline)
 
 $0. User decision: "Haiku only". Haiku 5.5's tuning outcomes go into `calibration.outcomes` and the floor's evidence, but they don't stand for Sonnet's or Opus's settings. Under "a stronger setting never misses more" they would have lifted Sonnet 5.5 medium and every Sonnet setting above it from 48/52 to Haiku's 56/58, and cleared Sonnet's parse miss against an Opus user. On these tasks the premise fails from Haiku up: Haiku medium passed `parse-decimal-grouping` and `nx-ismags-monomorphism` on both trials, which Sonnet medium missed. Built in a separate worktree while the user ran the Haiku probes, so the probe's checkout stayed clean.

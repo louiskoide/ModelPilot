@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from modelpilot import bench, policy_replay as pr, switch_policy as sp
 from tests import test_switch_policy
-from tests.test_switch_policy import S
+from tests.test_switch_policy import S, haiku_off
 
 TLRU = test_switch_policy.CalibrationTests.TLRU
 
@@ -32,7 +32,9 @@ def record(task, passed=True, cost=.27):
 
 class ReplayTests(unittest.TestCase):
     def setUp(self):
-        self.cfg, self.rates = sp.load(), bench.rates()
+        # The replay's mechanics among Sonnet 5.5 and Opus 5.5; what Haiku 5.5 (a candidate since October 9) changes on
+        # the recorded runs is runs/haiku-on-replay-20261009.json.
+        self.cfg, self.rates = haiku_off(), bench.rates()
         self.jump = {'point': '1/turn/1', 'trigger': 'turn_start', 'current': [S, 'medium'], 'action': 'jump',
                      'target': [S, 'high'], 'candidates': [{'p_ok': .11}], 'profile': PROFILE,
                      'advice': TLRU}

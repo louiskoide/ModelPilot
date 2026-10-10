@@ -10,6 +10,8 @@ from modelpilot.fixtures import fixture_server
 from tests import test_bench_tasks as synthetic
 from tests.test_bench import RATES, Clock, FakeTrial
 
+S55, H55 = 'claude-sonnet-5-5', 'claude-haiku-5-5'
+
 
 class PlanTests(unittest.TestCase):
     def test_task_turns_are_gap_seconds_apart(self):
@@ -281,11 +283,14 @@ class OfflineSequenceTests(unittest.TestCase):
             with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
                 record = self.run_sequence('modelpilot', [{'text': 'Done.'}], 'modelpilot', adapter=adapter,
                                            rates=dict(RATES, **{'claude-opus-5-5': dict(input=4, output=20, read=.2,
-                                                                                         write_5m=5, write_1h=8)}))
+                                                                                         write_5m=5, write_1h=8),
+                                                                'claude-haiku-5-5': bench.rates()['claude-haiku-5-5']}))
         self.assertEqual([s['stop'] for s in record['sessions']], ['success'] * 3)
         decisions = record['routing']['policy']['decisions']
         self.assertEqual([d['trigger'] for d in decisions], ['turn_start'] * 3)  # one per task turn
-        self.assertTrue(all(d['action'] == 'stay' for d in decisions))
+        # Since October 9 the first task turn moves the low concise start to Haiku 5.5 medium, where the later ones stay.
+        self.assertEqual([(d['current'], d['action'], d['target']) for d in decisions],
+                         [([S55, 'low'], 'jump', [H55, 'medium'])] + [([H55, 'medium'], 'stay', [H55, 'medium'])] * 2)
         self.assertEqual(record['sequence']['tasks'], ['synthetic-0', 'synthetic-1', 'synthetic-2'])
 
     def test_a_turn_that_does_not_succeed_ends_the_sequence(self):

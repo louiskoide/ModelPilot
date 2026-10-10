@@ -36,10 +36,9 @@ def without_haiku_outcomes(cfg):
 
 
 def haiku_on(baseline=None, measured=True):
-    """The config once the probes pass: Haiku 5.5 a candidate with per-message effort (its outcomes are in since
-    October 9), the floor on for baseline (None: off), as the arm's overrides would set it."""
+    """The shipped config (Haiku 5.5 a candidate with per-message effort since October 9), the floor on for baseline
+    (None: off), as the arm's overrides would set it."""
     cfg = switch_policy.load()
-    cfg['models'][H].update(candidate=True, per_message_effort=True)
     cfg['measured_candidates']['enabled'] = measured
     if baseline:
         cfg['quality_floor'].update(enabled=True, baseline=baseline)
@@ -130,13 +129,13 @@ class RateTests(unittest.TestCase):
 
 
 class TierTests(unittest.TestCase):
-    def test_haiku_5_5_replaces_haiku_4_5_at_the_bottom_and_is_not_a_candidate(self):
+    def test_haiku_5_5_replaces_haiku_4_5_at_the_bottom(self):
         cfg = switch_policy.load()
         self.assertEqual(MODELS, (H, S, O))
         spec = cfg['models'][H]
         self.assertEqual((spec['rank'], spec['efforts'], spec['mid_conversation_system'], spec['candidate']),
-                         (0, cfg['effort_order'], True, False))
-        self.assertEqual(spec['effort_switch_rewrite'], 'full')  # the pessimistic choice until measured
+                         (0, cfg['effort_order'], True, True))  # a candidate since October 9
+        self.assertEqual(spec['effort_switch_rewrite'], 'messages')  # with thinking, thinking-probe-haiku-5-5-20261009
         self.assertNotIn('claude-haiku-4-5-20251001', cfg['models'])
 
     def test_arms(self):
@@ -146,7 +145,7 @@ class TierTests(unittest.TestCase):
         self.assertEqual(bench.ARMS['haiku-4.5']['model'], 'claude-haiku-4-5-20251001')  # kept for its earlier runs
         for arm in ('jev-compat-o55', 'modelpilot', 'modelpilot-for-sonnet'):  # Jev now discovers Haiku 5.5
             self.assertEqual(tuple(bench.ARMS[arm]['models']), (H, S, O), arm)
-        self.assertNotIn(H, bench.ARMS['modelpilot']['served_models'])
+        self.assertIn(H, bench.ARMS['modelpilot']['served_models'])  # since October 9
 
 
 class CandidacyTests(unittest.TestCase):
@@ -160,17 +159,18 @@ class CandidacyTests(unittest.TestCase):
     def decide(self, cfg, current, adv=USUAL, trigger='turn_start'):
         return switch_policy.decide(cfg, self.rates, adv, current, self.prof, trigger)
 
-    def test_shipped_haiku_is_not_a_candidate_and_needs_per_message_effort_to_be_one(self):
+    def test_shipped_haiku_is_a_candidate_at_its_measured_effort_with_per_message_effort(self):
+        # October 9: the probes passed (thinking-probe-haiku-5-5-20261009-124512) and the stronger effort check held
+        # (thinking-probe-haiku-effort-20261009-130808); with thinking, its effort changes rewrite the messages.
         cfg = switch_policy.load()
-        self.assertNotIn(H, {m for m, _ in switch_policy.settings(cfg)})
         spec = cfg['models'][H]
-        self.assertEqual((spec['candidate'], spec['per_message_effort'], spec['candidate_efforts']), (False, False, ['medium']))
+        self.assertEqual((spec['candidate'], spec['per_message_effort'], spec['candidate_efforts'],
+                          spec['effort_switch_rewrite']), (True, True, ['medium'], 'messages'))
+        self.assertEqual([c for c in switch_policy.settings(cfg) if c[0] == H], [(H, 'medium')])  # the measured effort
         self.assertIs(spec['outcomes_count_for_stronger'], False)  # user decision, October 9
         self.assertEqual((spec['request_factor'], spec['output_factor']), (2.11, 2.32))  # runs/haiku-policy-evidence-20261008
         with self.assertRaisesRegex(ValueError, 'per_message_effort'):  # the client's own effort message would hold
-            switch_policy.with_overrides(cfg, {'models': {H: {'candidate': True}}})
-        on = switch_policy.with_overrides(cfg, {'models': {H: {'candidate': True, 'per_message_effort': True}}})
-        self.assertEqual([c for c in switch_policy.settings(on) if c[0] == H], [(H, 'medium')])  # the measured effort
+            switch_policy.with_overrides(cfg, {'models': {H: {'per_message_effort': False}}})
         with self.assertRaisesRegex(ValueError, 'candidate_efforts'):
             switch_policy.with_overrides(cfg, {'models': {H: {'candidate_efforts': ['turbo']}}})
 

@@ -140,9 +140,24 @@ class ActivePolicy(ProxyPolicy):
         self.workspace = self.base = None  # the trial's workspace and base commit (set by the adapter), for briefs
         # task -> main-loop requests seen; the trial's exploration draw is keyed by exploration_key (set by the adapter)
         self.main_requests, self.exploration_key = {}, None
+        # task -> models its main-loop requests were sent to: whose thinking may be in the conversation. Never reset, as a
+        # correction keeps the conversation; after a compaction this is conservative.
+        self.models_sent = {}
 
     def check_upstream(self, origin):
         pass  # ProxyServer accepts only direct Anthropic HTTPS or loopback HTTP (offline tests).
+
+    def history_models(self, task, client):
+        """The models whose thinking may be in this task's conversation: every one its requests went to, and the client's
+        (where anything deferred or refused by the policy goes)."""
+        with self.lock:
+            return tuple(sorted(self.models_sent.get(task, set()) | {client}))
+
+    def move(self, proposal, task, client, target, **fields):
+        """A jump proposal to target, carrying what the thinking gate checks it against (policy_actions.transform_request):
+        the models in the history and the client's model, where a deferral or correction returns the session."""
+        return dict(proposal, action='jump', target_model=target[0], target_effort=target[1],
+                    history_models=list(self.history_models(task, client)), returns_to=client, **fields)
 
     def dispatcher(self, gov, rates):
         return ActiveDispatcher(gov, rates)
@@ -333,6 +348,8 @@ class ActivePolicy(ProxyPolicy):
             setting = (ticket['target_model'], ticket['target_effort'])
         else:
             setting = (request['model'], request_effort(request))
+        with self.lock:  # where this request goes: its thinking joins the conversation
+            self.models_sent.setdefault(task, set()).add(setting[0])
         body = self.carry(task, request, result['request'] if admitted else request, setting)
         if body is None:
             return result
@@ -499,8 +516,7 @@ class ActivePolicy(ProxyPolicy):
         if target == tuple(setting) or target not in switch_policy.settings(self.config):
             entry['status'] = 'nothing_to_switch'
         else:
-            jump = dict(proposal, action='jump', trigger='exploration', decision=entry['point'],
-                        target_model=target[0], target_effort=target[1])
+            jump = self.move(proposal, task, request['model'], target, trigger='exploration', decision=entry['point'])
             try:
                 ticket = self.dispatcher(gov, rates).begin(jump, self.owner, current)
             except ValueError as exc:
@@ -526,7 +542,8 @@ class ActivePolicy(ProxyPolicy):
             return {'status': 'deferred', 'reason': 'unacknowledged_revision'}
         setting = self.effective(gov, task, revision) or client
         try:
-            current = transform_request(request, *setting) if setting != client else request
+            current = transform_request(request, *setting, history_models=self.history_models(task, client[0])) \
+                if setting != client else request
             proposal = escalation_proposal(gov.state, task, revision, self.owner, *setting)
         except ValueError as exc:
             return {'status': 'deferred', 'reason': 'refused:' + str(exc)}
@@ -547,8 +564,7 @@ class ActivePolicy(ProxyPolicy):
             self.consult(gov, task, revision, point, decision, request, setting, side)
         deferral = None
         if decision and decision['action'] == 'jump' and tuple(decision['target']) != setting:
-            jump = dict(proposal, action='jump', trigger=point[0], decision=point[1],
-                        target_model=decision['target'][0], target_effort=decision['target'][1])
+            jump = self.move(proposal, task, client[0], tuple(decision['target']), trigger=point[0], decision=point[1])
             try:
                 ticket = self.dispatcher(gov, rates).begin(jump, self.owner, current)
             except ValueError as exc:

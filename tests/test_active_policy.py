@@ -13,6 +13,7 @@ from modelpilot.proxy import ProxyServer
 from tests.test_policy_session import O, RATES, S, Upstream
 
 H = 'claude-haiku-4-5-20251001'
+H55 = 'claude-haiku-5-5'  # the bottom tier since October 8, a candidate since October 9
 
 ONE = 100*2/1e6 + 4*10/1e6  # one scripted Sonnet 5.5 reply: 100 input and 4 output tokens
 
@@ -90,6 +91,8 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
             conn.close()
 
     def rows(self):
+        # The proxy logs a request after its reply (a refusal too): wait until every accepted request is logged.
+        self.assertTrue(self.proxy.wait_idle(10))
         return [json.loads(line) for line in self.log.read_text().splitlines()]
 
     def sent(self):
@@ -193,10 +196,11 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertEqual(self.dispatches(), [])
 
     def test_jev_is_asked_only_where_some_answer_could_move(self):
-        # The shipped, calibrated policy with Jev's candidates only: from this Sonnet 5.5 medium start its measured
-        # candidates (low concise) could pay, so it asks Jev here; the arms start on low concise, where it still doesn't
-        # (runs/measured-candidates-replay-20261008.json).
-        self.start(config=switch_policy.with_overrides(switch_policy.load(), {'measured_candidates': {'enabled': False}}))
+        # The shipped, calibrated policy with Jev's candidates only and Haiku 5.5 off: from this Sonnet 5.5 medium start
+        # its measured candidates (low concise) could pay, so it asks Jev here, and since October 9 the move to Haiku 5.5
+        # medium can pay at every turn start (runs/haiku-on-replay-20261009.json).
+        self.start(config=switch_policy.with_overrides(switch_policy.load(), {'measured_candidates': {'enabled': False},
+                                                                            'models': {H55: {'candidate': False}}}))
         self.advisor.answer = {'model': {'choice': O, 'confidence': .99, 'probabilities': {O: 1}},
                                'effort': {'choice': 'max', 'confidence': .99, 'probabilities': {'max': 1}}}
         self.assertEqual(self.post()[0], 200)
@@ -342,6 +346,71 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
                          [[(1, 'medium'), (2, 'xhigh')], [(1, 'medium'), (2, 'xhigh')]])
         self.assertEqual([policy_actions.effective_effort(b) for b in bodies], ['xhigh', 'xhigh'])
         self.assertEqual([r.get('effective_effort') for r in self.rows()], ['xhigh', 'xhigh'])
+
+    def test_the_low_concise_start_moves_to_haiku_5_5_medium_by_the_proxy(self):
+        """The shipped policy (October 9): from the client's Sonnet 5.5 low, a turn start moves the session to Haiku 5.5
+        medium. The client's request keeps its model and effort; the proxy rewrites the model and adds its effort message
+        after the client's (thinking-probe-haiku-effort-20261009-130808: that message holds on Haiku)."""
+        self.start(config=switch_policy.load())
+        self.advisor.answer = {'model': {'choice': S, 'confidence': .91, 'probabilities': {S: .95, H55: .02, O: .03}},
+                               'effort': {'choice': 'medium', 'confidence': .55,
+                                          'probabilities': {'low': 0, 'medium': .64, 'high': .33, 'xhigh': .03, 'max': 0}}}
+        note = {'role': 'system', 'content': 'env', 'output_config': {'effort': 'low'}}  # the client's own, at low
+        first = self.convo(0) + [note]
+        later = first + self.convo(1)[1:]
+        for messages in (first, later):
+            self.post(messages=messages, thinking=self.ADAPTIVE, output_config={'effort': 'low'})
+        bodies = self.forwarded()
+        self.assertEqual([(b['model'], b['output_config']['effort']) for b in bodies], [(H55, 'low')] * 2)
+        self.assertEqual([self.effort_positions(b) for b in bodies], [[(1, 'low'), (2, 'medium')]] * 2)
+        self.assertEqual([policy_actions.effective_effort(b) for b in bodies], ['medium'] * 2)
+        turn, = self.decisions()
+        self.assertEqual((turn['action'], turn['target'], turn['reason']), ('jump', [H55, 'medium'], 'expected_cost_lower'))
+        self.assertTrue(next(c for c in turn['candidates'] if c['setting'] == f'{H55}/medium')['measured_only'])
+
+    @staticmethod
+    def answer(model, effort, p=.9):
+        """Jev's answer over today's tiers: p on (model, effort), the rest spread evenly."""
+        spread = lambda labels, top: {x: p if x == top else (1 - p) / (len(labels) - 1) for x in labels}
+        return {'model': {'choice': model, 'confidence': p, 'probabilities': spread([H55, S, O], model)},
+                'effort': {'choice': effort, 'confidence': p,
+                           'probabilities': spread(['low', 'medium', 'high', 'xhigh', 'max'], effort)}}
+
+    def test_haikus_thinking_never_reaches_opus_after_a_correction(self):
+        """The thinking gate checks every model whose thinking may be in the conversation, not only the request's. After a
+        turn on Haiku 5.5, a correction puts the session back on the client's Sonnet 5.5, and a move to Opus 5.5 would be
+        the verified Sonnet -> Opus pair with Haiku's thinking in its history: Haiku 5.5 -> Opus 5.5 is not probed."""
+        self.start()
+        self.advisor.queue = [self.answer(H55, 'medium'), self.answer(O, 'xhigh')]
+        first = self.convo(0)
+        self.post(messages=first, thinking=self.ADAPTIVE)
+        self.assertEqual(self.forwarded()[-1]['model'], H55)
+        gov = self.gov()
+        try:
+            gov.state.correct(self.task, 1, 'Also handle the empty case.')
+            gov.state.acknowledge(self.task, 2, OWNER)
+        finally:
+            gov.close()
+        thought = {'role': 'assistant', 'content': [{'type': 'thinking', 'thinking': 'x', 'signature': 's'},
+                                                    {'type': 'text', 'text': 'done'}]}
+        self.post(messages=first + [thought, {'role': 'user', 'content': 'Also handle the empty case.'}],
+                  thinking=self.ADAPTIVE)
+        turn = self.decisions()[-1]
+        self.assertEqual((turn['trigger'], turn['action'], turn['target']), ('turn_start', 'jump', [O, 'xhigh']))
+        self.assertEqual(self.forwarded()[-1]['model'], S)  # the client's setting: the move was refused
+        self.assertIn('Thinking history', self.rows()[-1]['policy']['reason'])
+
+    def test_a_move_needs_a_verified_way_back_to_the_clients_model(self):
+        """A deferral or correction sends the session back to the client's model with the target's thinking in it, so a
+        move from an Opus 5.5 client to Haiku 5.5 is refused while Haiku 5.5 -> Opus 5.5 is not probed, even with no
+        thinking in the history yet."""
+        self.start(client=O)
+        self.advisor.answer = self.answer(H55, 'medium')
+        self.post(model=O, messages=self.convo(0), thinking=self.ADAPTIVE)
+        turn, = self.decisions()
+        self.assertEqual((turn['action'], turn['target']), ('jump', [H55, 'medium']))
+        self.assertEqual(self.forwarded()[-1]['model'], O)
+        self.assertIn('no verified way back to ' + O, self.rows()[-1]['policy']['reason'])
 
     def test_effort_changes_at_the_next_user_turn_not_at_a_step(self):
         """Inside a turn's tool loop an effort change doesn't take effect (per-message-effort probe): a mid-task step

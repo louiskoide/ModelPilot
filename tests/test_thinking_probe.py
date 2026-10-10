@@ -558,8 +558,8 @@ class EffortTransport:
     left the seed's, which rewrites the messages (tools and system, 7000 tokens, stay)."""
     THINK = {'low': 10, 'medium': 100, 'high': 200, 'xhigh': 400}
 
-    def __init__(self, reject=lambda p: False):
-        self.calls, self.entries, self.reject = [], {}, reject
+    def __init__(self, reject=lambda p: False, keep_cache=False):
+        self.calls, self.entries, self.reject, self.keep_cache = [], {}, reject, keep_cache
 
     def __call__(self, p, c):
         self.calls.append((copy.deepcopy(p), dict(c)))
@@ -569,7 +569,7 @@ class EffortTransport:
         pm = [m['output_config']['effort'] for m in p['messages'] if m.get('role') == 'system' and m.get('output_config')]
         effort = pm[-1] if pm else p['output_config']['effort']
         first = key not in self.entries
-        read = 0 if first else self.entries[key] if p['output_config']['effort'] == 'medium' else 7000
+        read = 0 if first else self.entries[key] if self.keep_cache or p['output_config']['effort'] == 'medium' else 7000
         write = 7000 if first else 300
         self.entries[key] = read + write
         usage = dict(USAGE, cache_read_input_tokens=read, cache_creation_input_tokens=write,
@@ -619,6 +619,55 @@ class HaikuMoveTests(unittest.TestCase):
         # The fake follows the documented rule (the last effort message holds): the top level alone leaves Haiku at low.
         self.assertEqual({c: found[c]['thinking'] for c in found},
                          {'haiku/move_control': [[10] * 4], 'haiku/move_top': [[10] * 4], 'haiku/move_pm': [[100] * 4]})
+
+
+class HaikuEffortCheckTests(unittest.TestCase):
+    """The stronger check of the proxy move's effort (suite haiku-effort, October 9) and its rule, fixed before the run."""
+    CASES = ('haiku/move_control', 'haiku/native_medium', 'haiku/move_pm', 'haiku/native_xhigh', 'haiku/move_pm_xhigh')
+
+    def test_the_plan_adds_native_references_and_an_xhigh_pair(self):
+        groups = tp.plan('r', 'haiku-effort', 10, SHAPE)
+        self.assertEqual(tp.planned_calls(groups), 10 * 5 * 4)
+        first = [g for g in groups if g['repeat'] == 0]
+        self.assertEqual({g['case']: (g['effort_mode'], tuple(g['source']), tuple(g['target'])) for g in first},
+                         {'haiku/move_control': ('move_control', (S, 'low'), (H, 'low')),
+                          'haiku/native_medium': ('move_control', (S, 'medium'), (H, 'medium')),
+                          'haiku/move_pm': ('move_pm', (S, 'low'), (H, 'medium')),
+                          'haiku/native_xhigh': ('move_control', (S, 'xhigh'), (H, 'xhigh')),
+                          'haiku/move_pm_xhigh': ('move_pm', (S, 'low'), (H, 'xhigh'))})
+        for g in first:  # the client's request and its own effort message, at the client's effort
+            self.assertEqual((g['request']['model'], g['request']['messages'][-1]['output_config']),
+                             (S, {'effort': g['source'][1]}))
+
+    def test_a_run_reports_the_verdict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = EffortTransport(keep_cache=True)
+            result = tp.execute(tp.plan('r', 'haiku-effort', 2, SHAPE), Path(tmp), Budget(100), 'haiku-effort', 2,
+                                transport=fake)
+        self.assertEqual(result['status'], 'complete')
+        self.assertTrue(all(p['model'] == H for p, _ in fake.calls))
+        verdict = result['move_effort_verdict']
+        self.assertEqual({c: verdict['totals'][c] for c in self.CASES},  # the fake thinks by the last effort message
+                         dict(zip(self.CASES, (40, 400, 400, 1600, 1600))))
+        self.assertEqual((verdict['verdict'], verdict['medium_separates']), ('holds', True))
+
+    @classmethod
+    def found(cls, totals, cache='kept', accepted=True):
+        """Effort findings with two repeats per case, each thinking its total in the seed."""
+        return {c: {'repeats': 2, 'accepted': 2 if accepted else 1, 'step2_cache': [cache] * 2, 'step3_cache': [cache] * 2,
+                    'thinking': [[t, 0, 0, 0]] * 2} for c, t in zip(cls.CASES, totals)}
+
+    def test_the_rule(self):
+        def verdict(totals, **kw):
+            return tp.move_effort_verdict(self.found(totals, **kw))['verdict']
+        self.assertEqual(verdict((1000, 1300, 1300, 2000, 1900)), 'holds')
+        self.assertEqual(verdict((1000, 1300, 1050, 2000, 1900)), 'does_not_hold')  # medium separates, move_pm stays low
+        self.assertEqual(verdict((1000, 1050, 1000, 2000, 1900)), 'holds')  # medium too close to low: xhigh decides
+        self.assertFalse(tp.move_effort_verdict(self.found((1000, 1050, 1000, 2000, 1900)))['medium_separates'])
+        self.assertEqual(verdict((1000, 1300, 1300, 2000, 1400)), 'does_not_hold')  # the proxy's xhigh doesn't take
+        self.assertEqual(verdict((1000, 1300, 1300, 1400, 1400)), 'inconclusive')  # xhigh barely above low
+        self.assertEqual(verdict((1000, 1300, 1300, 2000, 1900), cache='rewritten'), 'invalid')
+        self.assertEqual(verdict((1000, 1300, 1300, 2000, 1900), accepted=False), 'invalid')
 
 
 class PerMessageEffortTests(unittest.TestCase):

@@ -13,7 +13,10 @@ from modelpilot.proxy import ProxyServer
 
 S, O = 'claude-sonnet-5-5', 'claude-opus-5-5'  # the ladder's tiers
 RATES = {S: dict(input=2, output=10, read=.2, write_5m=2.5, write_1h=4),  # configs/sonnet-5-5-rates.json
-         O: dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)}  # configs/opus-5-5-rates.json
+         O: dict(input=4, output=20, read=.2, write_5m=5, write_1h=8),  # configs/opus-5-5-rates.json
+         # configs/haiku-5-5-rates.json: a policy candidate since October 9, so the policy prices it
+         'claude-haiku-5-5': json.loads((Path(__file__).resolve().parents[1]/'configs/haiku-5-5-rates.json').read_text())[
+             'rates']['claude-haiku-5-5']}
 FAIL = {'tool': 'Bash', 'input': {'command': 'exit 3', 'description': 'fail on purpose'}}
 
 
