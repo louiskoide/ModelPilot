@@ -1,0 +1,49 @@
+{
+  "id": "sqlglot-duckdb-macro-overloads",
+  "repo": "sqlglot",
+  "url": "https://github.com/tobymao/sqlglot",
+  "license": "MIT",
+  "test_dir": "tests/dialects",
+  "pythonpath": ".",
+  "requires_python": "3.12",
+  "suite_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests",
+    "--ignore=tests/dialects/test_bigquery.py",
+    "--ignore=tests/test_optimizer.py",
+    "--ignore=tests/test_executor.py",
+    "--ignore=tests/test_expressions.py",
+    "--deselect",
+    "tests/dialects/test_dialect.py::TestDialect::test_lazy_load"
+  ],
+  "type": "feature",
+  "base": "22fd000c6993dc46786fe3c4ffa7a41f14a3a863",
+  "reference": "96a90befb8493a70c6bd98e7f252480b23803eb1",
+  "hidden_tests": [
+    "tests/dialects/test_duckdb.py"
+  ],
+  "hidden_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests/dialects/test_duckdb.py"
+  ],
+  "setup_files": {
+    "sqlglot/_version.py": "__version__ = '0.0.0'\n__version_tuple__ = (0, 0, 0)\n"
+  },
+  "source": "https://github.com/tobymao/sqlglot/commit/96a90befb8493a70c6bd98e7f252480b23803eb1",
+  "instruction": "DuckDB's CREATE MACRO can define several overloads in one statement, each with its own parameters and body: `CREATE MACRO add_x (a, b) AS a + b, (a, b, c) AS a + b + c`. Support this in sqlglot's DuckDB dialect. Such a statement parses to an exp.Create whose `this` has no `expressions` arg (the parameters belong to the overloads, not the name) and whose `expression` is a new expression type, exp.MacroOverloads, whose `expressions` hold one node per overload (2 for add_x). For table macros (`AS TABLE (...)`) every overload node has its `is_table` arg set.\nEach of these is written back unchanged with the DuckDB dialect:\n- CREATE MACRO add_x (a, b) AS a + b, (a, b, c) AS a + b + c\n- CREATE OR REPLACE MACRO foo (a) AS a, (a, b) AS a + b, (a, b, c) AS a + b + c\n- CREATE MACRO foo (a TINYINT) AS a + 1, (a INT) AS a + 2\n- CREATE MACRO foo(a TINYINT) AS a = 127\n- CREATE MACRO is_maximal (a TINYINT) AS a = 127, (a INT) AS a = 2147483647\n- CREATE MACRO tbl (a) AS TABLE (SELECT a AS x), (a, b) AS TABLE (SELECT a AS x, b AS y)\nAdd tests.",
+  "batch": "sqlglot-stage-1",
+  "notes": "Harder tuning tasks, stage 1 (user decision, October 10, 2026): sqlglot (MIT), mined from 2026 commits whose subject and body credit no agent, with hidden tests outside the test files that need pytz, duckdb or pandas (the suite leaves those out, and test_lazy_load, which runs a bare `python`). Screened with one low concise and one Opus 5.5 trial before any further batch. Tuning only.",
+  "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

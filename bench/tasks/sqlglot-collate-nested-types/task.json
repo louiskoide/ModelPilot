@@ -1,0 +1,53 @@
+{
+  "id": "sqlglot-collate-nested-types",
+  "repo": "sqlglot",
+  "url": "https://github.com/tobymao/sqlglot",
+  "license": "MIT",
+  "test_dir": "tests/dialects",
+  "pythonpath": ".",
+  "requires_python": "3.12",
+  "suite_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests",
+    "--ignore=tests/dialects/test_bigquery.py",
+    "--ignore=tests/test_optimizer.py",
+    "--ignore=tests/test_executor.py",
+    "--ignore=tests/test_expressions.py",
+    "--deselect",
+    "tests/dialects/test_dialect.py::TestDialect::test_lazy_load"
+  ],
+  "type": "feature",
+  "base": "5525f3fdec3c68ad374f39e8c30cdd38ee9b573b",
+  "reference": "80e0929cc1f105fbd060493ed094d4308e946063",
+  "hidden_tests": [
+    "tests/dialects/test_databricks.py",
+    "tests/dialects/test_postgres.py",
+    "tests/dialects/test_spark.py"
+  ],
+  "hidden_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests/dialects/test_databricks.py",
+    "tests/dialects/test_postgres.py",
+    "tests/dialects/test_spark.py"
+  ],
+  "setup_files": {
+    "sqlglot/_version.py": "__version__ = '0.0.0'\n__version_tuple__ = (0, 0, 0)\n"
+  },
+  "source": "https://github.com/tobymao/sqlglot/commit/80e0929cc1f105fbd060493ed094d4308e946063",
+  "instruction": "sqlglot should accept COLLATE on a string type inside nested types and in a CAST's target type, and write it back.\nWritten back unchanged with Databricks:\n- CREATE TABLE foo (my_arr ARRAY<STRING COLLATE UTF8_BINARY>)\n- CREATE TABLE foo (m MAP<STRING, STRING COLLATE UTF8_BINARY>)\n- SELECT CAST('a' AS STRING COLLATE UTF8_BINARY)\n\nWritten back unchanged with Postgres:\n- CAST('a' AS TEXT COLLATE \"de_DE\")\n\nWith Spark, a CHAR or VARCHAR rewritten to STRING keeps its collation (input -> output):\n- SELECT CAST('a' AS CHAR(10) COLLATE UTF8_BINARY) -> SELECT CAST('a' AS STRING COLLATE UTF8_BINARY)\n- SELECT CAST('a' AS VARCHAR(10) COLLATE UTF8_BINARY) -> SELECT CAST('a' AS STRING COLLATE UTF8_BINARY)\n- read with Postgres, SELECT CAST('a' AS VARCHAR COLLATE foo) -> SELECT CAST('a' AS STRING COLLATE foo)\nAdd tests.",
+  "batch": "sqlglot-stage-1",
+  "notes": "Harder tuning tasks, stage 1 (user decision, October 10, 2026): sqlglot (MIT), mined from 2026 commits whose subject and body credit no agent, with hidden tests outside the test files that need pytz, duckdb or pandas (the suite leaves those out, and test_lazy_load, which runs a bare `python`). Screened with one low concise and one Opus 5.5 trial before any further batch. Tuning only.",
+  "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

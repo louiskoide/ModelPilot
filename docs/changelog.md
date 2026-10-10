@@ -2,6 +2,21 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 10, 2026: harder tasks, sqlglot stage 1: 8 tasks built (offline)
+
+$0, user decisions: Haiku 5.5 no longer a session setting ("if Haiku passes, the tests are too easy"); harder tasks before item 8's labels, from sqlglot, in stages. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 1".
+
+- **8 tasks** from 2026 sqlglot commits (60–267 source lines over 2–8 files), all valid, each with a 3–4-test edge suite the reference passes in full. They're in `bench/splits.json` under `tuning` (67 tuning tasks); the final split and its lock are unchanged.
+- **Left out:**
+  - commits whose subject or body credits an agent;
+  - hidden tests in files that need `pytz`, `duckdb` or `pandas` (adding `pytz` would change boltons, a final-split repository);
+  - a task whose checked output is one long arbitrary template, which a fair instruction would give away.
+- **Checked ($0):**
+  - under the benchmark's flags the client doesn't load sqlglot's `CLAUDE.md` or `AGENTS.md` (a marker test with a positive control);
+  - the plan-only preflight graded all 8 references.
+- **Tests:** `tests.test_bench_tasks`, `tests.test_regrade`, `tests.test_bench`, `tests.test_bench_report` and `tests.test_long_session` pass (143 tests, Python 3.12, worktree).
+- **Next:** the screen (`runs/sqlglot-screen-20261010.sh`, the user's go): low concise and Opus 5.5 × 1 on the 8 tasks, subscription.
+
 ## October 9, 2026: Haiku 5.5's outcomes in, for its own settings only (offline)
 
 $0. User decision: "Haiku only". Haiku 5.5's tuning outcomes go into `calibration.outcomes` and the floor's evidence, but they don't stand for Sonnet's or Opus's settings. Under "a stronger setting never misses more" they would have lifted Sonnet 5.5 medium and every Sonnet setting above it from 48/52 to Haiku's 56/58, and cleared Sonnet's parse miss against an Opus user. On these tasks the premise fails from Haiku up: Haiku medium passed `parse-decimal-grouping` and `nx-ismags-monomorphism` on both trials, which Sonnet medium missed. Built in a separate worktree while the user ran the Haiku probes, so the probe's checkout stayed clean.

@@ -1,0 +1,51 @@
+{
+  "id": "sqlglot-pivot-literal-aliases",
+  "repo": "sqlglot",
+  "url": "https://github.com/tobymao/sqlglot",
+  "license": "MIT",
+  "test_dir": "tests/dialects",
+  "pythonpath": ".",
+  "requires_python": "3.12",
+  "suite_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests",
+    "--ignore=tests/dialects/test_bigquery.py",
+    "--ignore=tests/test_optimizer.py",
+    "--ignore=tests/test_executor.py",
+    "--ignore=tests/test_expressions.py",
+    "--deselect",
+    "tests/dialects/test_dialect.py::TestDialect::test_lazy_load"
+  ],
+  "type": "bug_fix",
+  "base": "281cf9c01f5e8a8566f7ec3c498b084bdbc1e577",
+  "reference": "19f5aea982e9cad34210361bae603b4ceba7d167",
+  "hidden_tests": [
+    "tests/dialects/test_duckdb.py",
+    "tests/dialects/test_spark.py"
+  ],
+  "hidden_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests/dialects/test_duckdb.py",
+    "tests/dialects/test_spark.py"
+  ],
+  "setup_files": {
+    "sqlglot/_version.py": "__version__ = '0.0.0'\n__version_tuple__ = (0, 0, 0)\n"
+  },
+  "source": "https://github.com/tobymao/sqlglot/commit/19f5aea982e9cad34210361bae603b4ceba7d167",
+  "instruction": "A Snowflake PIVOT whose IN list holds bare string literals names each pivoted column after the literal, quotes included: the value `'Q1'` gives a column named `'Q1'`, with its quotes. When sqlglot transpiles such a PIVOT from Snowflake to DuckDB or Spark, each literal value must get an alias that keeps that name: the literal's own text, quotes included, as a quoted identifier of the target dialect.\nRead with Snowflake, written with DuckDB (input -> output):\n- SELECT * FROM produce PIVOT(SUM(produce.sales) FOR produce.quarter IN ('Q1', 'Q2')) -> SELECT * FROM produce PIVOT(SUM(sales) FOR quarter IN ('Q1' AS \"'Q1'\", 'Q2' AS \"'Q2'\"))\n\nRead with Snowflake, written with Spark (input -> output):\n- SELECT piv.Q1 FROM produce PIVOT(SUM(sales) FOR quarter IN ('Q1', 'Q2')) piv -> SELECT piv.Q1 FROM (SELECT * FROM produce PIVOT(SUM(sales) FOR quarter IN ('Q1' AS `'Q1'`, 'Q2' AS `'Q2'`))) AS piv\n- SELECT piv.Q1 FROM (SELECT * FROM produce) PIVOT(SUM(sales) FOR quarter IN ('Q1', 'Q2')) piv -> SELECT piv.Q1 FROM (SELECT * FROM (SELECT * FROM produce) PIVOT(SUM(sales) FOR quarter IN ('Q1' AS `'Q1'`, 'Q2' AS `'Q2'`))) AS piv\n- SELECT * FROM produce PIVOT (SUM(produce.sales) FOR produce.quarter IN ('Q1', 'Q2')) -> SELECT * FROM produce PIVOT(SUM(produce.sales) FOR quarter IN ('Q1' AS `'Q1'`, 'Q2' AS `'Q2'`))\nDuckDB's own PIVOT is unchanged: `SELECT * FROM produce PIVOT(SUM(sales) FOR quarter IN ('Q1', 'Q2'))` read with DuckDB is written with DuckDB as it is. Add tests.",
+  "batch": "sqlglot-stage-1",
+  "notes": "Harder tuning tasks, stage 1 (user decision, October 10, 2026): sqlglot (MIT), mined from 2026 commits whose subject and body credit no agent, with hidden tests outside the test files that need pytz, duckdb or pandas (the suite leaves those out, and test_lazy_load, which runs a bare `python`). Screened with one low concise and one Opus 5.5 trial before any further batch. Tuning only.",
+  "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}
