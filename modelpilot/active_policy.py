@@ -21,9 +21,10 @@ consult a stronger setting on a brief of host facts instead of switching, and a 
 a handoff note from the model being left; both are side requests the proxy sends (ProxyServer.side_call), and
 their text is delivered into the conversation and kept in place (delegation.py). For measurement, consult.force can
 make a consult at the agent's finish: the Stop hook holds it once per turn and the request that continues the turn
-carries the review (finish_review). Haiku 5.5 is reached by proxy moves only, like every other setting, once the
-config makes it a candidate (it needs per-message effort there, or the client's own effort message would hold); at
-turn starts the measured settings are weighed beside Jev's pick (measured_candidates). Not implemented: worker drafts.
+carries the review (finish_review). Haiku 5.5 is not a session setting (user decision, October 10: helper roles,
+such as summaries and single simple steps, none built yet); as a candidate it is reached by proxy moves only, like
+every other setting (it needs per-message effort there, or the client's own effort message would hold). At turn
+starts the measured settings are weighed beside Jev's pick (measured_candidates). Not implemented: worker drafts.
 """
 import hashlib
 import json
