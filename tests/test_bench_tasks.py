@@ -10,7 +10,11 @@ from modelpilot import bench_tasks
 from modelpilot.bench_tasks import (candidates, check_lock, clean_env, grade, make_splits, parse_counts, parse_results,
                                      run_tests, validate, workspace)
 
-ENV = {'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@t', 'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@t'}
+# No background maintenance or gc after a commit: a detached one can still be writing into .git when tearDown removes
+# the repository ("Directory not empty: '.git'" and "'pack'", in CI on October 7 and 10).
+ENV = {'GIT_AUTHOR_NAME': 't', 'GIT_AUTHOR_EMAIL': 't@t', 'GIT_COMMITTER_NAME': 't', 'GIT_COMMITTER_EMAIL': 't@t',
+       'GIT_CONFIG_COUNT': '2', 'GIT_CONFIG_KEY_0': 'maintenance.auto', 'GIT_CONFIG_VALUE_0': 'false',
+       'GIT_CONFIG_KEY_1': 'gc.auto', 'GIT_CONFIG_VALUE_1': '0'}
 BUGGY = 'def last(items):\n    return items[0]\n'
 FIXED = 'def last(items):\n    return items[-1]\n'
 OLD_TEST = 'import unittest\nfrom pkg import last\n\nclass T(unittest.TestCase):\n    def test_one(self):\n        self.assertEqual(last([1]), 1)\n'

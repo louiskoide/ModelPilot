@@ -91,6 +91,8 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
             conn.close()
 
     def rows(self):
+        # The proxy logs a request after its reply (a refusal too): wait until every accepted request is logged.
+        self.assertTrue(self.proxy.wait_idle(10))
         return [json.loads(line) for line in self.log.read_text().splitlines()]
 
     def sent(self):
