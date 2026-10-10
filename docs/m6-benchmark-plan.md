@@ -744,6 +744,14 @@ Also reported, outside the verdict: each rule's flags against Y_S and Y_O, its e
 
 **Scoring:** `runs/item8-prereg-score-20261010.py`, SHA-256 `8e5bf2fb4581b74c82e81d8a7cac33111bca8fd1a5379d84c2becb81cc758d24` at this commit; its `--dev` mode applies the same rules to the 29 earlier tasks, whose labels and Jev answers exist, to check the code runs.
 
+**Amended October 10, before any label existed and before the sqlglot screen ran.** Two user decisions came after the commit above: Haiku 5.5 is no longer a session setting ("if Haiku passes, the tests are too easy"), and harder tasks from sqlglot come before item 8's labels (see "Harder tasks: sqlglot, stage 1"). No outcome of any test task had been seen; the five rules, their direction, the top-third flag, the test, the pass bar and the commitments are unchanged.
+- **The cheap setting is Sonnet 5.5 low concise** (`sonnet-5.5-low-concise`), what a Sonnet user's ModelPilot runs again. M: low concise or Sonnet 5.5 medium misses. Reported only: Y_S (low concise misses, Sonnet medium doesn't) and Y_O (low concise misses, Opus 5.5 medium doesn't). On the 29 earlier tasks M is parse, tomli and ISMAGS, Y_S is empty and Y_O is parse and ISMAGS.
+- **Arms** (to be confirmed by the user before the runs): low concise ×3, Sonnet 5.5 medium ×2, Opus 5.5 medium ×2, all on the subscription, seed 8.
+- **Test tasks:** the 30 labelling tasks and every task of a `sqlglot-stage-*` batch, whole batches. No task enters or leaves on its own screen result; the screen decides only whether a second sqlglot batch is built.
+- **Counted trials:** only those of runs with seed 8, item 8's, so the screen's trials (seed 12) never count. Each rule flags the top third of the labelled test tasks.
+- **Jev's features** must cover every test task. The collection's `--tasks test` captures the sqlglot tasks too; all 38 were captured and dry-run on October 10.
+- **Scoring:** the same script, amended, SHA-256 `798cd2065de5f5da18ef3515467c02834bf2584c2db5028ef0d3599db1ca55c0`. The version first committed (`8e5bf2fb4581b74c82e81d8a7cac33111bca8fd1a5379d84c2becb81cc758d24`) is kept as `runs/item8-prereg-score-20261010-v1.py`. Its `--dev` run still gives "fail" on the 29 earlier tasks, with the same flags and p-values.
+
 ### Caveman's engine over recorded tool results (plan item 9, first step; October 6, $0)
 
 Item 9's first step is a $0 pass of caveman's engine over tool results our agents actually received. A live arm (low concise behind caveman's proxy) was to follow only if this pass showed a real cut.
