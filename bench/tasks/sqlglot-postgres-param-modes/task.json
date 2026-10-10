@@ -1,0 +1,49 @@
+{
+  "id": "sqlglot-postgres-param-modes",
+  "repo": "sqlglot",
+  "url": "https://github.com/tobymao/sqlglot",
+  "license": "MIT",
+  "test_dir": "tests/dialects",
+  "pythonpath": ".",
+  "requires_python": "3.12",
+  "suite_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests",
+    "--ignore=tests/dialects/test_bigquery.py",
+    "--ignore=tests/test_optimizer.py",
+    "--ignore=tests/test_executor.py",
+    "--ignore=tests/test_expressions.py",
+    "--deselect",
+    "tests/dialects/test_dialect.py::TestDialect::test_lazy_load"
+  ],
+  "type": "feature",
+  "base": "bce1b1f9a75db83b71eebc097065e8c8d5ee6051",
+  "reference": "ad2e9d31f00d370d93ae925134e89d15cfd701a1",
+  "hidden_tests": [
+    "tests/dialects/test_postgres.py"
+  ],
+  "hidden_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests/dialects/test_postgres.py"
+  ],
+  "setup_files": {
+    "sqlglot/_version.py": "__version__ = '0.0.0'\n__version_tuple__ = (0, 0, 0)\n"
+  },
+  "source": "https://github.com/tobymao/sqlglot/commit/ad2e9d31f00d370d93ae925134e89d15cfd701a1",
+  "instruction": "sqlglot's Postgres dialect should parse function parameter modes in CREATE FUNCTION: a parameter may begin with IN, OUT, INOUT or VARIADIC, and the mode is kept when the SQL is written. A mode word followed directly by a built-in type is the parameter's name, not a mode (`out INT` is a parameter named out); a mode word followed by a name and then a type, built-in or user-defined, is a mode (`OUT x INT`).\nEach of these is written back unchanged with the Postgres dialect:\n- CREATE FUNCTION foo(a INT)\n- CREATE FUNCTION foo(IN a INT)\n- CREATE FUNCTION foo(OUT a INT)\n- CREATE FUNCTION foo(INOUT a INT)\n- CREATE FUNCTION foo(VARIADIC a INT[])\n- CREATE FUNCTION foo(out INT)\n- CREATE FUNCTION foo(inout VARCHAR)\n- CREATE FUNCTION foo(variadic INT[])\n- CREATE FUNCTION foo(a INT, OUT b INT, INOUT c VARCHAR, VARIADIC d INT[])\n- CREATE OR REPLACE FUNCTION foo(INOUT id UUID)\n- CREATE OR REPLACE FUNCTION foo(id UUID, OUT created_at TIMESTAMPTZ)\n- CREATE FUNCTION foo(OUT x INT DEFAULT 5)\n- CREATE FUNCTION foo(INOUT y VARCHAR DEFAULT 'test')\n- CREATE FUNCTION foo(IN a INT DEFAULT 0, OUT b INT)\n- CREATE FUNCTION foo(OUT result INT, IN input INT DEFAULT 10)\nAnd `CREATE FUNCTION foo(VARIADIC args INT[] DEFAULT ARRAY[]::INT[])` is written as `CREATE FUNCTION foo(VARIADIC args INT[] DEFAULT CAST(ARRAY[] AS INT[]))`. Add tests.",
+  "batch": "sqlglot-stage-1",
+  "notes": "Harder tuning tasks, stage 1 (user decision, October 10, 2026): sqlglot (MIT), mined from 2026 commits whose subject and body credit no agent, with hidden tests outside the test files that need pytz, duckdb or pandas (the suite leaves those out, and test_lazy_load, which runs a bare `python`). Screened with one low concise and one Opus 5.5 trial before any further batch. Tuning only.",
+  "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

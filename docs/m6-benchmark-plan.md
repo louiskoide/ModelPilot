@@ -752,6 +752,40 @@ Also reported, outside the verdict: each rule's flags against Y_S and Y_O, its e
 - **Jev's features** must cover every test task. The collection's `--tasks test` captures the sqlglot tasks too; all 38 were captured and dry-run on October 10.
 - **Scoring:** the same script, amended, SHA-256 `798cd2065de5f5da18ef3515467c02834bf2584c2db5028ef0d3599db1ca55c0`. The version first committed (`8e5bf2fb4581b74c82e81d8a7cac33111bca8fd1a5379d84c2becb81cc758d24`) is kept as `runs/item8-prereg-score-20261010-v1.py`. Its `--dev` run still gives "fail" on the 29 earlier tasks, with the same flags and p-values.
 
+### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
+
+User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku passes, the tests are too easy"), so harder tasks come before item 8's labels, from sqlglot (MIT; surveyed October 4, above), in stages. Stage 1 builds 8 tasks and screens them with one low concise and one Opus 5.5 trial each; a full batch follows only if the repository produces misses. sqlglot joins the tuning split; the final split and its lock are unchanged.
+
+**Mining.** `bench_tasks.candidates` over a clone (`git clone --shallow-since=2025-06-01 https://github.com/tobymao/sqlglot.git work/bench/repos/sqlglot`, head `a00dc2e5`, October 10), up to 400 source lines, 2026 onwards: 1,023 commits.
+- **Agent-written code left out.** 124 subjects are tagged as written with an agent ([CLAUDE] 104, [CODEX] 16, others), and many untagged commits credit one in their body (`Co-Authored-By: Claude`, `Assisted-by`, Copilot as co-author). Any commit whose subject or body names an agent is out. One candidate that only addressed Copilot's review feedback was left out too.
+- **Environment unchanged.** `tests/dialects/test_bigquery.py` imports `pytz`, and `tests/test_optimizer.py` imports `duckdb` and `pandas`. Adding `pytz` to the locked environment would also change boltons, a final-split repository, so no task's hidden tests are in those files, or in `test_executor.py` or `test_expressions.py` (one `pytz` test). Optimizer tasks are out for now.
+- **Short checked outputs.** sqlglot's tests compare exact SQL, and an instruction must state every checked value. A task whose hidden test checks one long, arbitrary template (STRTOK's DuckDB CASE expression) would hand the agent its output, and an equivalent SQL would fail, so it was dropped. Kept: tasks whose checked outputs are short and follow from the semantics.
+- 28 commits pass all of this with 60+ source lines over 2+ files. The 8 picked cover parsing, generation, transpilation and AST shape, from January to October 2026.
+
+| Task | Commit | Source lines, files | Hidden tests (reference passes) | Edge tests (base passes) |
+| --- | --- | --- | --- | --- |
+| `sqlglot-sqlite-json-arrow-precedence` | `2f914c54a`, Aug 10 | 91, 2 | 12 | 4 (2) |
+| `sqlglot-clickhouse-modify-column` | `66ecca339`, Aug 10 | 85, 8 | 33 | 4 (0) |
+| `sqlglot-pivot-literal-aliases` | `19f5aea98`, Jun 2 | 87, 5 | 66 | 3 (1) |
+| `sqlglot-mysql-alter-options` | `7f1cf60c8`, Oct 7 | 77, 6 | 78 | 4 (1) |
+| `sqlglot-postgres-param-modes` | `ad2e9d31f`, Jan 29 | 120, 5 | 24 | 4 (1) |
+| `sqlglot-duckdb-macro-overloads` | `96a90befb`, May 29 | 101, 3 | 44 | 4 (0) |
+| `sqlglot-starrocks-partitions` | `394bba402`, Jan 26 | 267, 3 | 54 | 4 (0) |
+| `sqlglot-collate-nested-types` | `80e0929cc`, May 11 | 75, 7 | 66 | 4 (1) |
+
+**Specs.** Each instruction states the behaviour in prose and lists every checked statement as `input -> output` (unchanged where no output is given), plus the AST facts the hidden tests assert (node types, `args` keys, counts). They were written from the commit message and the hidden tests; the linked issues weren't read. Common to all:
+- `test_dir` is `tests/dialects`, and a generated `sqlglot/_version.py` is a setup file.
+- The suite is `tests/` without the four files above, and without `test_dialect.py::test_lazy_load`, which runs a bare `python` the grader's PATH doesn't have: 961 tests in 23 s at a base.
+- Batch `sqlglot-stage-1`.
+
+**Checks ($0).**
+- `bench_tasks validate`: all 8 valid (`runs/bench-validate-20261010-1046*`–`1053*`). The first run refused three as `bad_spec` for a type label (`bugfix`, not `bug_fix`); fixed and revalidated.
+- Edge suites: 3–4 tests each, written from the instruction, reference and hidden tests before any trial. The reference passes every one (`bench/edge_tests/README.md`).
+- The bench's plan-only preflight graded all 8 references for the screen's two arms.
+- The pinned client, run with the benchmark's flags, doesn't load a workspace's `CLAUDE.md` or `AGENTS.md`, which sqlglot ships: a marker in each never reached the request, while without `--setting-sources ''` the `CLAUDE.md` marker did. The agent can still open them with its tools, like any repository document.
+
+**The screen (not run; the user's go).** `sonnet-5.5-low-concise` and `opus-5.5` × 1 on the 8 tasks, seed 12, on the subscription: $0 API, roughly $2.50–5 API-key equivalent (sqlglot's modules are large, so sessions may read more than the tuning tasks' do) and about 20–30 minutes after a 3-minute preflight. Script: `runs/sqlglot-screen-20261010.sh` (not committed). It decides only whether to build a second batch, never which tasks enter item 8.
+
 ### Caveman's engine over recorded tool results (plan item 9, first step; October 6, $0)
 
 Item 9's first step is a $0 pass of caveman's engine over tool results our agents actually received. A live arm (low concise behind caveman's proxy) was to follow only if this pass showed a real cut.

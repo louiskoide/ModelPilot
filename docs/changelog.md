@@ -2,6 +2,21 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 10, 2026: harder tasks, sqlglot stage 1: 8 tasks built (offline)
+
+$0, user decisions: Haiku 5.5 no longer a session setting ("if Haiku passes, the tests are too easy"); harder tasks before item 8's labels, from sqlglot, in stages. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 1".
+
+- **8 tasks** from 2026 sqlglot commits (60–267 source lines over 2–8 files), all valid, each with a 3–4-test edge suite the reference passes in full. They're in `bench/splits.json` under `tuning` (67 tuning tasks); the final split and its lock are unchanged.
+- **Left out:**
+  - commits whose subject or body credits an agent;
+  - hidden tests in files that need `pytz`, `duckdb` or `pandas` (adding `pytz` would change boltons, a final-split repository);
+  - a task whose checked output is one long arbitrary template, which a fair instruction would give away.
+- **Checked ($0):**
+  - under the benchmark's flags the client doesn't load sqlglot's `CLAUDE.md` or `AGENTS.md` (a marker test with a positive control);
+  - the plan-only preflight graded all 8 references.
+- **Tests:** `tests.test_bench_tasks`, `tests.test_regrade`, `tests.test_bench`, `tests.test_bench_report` and `tests.test_long_session` pass (143 tests, Python 3.12, worktree).
+- **Next:** the screen (`runs/sqlglot-screen-20261010.sh`, the user's go): low concise and Opus 5.5 × 1 on the 8 tasks, subscription.
+
 ## October 10, 2026: item 8 revised for Haiku, and its predictor test pre-registered (offline)
 
 $0, user decisions. Asked whether to build ModelPilot's own miss predictor before item 8, the user chose to pre-register its test first and to label the settings ModelPilot runs now. Details: `docs/m6-benchmark-plan.md`, "Revised October 10" and "Item 8 pre-registration". Built in the `item8-prereg` worktree on `1887ec8`.

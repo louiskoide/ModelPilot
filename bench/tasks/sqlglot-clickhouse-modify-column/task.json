@@ -1,0 +1,49 @@
+{
+  "id": "sqlglot-clickhouse-modify-column",
+  "repo": "sqlglot",
+  "url": "https://github.com/tobymao/sqlglot",
+  "license": "MIT",
+  "test_dir": "tests/dialects",
+  "pythonpath": ".",
+  "requires_python": "3.12",
+  "suite_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests",
+    "--ignore=tests/dialects/test_bigquery.py",
+    "--ignore=tests/test_optimizer.py",
+    "--ignore=tests/test_executor.py",
+    "--ignore=tests/test_expressions.py",
+    "--deselect",
+    "tests/dialects/test_dialect.py::TestDialect::test_lazy_load"
+  ],
+  "type": "bug_fix",
+  "base": "515083ca63a4bc6a85549a10e1c5651215d9a01f",
+  "reference": "66ecca33975e06fc862d3b159f8c4c1418fc04e9",
+  "hidden_tests": [
+    "tests/dialects/test_clickhouse.py"
+  ],
+  "hidden_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests/dialects/test_clickhouse.py"
+  ],
+  "setup_files": {
+    "sqlglot/_version.py": "__version__ = '0.0.0'\n__version_tuple__ = (0, 0, 0)\n"
+  },
+  "source": "https://github.com/tobymao/sqlglot/commit/66ecca33975e06fc862d3b159f8c4c1418fc04e9",
+  "instruction": "ClickHouse treats `ALTER TABLE ... MODIFY COLUMN` and `ALTER COLUMN ... TYPE` as the same operation, and sqlglot's ClickHouse dialect must too: a MODIFY COLUMN type change parses to an exp.Alter whose first action (`args['actions'][0]`) is an exp.AlterColumn, and is written back as `ALTER COLUMN ... TYPE`. `IF EXISTS` on an altered column is parsed, and written where the dialect supports it.\nWith the ClickHouse dialect (input -> output; written back unchanged where no output is given):\n- ALTER TABLE t MODIFY COLUMN c Int64 -> ALTER TABLE t ALTER COLUMN c TYPE Int64\n- ALTER TABLE t MODIFY COLUMN IF EXISTS c Int64 -> ALTER TABLE t ALTER COLUMN IF EXISTS c TYPE Int64\n- ALTER TABLE t ALTER COLUMN IF EXISTS c TYPE Int64\nA MODIFY COLUMN form that isn't a type change still falls back to a command: `parse_one(\"ALTER TABLE t MODIFY COLUMN c REMOVE DEFAULT\", read=\"clickhouse\", error_level=ErrorLevel.IGNORE)` returns an exp.Command. The existing behaviour is unchanged: `ALTER TABLE t ALTER COLUMN c TYPE Nullable(Int64)` is written back as it is, and is also what Postgres's `ALTER TABLE t ALTER COLUMN c TYPE BIGINT` becomes. Add tests.",
+  "batch": "sqlglot-stage-1",
+  "notes": "Harder tuning tasks, stage 1 (user decision, October 10, 2026): sqlglot (MIT), mined from 2026 commits whose subject and body credit no agent, with hidden tests outside the test files that need pytz, duckdb or pandas (the suite leaves those out, and test_lazy_load, which runs a bare `python`). Screened with one low concise and one Opus 5.5 trial before any further batch. Tuning only.",
+  "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

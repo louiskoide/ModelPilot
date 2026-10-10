@@ -1,0 +1,51 @@
+{
+  "id": "sqlglot-mysql-alter-options",
+  "repo": "sqlglot",
+  "url": "https://github.com/tobymao/sqlglot",
+  "license": "MIT",
+  "test_dir": "tests/dialects",
+  "pythonpath": ".",
+  "requires_python": "3.12",
+  "suite_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests",
+    "--ignore=tests/dialects/test_bigquery.py",
+    "--ignore=tests/test_optimizer.py",
+    "--ignore=tests/test_executor.py",
+    "--ignore=tests/test_expressions.py",
+    "--deselect",
+    "tests/dialects/test_dialect.py::TestDialect::test_lazy_load"
+  ],
+  "type": "feature",
+  "base": "1b7cd178775e500427664be053daefa7609f6758",
+  "reference": "7f1cf60c884868a295f76dfd42745b931dd9cfbb",
+  "hidden_tests": [
+    "tests/dialects/test_mysql.py",
+    "tests/dialects/test_starrocks.py"
+  ],
+  "hidden_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests/dialects/test_mysql.py",
+    "tests/dialects/test_starrocks.py"
+  ],
+  "setup_files": {
+    "sqlglot/_version.py": "__version__ = '0.0.0'\n__version_tuple__ = (0, 0, 0)\n"
+  },
+  "source": "https://github.com/tobymao/sqlglot/commit/7f1cf60c884868a295f76dfd42745b931dd9cfbb",
+  "instruction": "A MySQL ALTER TABLE may consist of table options alone, with no action (`ALTER TABLE t FORCE`, `ALTER TABLE t COMMENT='hi', AUTO_INCREMENT=5`). sqlglot takes the first option as an action, so the parse tree depends on the order of the options. Make actions optional in dialects that don't require one (MySQL and the dialects built on it): options go to the exp.Alter's `args['options']` and actions to `args['actions']`, which is an empty list when there are none, and the statement is written with its actions first, then its options, all comma-separated.\nWith the MySQL dialect (input -> output, written back unchanged where no output is given; then the number of actions and of options):\n- ALTER TABLE t COMMENT='hi', ADD COLUMN c INT -> ALTER TABLE t ADD COLUMN c INT, COMMENT='hi' (1, 1)\n- ALTER TABLE t COMMENT='hi', AUTO_INCREMENT=3000000000 (0, 2)\n- ALTER TABLE t MODIFY COLUMN c INT COMMENT 'col', COMMENT='tbl' (1, 1)\n- ALTER TABLE t CHANGE COLUMN c d INT, COMMENT='hi' (1, 1)\n- ALTER TABLE t ADD COLUMN c INT, COMMENT='x', AUTO_INCREMENT=5 (1, 2)\n- ALTER TABLE s.t COMMENT 'notes' AUTO_INCREMENT=5 COMPRESSION='zlib' -> ALTER TABLE s.t COMMENT='notes', AUTO_INCREMENT=5, COMPRESSION='zlib' (0, 3)\n- ALTER TABLE t COMMENT='x' AUTO_INCREMENT=5, ENGINE=InnoDB ROW_FORMAT=DYNAMIC -> ALTER TABLE t COMMENT='x', AUTO_INCREMENT=5, ENGINE=InnoDB, ROW_FORMAT=DYNAMIC (0, 4)\n- ALTER TABLE t ADD COLUMN x INT, ENGINE=InnoDB ROW_FORMAT=DYNAMIC -> ALTER TABLE t ADD COLUMN x INT, ENGINE=InnoDB, ROW_FORMAT=DYNAMIC (1, 2)\n- ALTER TABLE t ADD COLUMN x INT, LOCK=NONE, ENGINE=InnoDB ROW_FORMAT=DYNAMIC -> ALTER TABLE t ADD COLUMN x INT, LOCK=NONE, ENGINE=InnoDB, ROW_FORMAT=DYNAMIC (1, 3)\n\nAlso with MySQL:\n- ALTER TABLE t FORCE is an exp.Alter, written back unchanged\n- ALTER TABLE t ENGINE=InnoDB PARTITION BY LIST (a) (PARTITION p0 VALUES IN (1)) is written back unchanged\n- ALTER TABLE t ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8 -> ALTER TABLE t ROW_FORMAT=COMPRESSED, KEY_BLOCK_SIZE=8\n\nThese still fall back to a command, written back unchanged, with sqlglot's usual warning \"'<sql>' contains unsupported syntax. Falling back to parsing as a 'Command'.\":\n- ALTER TABLE t PARTITION BY RANGE (a) (PARTITION p0 VALUES LESS THAN (10), PARTITION p1 VALUES LESS THAN MAXVALUE)\n- ALTER TABLE t PARTITION BY RANGE COLUMNS (a, b) (PARTITION p0 VALUES LESS THAN (10, 20))\n- ALTER TABLE t PARTITION BY LIST COLUMNS (a) (PARTITION p0 VALUES IN (1, 2))\n- ALTER TABLE t PARTITION BY LIST (a) (PARTITION p0 VALUES IN (1) COMMENT = 'x')\n- ALTER TABLE t PARTITION BY RANGE (a) (PARTITION p0 VALUES LESS THAN (10) ENGINE = InnoDB)\nWith StarRocks, `ALTER TABLE t PARTITION BY DATE_TRUNC('MONTH', dt) DISTRIBUTED BY HASH (a) BUCKETS 4` is written back unchanged. ALTER statements with several actions keep parsing as they do now. Add tests.",
+  "batch": "sqlglot-stage-1",
+  "notes": "Harder tuning tasks, stage 1 (user decision, October 10, 2026): sqlglot (MIT), mined from 2026 commits whose subject and body credit no agent, with hidden tests outside the test files that need pytz, duckdb or pandas (the suite leaves those out, and test_lazy_load, which runs a bare `python`). Screened with one low concise and one Opus 5.5 trial before any further batch. Tuning only.",
+  "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

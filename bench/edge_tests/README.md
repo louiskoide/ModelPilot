@@ -125,6 +125,24 @@ lattice sizes the generators refuse, and a TLRU test of behaviour the instructio
 | tomli-key-parts-limit | 3 | 0 |
 | tomli-parse-float-illegal-types | 4 | 1 |
 
+sqlglot stage 1, harder tuning tasks (added October 10, 2026, before any trial ran on them; same rules). Each suite was
+run against fresh reference and base trees (`bench_tasks.task_tree`) with the benchmark Python. Expectations were
+corrected only where sqlglot's unrelated normalization differed from the draft (type names, `NUMERIC` to `DECIMAL`,
+how it writes `TO_DAYS`, colons in `STRUCT` fields, a parenthesis node around `a || b`); every test checks the
+behaviour its task's instruction asks for. The SQLite suite also checks meaning, not only text: each rewritten
+expression must evaluate in SQLite (3.53) to what the input does.
+
+| Task | Tests | Base passes |
+| --- | --- | --- |
+| sqlglot-clickhouse-modify-column | 4 | 0 |
+| sqlglot-collate-nested-types | 4 | 1 |
+| sqlglot-duckdb-macro-overloads | 4 | 0 |
+| sqlglot-mysql-alter-options | 4 | 1 |
+| sqlglot-pivot-literal-aliases | 3 | 1 |
+| sqlglot-postgres-param-modes | 4 | 1 |
+| sqlglot-sqlite-json-arrow-precedence | 4 | 2 |
+| sqlglot-starrocks-partitions | 4 | 0 |
+
 Known label caveat (user decision, October 6, 2026: noted, suite unchanged):
 
 - `tomli-decode-error-attrs`, `test_line_starts_and_keywords`: it requires keyword construction,

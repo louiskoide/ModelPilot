@@ -1,0 +1,49 @@
+{
+  "id": "sqlglot-sqlite-json-arrow-precedence",
+  "repo": "sqlglot",
+  "url": "https://github.com/tobymao/sqlglot",
+  "license": "MIT",
+  "test_dir": "tests/dialects",
+  "pythonpath": ".",
+  "requires_python": "3.12",
+  "suite_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests",
+    "--ignore=tests/dialects/test_bigquery.py",
+    "--ignore=tests/test_optimizer.py",
+    "--ignore=tests/test_executor.py",
+    "--ignore=tests/test_expressions.py",
+    "--deselect",
+    "tests/dialects/test_dialect.py::TestDialect::test_lazy_load"
+  ],
+  "type": "bug_fix",
+  "base": "e36ba73f651c9a82fbe831195fa7883799d0ddb0",
+  "reference": "2f914c54aa4817a0a5e65a0d7d5e7cba9037ac30",
+  "hidden_tests": [
+    "tests/dialects/test_sqlite.py"
+  ],
+  "hidden_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests/dialects/test_sqlite.py"
+  ],
+  "setup_files": {
+    "sqlglot/_version.py": "__version__ = '0.0.0'\n__version_tuple__ = (0, 0, 0)\n"
+  },
+  "source": "https://github.com/tobymao/sqlglot/commit/2f914c54aa4817a0a5e65a0d7d5e7cba9037ac30",
+  "instruction": "In sqlglot's SQLite dialect, the concatenation operator `||` and the JSON operators `->` and `->>` must form a single precedence tier, as in SQLite: left-associative among themselves and binding tighter than `*`, `/`, `+` and `-`, while `COLLATE` binds tighter than the tier. Other dialects keep their current precedence.\nParsed and written with the SQLite dialect (input -> output; written back unchanged where no output is given):\n- SELECT a.data ->> b.key ->> a.final_key FROM t\n- SELECT a -> b ->> c -> d FROM t\n- SELECT a || b ->> c -> SELECT (a || b) ->> c\n- SELECT a ->> b || c FROM t\n- SELECT 2 * 3 || 4 -> SELECT 2 * (3 || 4)\n- SELECT 1 + 2 || 3 -> SELECT 1 + (2 || 3)\n- SELECT a || b * c FROM t -> SELECT (a || b) * c FROM t\n- SELECT a - b ->> c FROM t -> SELECT a - (b ->> c) FROM t\n- SELECT a ->> b + c FROM t -> SELECT (a ->> b) + c FROM t\n- SELECT -a || b FROM t\n- SELECT a || b COLLATE NOCASE FROM t ORDER BY 1\n- SELECT a COLLATE NOCASE || b -> c FROM t -> SELECT (a COLLATE NOCASE || b) -> c FROM t\n- SELECT a COLLATE NOCASE || b * c FROM t -> SELECT (a COLLATE NOCASE || b) * c FROM t\n- SELECT a COLLATE NOCASE -> b + c FROM t -> SELECT (a COLLATE NOCASE -> b) + c FROM t\nIn `SELECT a.data ->> b.key ->> a.final_key FROM source AS a JOIN keys AS b ON TRUE` the first select item is an exp.JSONExtractScalar whose `this` is also an exp.JSONExtractScalar, and in `SELECT a || b COLLATE NOCASE FROM t` it is an exp.DPipe whose `expression` is an exp.Collate. Add tests.",
+  "batch": "sqlglot-stage-1",
+  "notes": "Harder tuning tasks, stage 1 (user decision, October 10, 2026): sqlglot (MIT), mined from 2026 commits whose subject and body credit no agent, with hidden tests outside the test files that need pytz, duckdb or pandas (the suite leaves those out, and test_lazy_load, which runs a bare `python`). Screened with one low concise and one Opus 5.5 trial before any further batch. Tuning only.",
+  "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}
