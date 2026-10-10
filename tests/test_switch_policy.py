@@ -30,9 +30,15 @@ def jev_only(cfg=None):
 
 
 def haiku_off(cfg=None):
-    """The shipped config with Haiku 5.5 not a candidate, as until October 9: for the Sonnet and Opus mechanics. What
-    Haiku 5.5 changes is in tests/test_haiku_5_5.py, CandidacyTests."""
+    """Haiku 5.5 not a session candidate: the shipped config until October 9 and again since October 10 (user decision:
+    helper roles only). Kept explicit for tests that must not depend on that flag."""
     return sp.with_overrides(cfg or sp.load(), {'models': {H: {'candidate': False}}})
+
+
+def haiku_session(cfg=None):
+    """Haiku 5.5 as a session candidate, as shipped October 9-10. What it changed is in tests/test_haiku_5_5.py,
+    CandidacyTests."""
+    return sp.with_overrides(cfg or sp.load(), {'models': {H: {'candidate': True}}})
 
 
 class SwitchPolicyTests(unittest.TestCase):
@@ -45,9 +51,10 @@ class SwitchPolicyTests(unittest.TestCase):
 
     def test_the_settings_come_from_the_config(self):
         settings = sp.settings(self.cfg)
-        self.assertEqual([c for c in settings if c[0] == H], [(H, 'medium')])  # a candidate at its measured effort only
+        self.assertNotIn(H, {m for m, _ in settings})  # not a session setting (October 10): the config says why
         self.assertIn((O, 'xhigh'), settings)
-        self.assertEqual(len(settings), 11)
+        self.assertEqual(len(settings), 10)
+        self.assertEqual([c for c in sp.settings(haiku_session(self.cfg)) if c[0] == H], [(H, 'medium')])
         cfg = copy.deepcopy(self.cfg)  # a new model is a config entry and a rate, not code
         cfg['models']['claude-next'] = dict(cfg['models'][O], rank=3)
         rates = dict(self.rates, **{'claude-next': self.rates[O]})
@@ -365,8 +372,9 @@ class CalibrationTests(unittest.TestCase):
         self.assertEqual(self.decide(self.TLRU, cfg=off)['action'], 'stay')
         before = self.decide(self.TLRU, cfg=jev_only(off))
         self.assertEqual((before['action'], before['target']), ('jump', [S, 'high']))
-        # Since October 9 the measured Haiku 5.5 medium is cheaper at a higher measured rate.
-        self.assertEqual(self.decide(self.TLRU)['target'], [H, 'medium'])
+        self.assertEqual(self.decide(self.TLRU)['action'], 'stay')  # the shipped config, as off
+        # As a session candidate (October 9-10) the measured Haiku 5.5 medium was cheaper at a higher measured rate.
+        self.assertEqual(self.decide(self.TLRU, cfg=haiku_session(self.cfg))['target'], [H, 'medium'])
 
     def test_a_setting_with_nothing_measured_as_weak_keeps_jevs_estimate(self):
         cfg = copy.deepcopy(self.cfg)
@@ -383,9 +391,8 @@ class CalibrationTests(unittest.TestCase):
                         'probabilities': {'low': 0, 'medium': .64, 'high': .33, 'xhigh': .03, 'max': 0}}}
 
     def test_the_low_concise_start_holds_against_jevs_usual_medium_answer(self):
-        # Among the Sonnet and Opus settings; since October 9 it moves to Haiku 5.5 medium (CandidacyTests).
-        self.assertEqual(self.decide(self.USUAL, current=(S, 'low'))['target'], [H, 'medium'])
-        self.cfg = haiku_off(self.cfg)
+        # As a session candidate (October 9-10) Haiku 5.5 medium took it (CandidacyTests); not since October 10.
+        self.assertEqual(self.decide(self.USUAL, current=(S, 'low'), cfg=haiku_session(self.cfg))['target'], [H, 'medium'])
         decision = self.decide(self.USUAL, current=(S, 'low'))
         self.assertEqual((decision['action'], decision['target']), ('stay', [S, 'low']))
         stay = decision['candidates'][0]
@@ -416,15 +423,17 @@ class JevGateTests(unittest.TestCase):
         return sp.jev_gate(cfg, self.rates, current, sp.profile(cfg, request(kb), warm), trigger)
 
     def test_at_the_shipped_weight_no_answer_moves_a_turn_start_or_a_step(self):
-        # Among the Sonnet and Opus settings. With Haiku 5.5 a candidate (October 9) a turn start is asked: the move to
-        # Haiku 5.5 medium can pay, though its measured rate mostly decides; a step still isn't (Haiku runs at medium only).
+        # The shipped config, Sonnet and Opus settings only (Haiku 5.5 not a session setting since October 10). As a
+        # session candidate (October 9-10) Haiku 5.5 medium made every turn start worth asking, though its measured rate
+        # mostly decided; a step still wasn't (Haiku runs at medium only).
         for trigger in ('turn_start', 'step'):
-            gate = self.gate(cfg=haiku_off(), trigger=trigger)
+            gate = self.gate(trigger=trigger)
             self.assertEqual((gate['can_change'], gate['reason']), (False, 'every_answer_stays'), trigger)
             self.assertLess(gate['closest_usd'], 0)
             self.assertEqual(gate['shapes'], 3 * 2 * (1 + 5 * 2))
-        self.assertEqual((self.gate()['can_change'], self.gate()['reason']), (True, 'a_move_can_pay'))
-        self.assertEqual(self.gate(trigger='step')['reason'], 'every_answer_stays')
+        session = haiku_session()
+        self.assertEqual((self.gate(cfg=session)['can_change'], self.gate(cfg=session)['reason']), (True, 'a_move_can_pay'))
+        self.assertEqual(self.gate(cfg=session, trigger='step')['reason'], 'every_answer_stays')
 
     def test_where_jevs_answer_is_the_whole_estimate_it_is_always_asked(self):
         self.assertEqual(self.gate(cfg=jev_only())['reason'], 'uncalibrated')
@@ -576,7 +585,7 @@ class MeasuredCandidateTests(unittest.TestCase):
         unsure_opus = advice(O, 'medium', model_p=.1)  # Jev stays on Opus, unsure
         decision = sp.decide(self.cfg, self.rates, unsure_opus, (O, 'medium'), self.prof, 'turn_start')
         measured = {c['setting'] for c in decision['candidates'] if c.get('measured_only')}
-        self.assertEqual(measured, {f'{H}/medium', f'{S}/low', f'{S}/medium'})  # runnable, measured, not Jev's pick
+        self.assertEqual(measured, {f'{S}/low', f'{S}/medium'})  # runnable, measured, not Jev's pick (no Haiku: October 10)
         self.assertEqual((decision['action'], decision['downgrade']), ('jump', True))
         self.assertIn(sp._label(decision['target']), measured)
         self.assertGreater(decision['benefit_usd'], decision['required_usd'])

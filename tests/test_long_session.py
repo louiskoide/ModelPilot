@@ -288,9 +288,9 @@ class OfflineSequenceTests(unittest.TestCase):
         self.assertEqual([s['stop'] for s in record['sessions']], ['success'] * 3)
         decisions = record['routing']['policy']['decisions']
         self.assertEqual([d['trigger'] for d in decisions], ['turn_start'] * 3)  # one per task turn
-        # Since October 9 the first task turn moves the low concise start to Haiku 5.5 medium, where the later ones stay.
-        self.assertEqual([(d['current'], d['action'], d['target']) for d in decisions],
-                         [([S55, 'low'], 'jump', [H55, 'medium'])] + [([H55, 'medium'], 'stay', [H55, 'medium'])] * 2)
+        # Every task turn stays on the low concise start: Haiku 5.5 is not a session setting (October 10). As a candidate
+        # (October 9-10) the first turn moved to Haiku 5.5 medium and the later ones stayed there.
+        self.assertEqual([(d['current'], d['action'], d['target']) for d in decisions], [([S55, 'low'], 'stay', [S55, 'low'])] * 3)
         self.assertEqual(record['sequence']['tasks'], ['synthetic-0', 'synthetic-1', 'synthetic-2'])
 
     def test_a_turn_that_does_not_succeed_ends_the_sequence(self):

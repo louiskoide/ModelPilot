@@ -19,6 +19,49 @@ $0, user decisions. Asked whether to build ModelPilot's own miss predictor befor
 - **Amended the same day, before any label and before the sqlglot screen** (user decisions: Haiku 5.5 off; harder sqlglot tasks first). The cheap setting is low concise again. The test tasks add every `sqlglot-stage-*` batch, whole. Only item 8's seed-8 trials count. The rules and the test are unchanged. Scoring script re-pinned (`798cd2065de5f5da18ef3515467c02834bf2584c2db5028ef0d3599db1ca55c0`; the first version kept as `-v1`). Arms confirmed by the user before any run: low concise ×3, Sonnet 5.5 medium ×2, Opus 5.5 medium ×2 on the 38 test tasks, subscription, seed 8 (about $34 API-key equivalent, $0 API, about 3.75 hours).
 - **Next:** the Jev collection (`runs/jev-features-20261010.py`: the policy's first request through the real client against a local fixture, live TypeSafe, 3 answers a task), a $0 plan-only check of the new script, then the user's runs.
 
+## October 10, 2026 (midday): Haiku 5.5 is not a session setting (offline)
+
+$0, user decision after the live run below: Haiku 5.5 is for helper roles, such as summaries and single simple steps inside larger multi-step tasks, not whole everyday tasks. "If Haiku is passing tests, then the tests are probably too easy." Not turned off: its probes and measurements stay for those roles, none built yet. Details: `docs/m6-modelpilot-policy.md`, "Not a session setting".
+
+- **Why the policy put it everywhere.** It took every turn start of the Sonnet-start arms on a measured rate from the 29 tuning tasks, which can't separate the tiers: every tier passes about 26 of them every time, and only parse, tomli and ISMAGS tell them apart. Two weaknesses let it in:
+  - The floor compares which tasks were missed, not how often. One failed trial of Sonnet 5.5 medium (parse: 1 of 2 in the floor's evidence) lets a cheaper setting miss that task every time.
+  - One average decides for every task, since nothing gives the policy a per-task signal (Jev's weight is 0.03).
+
+  Neither is fixed here; the user chose this step first.
+- **Change.** In `configs/modelpilot-policy.json`, Haiku 5.5 has `candidate: false` again, plus `not_a_session_setting` saying why. Everything else in its entry stays: per-message effort, the measured `candidate_efforts`, run factors, evidence. `bench.ARMS[...]['served_models']` drops it, as it is derived from the candidates.
+- **Replay** (`runs/haiku-session-off-replay-20261010.py` → `.json`, all eight recorded ModelPilot runs, 206 decisions):
+  - `modelpilot` and `modelpilot-for-sonnet` keep all 134 turn starts on Sonnet 5.5 low concise, and none moves to Haiku.
+  - The gate skips Jev at all 206 points, as before October 9, so the Sonnet arm makes no TypeSafe calls on these runs.
+  - With Haiku a session candidate, 130 of the 134 would move. `modelpilot-for-opus` doesn't change.
+- **Tests:** Haiku-on mechanics are still tested, through an explicit override (`haiku_on`, `haiku_session`): the proxy move, measured candidates, the gate, and the thinking gate's Haiku cases. New tests:
+  - `test_the_shipped_policy_never_moves_a_session_to_haiku`: every arm, from Sonnet low and medium and Opus medium, at every trigger, even when Jev names Haiku with confidence.
+  - `test_the_shipped_policy_keeps_the_low_concise_start_on_sonnet`: end to end, with Jev not asked.
+
+  718 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/haiku-session-off-regression-py312.log`). The first full run (`-first.log`) failed one test that still expected the long-session sequence's first turn to move to Haiku (`test_long_session`); it now expects all three turns to stay.
+- **Next** (the user's calls): which helper role first (compaction summaries, or single simple steps with a return), and harder tuning tasks so that floor verdicts can separate the tiers.
+
+## October 10, 2026 (morning): plan item 14, live: the ModelPilot arm on Haiku 5.5 passes 26/29 strictly at $0.012 a task
+
+The user's go and run (`runs/haiku-arm-live-20261010.sh`): `runs/bench-20261010-090944`, `modelpilot-for-sonnet`, the 29 tuning tasks, 1 trial, seed 11, commit `ccf4417` with no uncommitted changes, API key and TypeSafe key, `--budget 2`, `--run-budget 3`, no retries. 29/29 complete, no unknown cost, **$0.33 known spend** (estimate $1–1.50), 09:09–09:47, re-graded (`runs/regrade-bench-20261010-090944-20261010-094714`). Analysis ($0): `runs/haiku-arm-live-analysis-20261010.py` → `.json`, every recorded trial on the same tasks at October 10 prices, cold-equivalent, strict grading.
+
+| Arm | Strict passes | Tasks with a miss | $ a task | Wall s a task |
+| --- | --- | --- | --- | --- |
+| `modelpilot-for-sonnet`, Haiku on (this run) | 26/29 | 3 | $0.0118 | 67 |
+| `haiku-5.5` (medium, fixed) | 56/58 | 1 | $0.0338 | 120 |
+| `sonnet-5.5-low-concise` | 55/60 | 3 | $0.0708 | 38 |
+| `sonnet-5.5` (medium) | 52/65 | 5 | $0.0891 | 45 |
+| `opus-5.5` (medium) | 38/40 | 1 | $0.2440 | 68 |
+
+- **What the policy did.** All 29 turn starts moved to Haiku 5.5 medium as measured candidates (`expected_cost_lower`), though Jev chose Sonnet 28 times and Opus once. All 344 main-loop requests ran on Haiku medium, and the 16 steps stayed without asking Jev (`jev_cannot_change`). That is 29 TypeSafe calls, unpriced. No refusals, deferrals or thinking-gate refusals. The replay had predicted 101 of 105; here Jev answered every time.
+- **Quality.** The misses: `nx-ismags-monomorphism` (22 hidden tests failing, edges 0/6), `parse-decimal-grouping` (hidden pass, edges 4/5) and `tomli-decode-error-attrs` (hidden pass, edges 3/4). Each was reported as a success. All three are among Sonnet 5.5 medium's misses, so on these tasks the arm stayed within its floor. But fixed Haiku 5.5 medium passed parse and ISMAGS on both of its trials.
+  - The arm's Haiku differs from the fixed arm's. It gets the client's Sonnet prompt (~11 KB, not ~40 KB), the concise prompt and its effort by message, and it made 11.9 main-loop requests a trial against 15.3. Whether that weakens it or this is one trial's noise is open. The policy's Haiku rate (57/60 with the prior) comes from the fixed arm.
+- **Cost and time.** $0.0118 a task: 35% of fixed Haiku medium, 17% of low concise, 13% of Sonnet medium. Fewer and smaller requests than fixed Haiku's (not broken down further): no request crossed 100,000 prompt tokens, where 62 did in the fixed runs, and no session reached the 30-turn limit (most 20 requests). 66.5 s a task, against 119.5 s for fixed Haiku and 37.8 s for low concise. From 09:09:44 to 09:11:24 the other session's $0 capture (`runs/jev-features-20261010.py`, local fixture only) shared the CPU, so the first trials' wall times may carry a little noise; costs and outcomes are unaffected.
+- **The client's stop.** Its own price (Sonnet's rates) peaked at $0.73 and averaged $0.23 against the $2 stop. With the smaller prompt, $1 would have sufficed here; it was not predictable from the fixed runs.
+- **Next** (the user's calls):
+  - Whether this run counts as evidence for Haiku 5.5 medium. Adding it moves Haiku's measured rate and keeps it within the Sonnet floor; it may not change any decision.
+  - More trials to tell noise from the prompt effect, about $0.33 and 40 minutes each on the API key.
+  - The final split, still locked and not yet run.
+
 ## October 10, 2026: the thinking gate checks the whole history; the live Haiku-arm run planned (offline)
 
 $0. User request: gate Haiku 5.5 ↔ Opus 5.5 on the session's real models (option (a), not a probe), then plan the live run.
