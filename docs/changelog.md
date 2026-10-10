@@ -2,6 +2,27 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 10, 2026 (midday): Haiku 5.5 is not a session setting (offline)
+
+$0, user decision after the live run below: Haiku 5.5 is for helper roles, such as summaries and single simple steps inside larger multi-step tasks, not whole everyday tasks. "If Haiku is passing tests, then the tests are probably too easy." Not turned off: its probes and measurements stay for those roles, none built yet. Details: `docs/m6-modelpilot-policy.md`, "Not a session setting".
+
+- **Why the policy put it everywhere.** It took every turn start of the Sonnet-start arms on a measured rate from the 29 tuning tasks, which can't separate the tiers: every tier passes about 26 of them every time, and only parse, tomli and ISMAGS tell them apart. Two weaknesses let it in:
+  - The floor compares which tasks were missed, not how often. One failed trial of Sonnet 5.5 medium (parse: 1 of 2 in the floor's evidence) lets a cheaper setting miss that task every time.
+  - One average decides for every task, since nothing gives the policy a per-task signal (Jev's weight is 0.03).
+
+  Neither is fixed here; the user chose this step first.
+- **Change.** In `configs/modelpilot-policy.json`, Haiku 5.5 has `candidate: false` again, plus `not_a_session_setting` saying why. Everything else in its entry stays: per-message effort, the measured `candidate_efforts`, run factors, evidence. `bench.ARMS[...]['served_models']` drops it, as it is derived from the candidates.
+- **Replay** (`runs/haiku-session-off-replay-20261010.py` → `.json`, all eight recorded ModelPilot runs, 206 decisions):
+  - `modelpilot` and `modelpilot-for-sonnet` keep all 134 turn starts on Sonnet 5.5 low concise, and none moves to Haiku.
+  - The gate skips Jev at all 206 points, as before October 9, so the Sonnet arm makes no TypeSafe calls on these runs.
+  - With Haiku a session candidate, 130 of the 134 would move. `modelpilot-for-opus` doesn't change.
+- **Tests:** Haiku-on mechanics are still tested, through an explicit override (`haiku_on`, `haiku_session`): the proxy move, measured candidates, the gate, and the thinking gate's Haiku cases. New tests:
+  - `test_the_shipped_policy_never_moves_a_session_to_haiku`: every arm, from Sonnet low and medium and Opus medium, at every trigger, even when Jev names Haiku with confidence.
+  - `test_the_shipped_policy_keeps_the_low_concise_start_on_sonnet`: end to end, with Jev not asked.
+
+  718 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/haiku-session-off-regression-py312.log`). The first full run (`-first.log`) failed one test that still expected the long-session sequence's first turn to move to Haiku (`test_long_session`); it now expects all three turns to stay.
+- **Next** (the user's calls): which helper role first (compaction summaries, or single simple steps with a return), and harder tuning tasks so that floor verdicts can separate the tiers.
+
 ## October 10, 2026 (morning): plan item 14, live: the ModelPilot arm on Haiku 5.5 passes 26/29 strictly at $0.012 a task
 
 The user's go and run (`runs/haiku-arm-live-20261010.sh`): `runs/bench-20261010-090944`, `modelpilot-for-sonnet`, the 29 tuning tasks, 1 trial, seed 11, commit `ccf4417` with no uncommitted changes, API key and TypeSafe key, `--budget 2`, `--run-budget 3`, no retries. 29/29 complete, no unknown cost, **$0.33 known spend** (estimate $1–1.50), 09:09–09:47, re-graded (`runs/regrade-bench-20261010-090944-20261010-094714`). Analysis ($0): `runs/haiku-arm-live-analysis-20261010.py` → `.json`, every recorded trial on the same tasks at October 10 prices, cold-equivalent, strict grading.

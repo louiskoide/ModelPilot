@@ -36,9 +36,9 @@ def without_haiku_outcomes(cfg):
 
 
 def haiku_on(baseline=None, measured=True):
-    """The shipped config (Haiku 5.5 a candidate with per-message effort since October 9), the floor on for baseline
-    (None: off), as the arm's overrides would set it."""
-    cfg = switch_policy.load()
+    """Haiku 5.5 as a session candidate, as shipped October 9-10 (not since: user decision, October 10), with the floor on
+    for baseline (None: off), as the arm's overrides would set it."""
+    cfg = switch_policy.with_overrides(switch_policy.load(), {'models': {H: {'candidate': True}}})
     cfg['measured_candidates']['enabled'] = measured
     if baseline:
         cfg['quality_floor'].update(enabled=True, baseline=baseline)
@@ -134,7 +134,7 @@ class TierTests(unittest.TestCase):
         self.assertEqual(MODELS, (H, S, O))
         spec = cfg['models'][H]
         self.assertEqual((spec['rank'], spec['efforts'], spec['mid_conversation_system'], spec['candidate']),
-                         (0, cfg['effort_order'], True, True))  # a candidate since October 9
+                         (0, cfg['effort_order'], True, False))  # a session candidate October 9-10 only
         self.assertEqual(spec['effort_switch_rewrite'], 'messages')  # with thinking, thinking-probe-haiku-5-5-20261009
         self.assertNotIn('claude-haiku-4-5-20251001', cfg['models'])
 
@@ -145,12 +145,12 @@ class TierTests(unittest.TestCase):
         self.assertEqual(bench.ARMS['haiku-4.5']['model'], 'claude-haiku-4-5-20251001')  # kept for its earlier runs
         for arm in ('jev-compat-o55', 'modelpilot', 'modelpilot-for-sonnet'):  # Jev now discovers Haiku 5.5
             self.assertEqual(tuple(bench.ARMS[arm]['models']), (H, S, O), arm)
-        self.assertIn(H, bench.ARMS['modelpilot']['served_models'])  # since October 9
+        self.assertNotIn(H, bench.ARMS['modelpilot']['served_models'])  # not a session setting (October 10)
 
 
 class CandidacyTests(unittest.TestCase):
-    """What turning Haiku 5.5 on will do (user decisions, October 8: every arm, reached by proxy moves, measured
-    settings weighed beside Jev's), checked now with the flag that the probes will turn on."""
+    """Haiku 5.5 as a session setting: a candidate October 9-10 (user decisions, October 8: every arm, reached by proxy
+    moves, measured settings weighed beside Jev's), and not since (user decision, October 10: helper roles only)."""
     def setUp(self):
         self.rates = bench.rates()
         self.prof = switch_policy.profile(switch_policy.load(), {'model': S, 'messages': [{'role': 'user', 'content': 'x' * 19800}]},
@@ -159,20 +159,38 @@ class CandidacyTests(unittest.TestCase):
     def decide(self, cfg, current, adv=USUAL, trigger='turn_start'):
         return switch_policy.decide(cfg, self.rates, adv, current, self.prof, trigger)
 
-    def test_shipped_haiku_is_a_candidate_at_its_measured_effort_with_per_message_effort(self):
-        # October 9: the probes passed (thinking-probe-haiku-5-5-20261009-124512) and the stronger effort check held
-        # (thinking-probe-haiku-effort-20261009-130808); with thinking, its effort changes rewrite the messages.
+    def test_shipped_haiku_is_not_a_session_setting_and_keeps_its_measurements(self):
+        # User decision, October 10: Haiku 5.5 is for helper roles (summaries, single simple steps), not whole everyday
+        # tasks. Its measurements stay: the probes (thinking-probe-haiku-5-5-20261009-124512), the stronger effort check
+        # (thinking-probe-haiku-effort-20261009-130808) and, with thinking, effort changes that rewrite the messages.
         cfg = switch_policy.load()
         spec = cfg['models'][H]
         self.assertEqual((spec['candidate'], spec['per_message_effort'], spec['candidate_efforts'],
-                          spec['effort_switch_rewrite']), (True, True, ['medium'], 'messages'))
-        self.assertEqual([c for c in switch_policy.settings(cfg) if c[0] == H], [(H, 'medium')])  # the measured effort
+                          spec['effort_switch_rewrite']), (False, True, ['medium'], 'messages'))
+        self.assertIn('helper roles', spec['not_a_session_setting'])
+        self.assertNotIn(H, {m for m, _ in switch_policy.settings(cfg)})
         self.assertIs(spec['outcomes_count_for_stronger'], False)  # user decision, October 9
         self.assertEqual((spec['request_factor'], spec['output_factor']), (2.11, 2.32))  # runs/haiku-policy-evidence-20261008
+        on = haiku_on()
+        self.assertEqual([c for c in switch_policy.settings(on) if c[0] == H], [(H, 'medium')])  # the measured effort
         with self.assertRaisesRegex(ValueError, 'per_message_effort'):  # the client's own effort message would hold
-            switch_policy.with_overrides(cfg, {'models': {H: {'per_message_effort': False}}})
+            switch_policy.with_overrides(on, {'models': {H: {'per_message_effort': False}}})
         with self.assertRaisesRegex(ValueError, 'candidate_efforts'):
-            switch_policy.with_overrides(cfg, {'models': {H: {'candidate_efforts': ['turbo']}}})
+            switch_policy.with_overrides(on, {'models': {H: {'candidate_efforts': ['turbo']}}})
+
+    def test_the_shipped_policy_never_moves_a_session_to_haiku(self):
+        # Wherever Haiku 5.5 as a candidate took the session (the next test), and even when Jev names it with confidence.
+        named = {'model': {'choice': H, 'confidence': .95, 'probabilities': {H: .95, S: .04, O: .01}},
+                 'effort': USUAL['effort']}
+        for overrides in (bench.ARMS['modelpilot-for-sonnet']['policy_overrides'], None,
+                          bench.ARMS['modelpilot-for-opus']['policy_overrides']):
+            cfg = switch_policy.with_overrides(switch_policy.load(), overrides)
+            for current in ((S, 'low'), (S, 'medium'), (O, 'medium')):
+                for adv in (USUAL, named):
+                    for trigger in ('turn_start', 'step', 'stuck_evidence'):
+                        decision = self.decide(cfg, current, adv, trigger)
+                        self.assertNotEqual((decision.get('target') or [None])[0], H, (overrides, current, trigger))
+                        self.assertNotIn(H, {c['setting'].split('/')[0] for c in decision.get('candidates') or []})
 
     def test_a_sonnet_user_starting_on_low_concise_moves_to_haiku_medium(self):
         for baseline in (f'{S}/medium', None):  # modelpilot-for-sonnet, and modelpilot without the floor

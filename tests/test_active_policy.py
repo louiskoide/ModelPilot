@@ -25,6 +25,12 @@ def jev_only():
     return cfg
 
 
+def haiku_session(cfg):
+    """Haiku 5.5 as a session candidate, as shipped October 9-10 (not since: user decision, October 10, helper roles
+    only), for the proxy-move and thinking-gate mechanics a helper role will use."""
+    return switch_policy.with_overrides(cfg, {'models': {H55: {'candidate': True}}})
+
+
 class ScriptedAdvisor:
     """Stands in for Jev (advisor.JevAdvisor): returns a scripted answer and records each call."""
     live = False
@@ -347,14 +353,30 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         self.assertEqual([policy_actions.effective_effort(b) for b in bodies], ['xhigh', 'xhigh'])
         self.assertEqual([r.get('effective_effort') for r in self.rows()], ['xhigh', 'xhigh'])
 
-    def test_the_low_concise_start_moves_to_haiku_5_5_medium_by_the_proxy(self):
-        """The shipped policy (October 9): from the client's Sonnet 5.5 low, a turn start moves the session to Haiku 5.5
-        medium. The client's request keeps its model and effort; the proxy rewrites the model and adds its effort message
-        after the client's (thinking-probe-haiku-effort-20261009-130808: that message holds on Haiku)."""
+    USUAL = {'model': {'choice': S, 'confidence': .91, 'probabilities': {S: .95, H55: .02, O: .03}},
+             'effort': {'choice': 'medium', 'confidence': .55,
+                        'probabilities': {'low': 0, 'medium': .64, 'high': .33, 'xhigh': .03, 'max': 0}}}
+
+    def test_the_shipped_policy_keeps_the_low_concise_start_on_sonnet(self):
+        """User decision, October 10: Haiku 5.5 is not a session setting. Jev's usual answer leaves the client's Sonnet 5.5
+        low as it is, where Haiku 5.5 as a candidate took it (the next test)."""
         self.start(config=switch_policy.load())
-        self.advisor.answer = {'model': {'choice': S, 'confidence': .91, 'probabilities': {S: .95, H55: .02, O: .03}},
-                               'effort': {'choice': 'medium', 'confidence': .55,
-                                          'probabilities': {'low': 0, 'medium': .64, 'high': .33, 'xhigh': .03, 'max': 0}}}
+        self.advisor.answer = self.USUAL
+        note = {'role': 'system', 'content': 'env', 'output_config': {'effort': 'low'}}
+        self.post(messages=self.convo(0) + [note], thinking=self.ADAPTIVE, output_config={'effort': 'low'})
+        self.assertEqual(self.forwarded()[-1]['model'], S)
+        turn, = self.decisions()
+        # No answer could move it, so Jev isn't asked (as before October 9): one TypeSafe call fewer a turn start.
+        self.assertEqual((turn['action'], turn['target'], turn['reason']), ('stay', [S, 'low'], 'jev_cannot_change'))
+        self.assertEqual(self.advisor.calls, [])
+
+    def test_the_low_concise_start_moves_to_haiku_5_5_medium_by_the_proxy(self):
+        """Haiku 5.5 as a session candidate (shipped October 9-10): from the client's Sonnet 5.5 low, a turn start moves
+        the session to Haiku 5.5 medium. The client's request keeps its model and effort; the proxy rewrites the model
+        and adds its effort message after the client's (thinking-probe-haiku-effort-20261009-130808: that message holds
+        on Haiku)."""
+        self.start(config=haiku_session(switch_policy.load()))
+        self.advisor.answer = self.USUAL
         note = {'role': 'system', 'content': 'env', 'output_config': {'effort': 'low'}}  # the client's own, at low
         first = self.convo(0) + [note]
         later = first + self.convo(1)[1:]
@@ -380,7 +402,7 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         """The thinking gate checks every model whose thinking may be in the conversation, not only the request's. After a
         turn on Haiku 5.5, a correction puts the session back on the client's Sonnet 5.5, and a move to Opus 5.5 would be
         the verified Sonnet -> Opus pair with Haiku's thinking in its history: Haiku 5.5 -> Opus 5.5 is not probed."""
-        self.start()
+        self.start(config=haiku_session(jev_only()))
         self.advisor.queue = [self.answer(H55, 'medium'), self.answer(O, 'xhigh')]
         first = self.convo(0)
         self.post(messages=first, thinking=self.ADAPTIVE)
@@ -404,7 +426,7 @@ class ActivePolicyTests(Upstream, unittest.TestCase):
         """A deferral or correction sends the session back to the client's model with the target's thinking in it, so a
         move from an Opus 5.5 client to Haiku 5.5 is refused while Haiku 5.5 -> Opus 5.5 is not probed, even with no
         thinking in the history yet."""
-        self.start(client=O)
+        self.start(client=O, config=haiku_session(jev_only()))
         self.advisor.answer = self.answer(H55, 'medium')
         self.post(model=O, messages=self.convo(0), thinking=self.ADAPTIVE)
         turn, = self.decisions()

@@ -17,7 +17,7 @@ Switching model OR effort wrote a new cache prefix in tested M0 conditions. Retu
 - M0 cache harness and M1 pass-through proxy: verified, including an 8-hour soak. Missing: one-hour TTL, other request shapes, broad proxy compatibility.
 - M2 ledger, M3 workers, M4 verifier, M5 controls: bounded harnesses, small live checks; not integrated.
 - M6 benchmark: fixed, Jev and ModelPilot arms run live on 29 tuning tasks; the final split is locked, not yet run.
-- ModelPilot arm: starts at low concise; Haiku 5.5 medium a candidate (Oct 9); Jev advises, `switch_policy` decides; delegation off. Quality floor (October 8): no worse than the user's own model; arms `modelpilot-for-sonnet`/`-for-opus`.
+- ModelPilot arm: starts at low concise; Haiku 5.5 not a session model (Oct 10); Jev advises, `switch_policy` decides; delegation off. Quality floor (October 8): no worse than the user's own model; arms `modelpilot-for-sonnet`/`-for-opus`.
 - Governor: dry-run surface wired into the proxy and hooks; one live governed session passed. Missing: live turn-end delivery, observed rebuilds, fallback, active mode.
 
 The project is a tested set of components and bounded harnesses, not an operational end-to-end governor. Never present the toy benchmark as proof of production quality or savings.
@@ -84,4 +84,4 @@ Built offline first; live runs need the user's approval. 1–4 done October 6; 4
 11. 4b held (user decision; its trial-count rule gives n=1).
 12. Governor: live evidence for turn-end delivery and observed rebuilds; dry-run meanwhile.
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
-14. Haiku 5.5: live arm 26/29 strict, $0.012 a task (Oct 10).
+14. Haiku 5.5: helper roles only (summaries, simple steps), unbuilt.

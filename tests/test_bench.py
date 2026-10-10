@@ -53,8 +53,8 @@ class ScheduleTests(unittest.TestCase):
         self.assertIsNone(bench.arm_adapter('modelpilot', 1, 1).advisor)  # no key: no advice, never eligible
         self.assertFalse(bench.arm_adapter('modelpilot', 1, 1, advisor_stub={}).advisor.live)
         arm = bench.ARMS['modelpilot']
-        self.assertEqual((arm['served_models'], arm['models']),  # Haiku 5.5 a candidate since October 9
-                         (['claude-haiku-5-5', 'claude-opus-5-5', 'claude-sonnet-5-5'], POLICY_TIERS))
+        self.assertEqual((arm['served_models'], arm['models']),  # Haiku 5.5 not a session setting (October 10)
+                         (['claude-opus-5-5', 'claude-sonnet-5-5'], POLICY_TIERS))
         self.assertNotIn('modelpilot-o55', bench.ARMS)  # the start is Jev's prediction now, not a tuned variant
         self.assertTrue(all(m in bench.rates() for m in arm['served_models']))
         from modelpilot.modelpilot_adapter import ModelPilotAdapter
