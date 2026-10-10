@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SHAPE_FIXTURE = ROOT/'tests/fixtures/claude-2.1.284-shape.json'
 FAKE_KEY = 'sk-ant-offline-fixture-not-a-key'
 SUITES = ('smoke', 'transitions', 'top-rung', 'opus-5-5-effort', 'sonnet-5-5', 'haiku-5-5', 'returns',
-          'per-message-effort')
+          'per-message-effort', 'haiku-effort')
 SHAPES = ('tool_continuation', 'new_turn')
 PREFIX_LINES, SEED_MAX_TOKENS, SWITCH_MAX_TOKENS = 260, 4096, 2048
 PUZZLE = ('Find the smallest positive integer n that leaves remainder 3 when divided by 7, remainder 4 when '
@@ -115,6 +115,21 @@ EFFORT_STEPS, EFFORT_MAX_TOKENS = 3, 8192
 HAIKU_EFFORT_CASES = {'haiku/move_control': ((S, 'low'), 'move_control', 'low', None),
                       'haiku/move_top': ((S, 'low'), 'move_top', 'medium', None),
                       'haiku/move_pm': ((S, 'low'), 'move_pm', 'medium', 'before_result')}
+# The stronger check of the proxy move's effort (suite haiku-effort, user decision October 9): over 2 repeats in
+# thinking-probe-haiku-5-5-20261009-124512, move_pm thought about 9% more than move_control and move_top about the same,
+# with the repeats overlapping, so these puzzles barely separated Haiku's low from medium. It adds references (native_*:
+# the client itself at that effort, its requests moved to Haiku, so the top level and the client's message agree) and
+# move_pm at xhigh, whose wider gap shows whether the proxy's message sets Haiku's effort at all. move_effort_verdict
+# decides, by a rule fixed before the run.
+HAIKU_EFFORT_CHECK_CASES = {'haiku/move_control': HAIKU_EFFORT_CASES['haiku/move_control'],
+                            'haiku/native_medium': ((S, 'medium'), 'move_control', 'medium', None),
+                            'haiku/move_pm': HAIKU_EFFORT_CASES['haiku/move_pm'],
+                            'haiku/native_xhigh': ((S, 'xhigh'), 'move_control', 'xhigh', None),
+                            'haiku/move_pm_xhigh': ((S, 'low'), 'move_pm', 'xhigh', 'before_result')}
+# move_effort_verdict's thresholds, on mean thinking per repeat against move_control's: the xhigh reference must reach
+# XHIGH_SEPARATES for the probe to tell efforts apart at all; below MEDIUM_SEPARATES the medium reference is too close to
+# low for move_pm's own reading to mean anything.
+XHIGH_SEPARATES, MEDIUM_SEPARATES = 1.5, 1.15
 
 
 def step_puzzle(step):
@@ -258,6 +273,17 @@ def _group(run_id, case, shape_name, repeat, source, target, client_shape, spec_
             'steps': ['seed', 'switched']}
 
 
+def _move_groups(run_id, cases, repeat, client_shape):
+    """The proxy move's effort groups: the client's request, with its own effort message, forwarded to Haiku 5.5."""
+    groups = []
+    for case, (home, mode, effort, placement) in cases.items():
+        g = _group(run_id, case, 'tool_continuation', repeat, home, (H, effort), client_shape)
+        g['request']['messages'][-1]['output_config'] = {'effort': home[1]}  # the client's own effort message
+        g.update(steps=['seed'] + [f'step{i}' for i in range(1, EFFORT_STEPS + 1)], effort_mode=mode, placement=placement)
+        groups.append(g)
+    return groups
+
+
 def plan(run_id, suite, repeats, client_shape):
     if suite not in SUITES:
         raise ValueError(f'Unknown suite {suite!r}')
@@ -277,6 +303,9 @@ def plan(run_id, suite, repeats, client_shape):
                 g.update(steps=['seed'] + [f'step{i}' for i in range(1, EFFORT_STEPS + 1)], effort_mode=mode,
                          placement=placement)
                 groups.append(g)
+            continue
+        if suite == 'haiku-effort':
+            groups.extend(_move_groups(run_id, HAIKU_EFFORT_CHECK_CASES, repeat, client_shape))
             continue
         if suite == 'returns':
             for case, (home, away, count, anchored) in RETURN_CASES.items():
@@ -298,12 +327,7 @@ def plan(run_id, suite, repeats, client_shape):
                 groups.append(_group(run_id, case, shape_name, repeat, source, target, client_shape,
                                      spec_model=S if source[0] in (TOP, H) else None))
         if suite == 'haiku-5-5':
-            for case, (home, mode, effort, placement) in HAIKU_EFFORT_CASES.items():
-                g = _group(run_id, case, 'tool_continuation', repeat, home, (H, effort), client_shape)
-                g['request']['messages'][-1]['output_config'] = {'effort': home[1]}  # the client's own effort message
-                g.update(steps=['seed'] + [f'step{i}' for i in range(1, EFFORT_STEPS + 1)], effort_mode=mode,
-                         placement=placement)
-                groups.append(g)
+            groups.extend(_move_groups(run_id, HAIKU_EFFORT_CASES, repeat, client_shape))
     for g in groups:
         if 'switched' in g['steps']:
             # A refusal that does not depend on the reply (e.g. mid-history system messages for Haiku)
@@ -548,7 +572,7 @@ def effort_findings(verdict_rows):
     """Per effort case: accepted repeats, whether steps 2 and 3 kept the cache, and mean thinking tokens by step."""
     found = {}
     for v in verdict_rows:
-        if v['case'] not in EFFORT_CASES and v['case'] not in HAIKU_EFFORT_CASES:
+        if v['case'] not in {**EFFORT_CASES, **HAIKU_EFFORT_CASES, **HAIKU_EFFORT_CHECK_CASES}:
             continue
         f = found.setdefault(v['case'], {'repeats': 0, 'accepted': 0, 'verdicts': [], 'step2_cache': [],
                                          'step3_cache': [], 'thinking': []})
@@ -564,6 +588,43 @@ def effort_findings(verdict_rows):
         rows = [t for t in f['thinking'] if len(t) == EFFORT_STEPS + 1 and all(x is not None for x in t)]
         f['mean_thinking_by_step'] = [sum(t[i] for t in rows) / len(rows) for i in range(EFFORT_STEPS + 1)] if rows else None
     return found
+
+
+def move_effort_verdict(found):
+    """The haiku-effort suite's decision on Haiku's per_message_effort, fixed before its run (October 9). T(case): the
+    mean over repeats of thinking tokens summed over the seed and the three steps.
+    - invalid: a case has a repeat not accepted, or a move_pm repeat rewrote the cache at step 2 or 3;
+    - inconclusive: T(native_xhigh) < XHIGH_SEPARATES x T(move_control), so the probe can't tell Haiku's efforts apart;
+    - does_not_hold: T(move_pm_xhigh) is not nearer T(native_xhigh) than T(move_control), or the medium reference
+      separates from low (T(native_medium) >= MEDIUM_SEPARATES x T(move_control)) and T(move_pm) is not nearer it;
+    - holds: otherwise. With the medium reference too close to low, the xhigh pair decides alone (medium_separates).
+    per_message_effort may be set for Haiku only when the verdict is holds."""
+    t = {}
+    for case in HAIKU_EFFORT_CHECK_CASES:
+        f = found.get(case) or {}
+        rows = [r for r in f.get('thinking') or [] if len(r) == EFFORT_STEPS + 1 and None not in r]
+        if not f.get('repeats') or f['accepted'] != f['repeats'] or len(rows) != f['repeats']:
+            return {'verdict': 'invalid', 'reason': f'{case}: not every repeat accepted with its thinking'}
+        if 'move_pm' in case and not (len(f['step2_cache']) == len(f['step3_cache']) == f['repeats']
+                                       and set(f['step2_cache'] + f['step3_cache']) == {'kept'}):
+            return {'verdict': 'invalid', 'reason': f'{case}: the cache was rewritten'}
+        t[case] = sum(map(sum, rows)) / len(rows)
+    low = t['haiku/move_control']
+    out = {'totals': t, 'xhigh_ratio': t['haiku/native_xhigh'] / low if low else None,
+           'medium_ratio': t['haiku/native_medium'] / low if low else None}
+
+    def nearer(case, reference):
+        return abs(t[case] - t[reference]) < abs(t[case] - low)
+    if not low or out['xhigh_ratio'] < XHIGH_SEPARATES:
+        return dict(out, verdict='inconclusive', reason='the xhigh reference does not separate from low')
+    out['medium_separates'] = out['medium_ratio'] >= MEDIUM_SEPARATES
+    if not nearer('haiku/move_pm_xhigh', 'haiku/native_xhigh'):
+        return dict(out, verdict='does_not_hold', reason="move_pm_xhigh is not nearer the xhigh reference than low")
+    if out['medium_separates'] and not nearer('haiku/move_pm', 'haiku/native_medium'):
+        return dict(out, verdict='does_not_hold', reason="move_pm is not nearer the medium reference than low")
+    return dict(out, verdict='holds', reason='move_pm_xhigh nearer the xhigh reference' + (
+        ' and move_pm nearer the medium reference' if out['medium_separates'] else
+        '; the medium reference too close to low to read move_pm on its own'))
 
 
 def execute(groups, out, budget, suite, repeats, transport=probe.send):
@@ -588,8 +649,10 @@ def execute(groups, out, budget, suite, repeats, transport=probe.send):
         result['verified_transitions'] = verified_transitions(result)
         if suite == 'returns':
             result['return_findings'] = return_findings(result['verdicts'])
-        if suite in ('per-message-effort', 'haiku-5-5'):
+        if suite in ('per-message-effort', 'haiku-5-5', 'haiku-effort'):
             result['effort_findings'] = effort_findings(result['verdicts'])
+        if suite == 'haiku-effort':
+            result['move_effort_verdict'] = move_effort_verdict(result['effort_findings'])
         tmp = out/'summary.tmp'
         tmp.write_text(json.dumps(result, indent=2)+'\n')
         tmp.replace(out/'summary.json')
@@ -808,10 +871,12 @@ def main(argv=None):
     calls = planned_calls(groups)
     manifest = dict(run_id=rid, suite=args.suite, repeats=repeats, live=args.live, calls=calls, budget_usd=args.budget,
                     max_reserve_usd=max_reserve(groups), rates=RATES, pricing_source=SOURCE,
-                    pricing_checked='2026-10-08' if args.suite == 'haiku-5-5' else '2026-09-24', shape=shape,
+                    pricing_checked='2026-10-08' if args.suite in ('haiku-5-5', 'haiku-effort') else '2026-09-24', shape=shape,
                     prompts=PROMPTS, follow_up=FOLLOW_UP, controls=dict(CONTROLS, **HAIKU_CONTROL), transitions=TRANSITIONS,
                     opus_5_5_cases=O55_CASES, return_cases=RETURN_CASES, next_step=NEXT_STEP, effort_cases=EFFORT_CASES,
-                    haiku_effort_cases=HAIKU_EFFORT_CASES,
+                    haiku_effort_cases=HAIKU_EFFORT_CASES, haiku_effort_check_cases=HAIKU_EFFORT_CHECK_CASES,
+                    move_effort_rule=dict(xhigh_separates=XHIGH_SEPARATES, medium_separates=MEDIUM_SEPARATES,
+                                          rule=move_effort_verdict.__doc__),
                     step_puzzles=[step_puzzle(i) for i in range(1, EFFORT_STEPS + 1)], groups=groups,
                     method='Seed at the source setting; continue with its content passed back unchanged, transformed '
                            'by policy_actions.transform_request (Opus 5.5: effort edited directly). Switched requests '
