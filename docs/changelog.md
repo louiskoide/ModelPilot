@@ -2,6 +2,23 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 10, 2026: item 8 revised for Haiku, and its predictor test pre-registered (offline)
+
+$0, user decisions. Asked whether to build ModelPilot's own miss predictor before item 8, the user chose to pre-register its test first and to label the settings ModelPilot runs now. Details: `docs/m6-benchmark-plan.md`, "Revised October 10" and "Item 8 pre-registration". Built in the `item8-prereg` worktree on `1887ec8`.
+
+- **Arms** (user decision): Haiku 5.5 medium ×3, Sonnet 5.5 medium ×2, Opus 5.5 medium ×2 on the 30 labelling tasks, all on the subscription, seed 8. About $23 API-key equivalent, $0 API, about 5 hours. They replace October 8's low concise ×3, Opus ×2, Sonnet ×1 and `modelpilot` ×1.
+  - The `modelpilot` step was there to record Jev's answers, but the arm's gate skips Jev, so it would have recorded none.
+  - Script: `runs/item8-labelling-20261010.sh` (not committed, like its predecessor).
+- **Found:** on the 29 earlier tasks, no task separates Haiku from either baseline. tomli, Haiku medium's one miss, Sonnet medium and Opus 5.5 missed too. So the primary label is the broad one: Haiku 5.5 medium or Sonnet 5.5 medium misses (parse, tomli, ISMAGS there).
+- **Pre-registered before any label exists.**
+  - Rules: five turn-start rules (Jev's task complexity, P(Opus), effort index; the instruction's length and stated expectations), each flagging the top third.
+  - Test: a hypergeometric p, Bonferroni over five. Pass needs 5p < 0.05 and at least half the misses caught. Fewer than 3 misses is inconclusive.
+  - Commitments: pass means item 10 builds it, confirmed on the final split; fail drops item 10 and puts Jev's advisor role to the user.
+  - Scoring: `runs/item8-prereg-score-20261010.py` (SHA-256 `8e5bf2fb4581b74c82e81d8a7cac33111bca8fd1a5379d84c2becb81cc758d24`). Its `--dev` run on the 29 earlier tasks gives "fail", as item 4 found (best: instruction length and stated expectations, 2 of 3 caught, p 0.27 and 0.47 before correction).
+- **Changed while drafting, before committing:** R5 was call-like spans, item 4's "best router feature". Its misses leaned low at chance (AUC 0.474), so no direction for it could be fixed in advance. It became stated expectations, item 4's strongest feature (AUC 0.673).
+- **Amended the same day, before any label and before the sqlglot screen** (user decisions: Haiku 5.5 off; harder sqlglot tasks first). The cheap setting is low concise again. The test tasks add every `sqlglot-stage-*` batch, whole. Only item 8's seed-8 trials count. The rules and the test are unchanged. Scoring script re-pinned (`798cd2065de5f5da18ef3515467c02834bf2584c2db5028ef0d3599db1ca55c0`; the first version kept as `-v1`). Arms confirmed by the user before any run: low concise ×3, Sonnet 5.5 medium ×2, Opus 5.5 medium ×2 on the 38 test tasks, subscription, seed 8 (about $34 API-key equivalent, $0 API, about 3.75 hours).
+- **Next:** the Jev collection (`runs/jev-features-20261010.py`: the policy's first request through the real client against a local fixture, live TypeSafe, 3 answers a task), a $0 plan-only check of the new script, then the user's runs.
+
 ## October 10, 2026 (midday): Haiku 5.5 is not a session setting (offline)
 
 $0, user decision after the live run below: Haiku 5.5 is for helper roles, such as summaries and single simple steps inside larger multi-step tasks, not whole everyday tasks. "If Haiku is passing tests, then the tests are probably too easy." Not turned off: its probes and measurements stay for those roles, none built yet. Details: `docs/m6-modelpilot-policy.md`, "Not a session setting".
