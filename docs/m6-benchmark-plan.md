@@ -706,6 +706,44 @@ The four runs go one at a time, with seed 8 added to each. The plan-only check (
 
 A trial that ends in `transport_error` (a lost connection) still counts as complete. The label rule above would read it as a miss, and `runs/miss-predictability-20261006.py` doesn't filter such trials out. So those trials are dropped from the labels before item 10, and rerun.
 
+**Revised October 10 (user decision; not run yet).** Since October 9 ModelPilot runs Haiku 5.5 medium for a Sonnet user and Opus 5.5 medium for an Opus user, so the labels are those settings' and the floor's two baselines', all on the subscription, seed 8 ($0 API):
+- `haiku-5.5` (medium) ×3, about $3 API-key equivalent and 3 hours (about 120 s a task);
+- `sonnet-5.5` (medium) ×2, about $5 and 45 minutes;
+- `opus-5.5` (medium) ×2, about $15 and 70 minutes.
+
+Low concise ×3, Sonnet ×1 and `modelpilot` ×1 are dropped. The `modelpilot` step was there for Jev's answers, but the arm's gate skips Jev (always on October 8's code, and again with `every_answer_moves`), so it would have recorded none. Jev's turn-start answers come from a separate collection instead: `runs/jev-features-20261010.py`, the policy's own first request, sent through the real client against a local fixture. Script: `runs/item8-labelling-20261010.sh` (not committed, like the scripts it replaces).
+
+### Item 8 pre-registration (October 10, before any label exists)
+
+Written and committed before any item 8 trial ran, so the 30 tasks are a held-out test of rules fixed in advance. It answers one question: can anything ModelPilot knows at a turn start pick out the tasks its cheap settings miss? Item 4 asked this of 29 tasks with 3 positives and found nothing, without the power to say no.
+
+**Labels** (per task, from item 8's runs only). A trial counts if it is complete, eligible (`bench_report.ineligible_reason`), strictly graded (`hidden_and_edge`) and its session ended for a model reason: `success`, `turn_limit` or `budget_stop`. Transport errors, rate limits, account and API errors, client errors, timeouts and cost-unknown halts don't count. A task's setting misses if any counted trial of it failed.
+- **Primary, M:** Haiku 5.5 medium or Sonnet 5.5 medium misses: the cheap settings ModelPilot would run.
+- **Reported, not part of the verdict:** Y_S (Haiku misses and Sonnet medium doesn't: what a Sonnet user's floor needs flagged) and Y_O (Haiku misses and Opus 5.5 medium doesn't: what an Opus user's saving would need). On the 29 earlier tasks both are empty (tomli, Haiku's one miss, Sonnet medium and Opus 5.5 missed too), which is why they can't be primary.
+
+**Rules** (fixed now; higher means harder for every one, chosen before seeing any new value). Each flags the 10 of the 30 tasks with the highest score, ties at the cut all flagged. Only what a router has at a turn start, as item 4's router tier:
+- R1 Jev's task complexity (`metrics.taskComplexity`);
+- R2 Jev's probability for Opus 5.5;
+- R3 Jev's effort index (sum of effort position × probability, low 0 to max 4);
+- R4 the instruction's length in characters;
+- R5 the instruction's stated expectations (`==`, "should", "must"): item 4's strongest feature on the 29 earlier tasks (AUC 0.673, misses high), picked there and tested here. Item 4's "best router feature", call-like spans, had misses leaning low at chance (AUC 0.474), so no direction for it could be fixed in advance.
+
+Jev's features are each task's median over 3 answers from `runs/jev-features-20261010.py` (live TypeSafe, the policy's own first request, the arm's start Sonnet 5.5 low with the concise prompt). Text features are item 4's (`text_features`).
+
+**Test.** m = the number of M tasks among the 30. For each rule, k = M tasks among those it flags, and p = P(K ≥ k) under the hypergeometric (30 tasks, m positives, as many draws as flagged). Bonferroni over the 5 rules.
+- **Pass:** some rule has 5 × p < 0.05 and catches at least half of the M tasks.
+- **Fail:** m ≥ 3 and no rule passes.
+- **Inconclusive:** m < 3, too few misses to test.
+
+**What each outcome commits to.**
+- Pass: item 10 builds that rule as per-task floor evidence (offline). Its first claim waits for the final split, the untouched hold-out.
+- Fail: no turn-start predictor from these features. Item 10 is dropped, and Jev's role as ModelPilot's advisor goes to the user.
+- Inconclusive: no verdict. More labelled tasks, from new repositories, are the only way forward (the user's call).
+
+Also reported, outside the verdict: each rule's flags against Y_S and Y_O, its extra cost of escalating the flagged tasks (Haiku medium to Sonnet medium, at item 8's per-task means), and the pooled 59-task AUCs, descriptive only.
+
+**Scoring:** `runs/item8-prereg-score-20261010.py`, SHA-256 `8e5bf2fb4581b74c82e81d8a7cac33111bca8fd1a5379d84c2becb81cc758d24` at this commit; its `--dev` mode applies the same rules to the 29 earlier tasks, whose labels and Jev answers exist, to check the code runs.
+
 ### Caveman's engine over recorded tool results (plan item 9, first step; October 6, $0)
 
 Item 9's first step is a $0 pass of caveman's engine over tool results our agents actually received. A live arm (low concise behind caveman's proxy) was to follow only if this pass showed a real cut.
