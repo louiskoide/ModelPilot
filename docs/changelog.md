@@ -2,6 +2,37 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 10, 2026 (evening): the mid-task compaction test, built (offline); the one-hour probe stopped by a network outage
+
+$0 for the build, user request: does a compaction summary keep the work, and does it matter who writes it (plan items 6 and 14)? The user first asked whether compaction hurts quality. ModelPilot never compacts, but the client does. Nothing on record measures the effect, since no benchmark context has reached the client's 100k auto-compaction minimum. Details: `docs/m6-benchmark-plan.md`, "Mid-task compaction".
+
+- **Why mid-task.** Between tasks (the sequence shape's `--compact`), the next task barely needs the conversation, so every summarizer would look alike. Inside a task, the summary has to carry what has been learned.
+- **The `split` shape** (`modelpilot/midtask_compaction.py`, `bench --shape split`): each task as a plan turn (investigate and plan, no edits) and a fix turn of one session. Arms with a `compaction` entry add a `/compact` turn between them. The checkout is graded once, as a single trial. Fixed arms and tuning tasks only.
+- **Arms:**
+  - `sonnet-5.5-low-concise`: the control, whole conversation.
+  - `sonnet-5.5-low-concise-compact`: Sonnet 5.5 low writes the summary, as the client does.
+  - `sonnet-5.5-low-concise-compact-haiku`: the proxy sends the compaction request to Haiku 5.5 at the client's effort (`ProxyServer(compaction_model=…)`, through `policy_actions.transform_request`'s thinking gate). A refused rewrite goes as sent and says why.
+- **Checks:**
+  - `compaction_check`: the summary came from the arm's model, and the control didn't compact. Failures are excluded as `compaction_not_applied` (`bench_report.ineligible_reason`).
+  - `plan_turn_edits`: a plan turn that changed the checkout is recorded.
+- **Found at $0:**
+  - The pinned client's compaction request: Sonnet 5.5, low effort, adaptive thinking, `max_tokens` 128,000, 6 tools, a mid-conversation system message. Haiku 5.5 served 344 Sonnet-shaped requests like it in `bench-20261010-090944`, all 200.
+  - After `/compact`, the fix turn's requests carry the summary and not the plan turn, which is the premise of the test.
+- **Pre-registered** before any run: strict passes paired per task, each compaction arm against the control and Haiku against Sonnet. A loss is claimed only when the interval excludes 0.
+- **Plan-only check:** parse, tomli and ISMAGS × the 3 arms × 3 trials, preflight passed.
+- **Proposed run** (user's go):
+  - A smoke trial first, then the 3 known-miss tasks plus the 8 sqlglot tasks × 3 arms × 3 trials on the subscription, after item 8's runs.
+  - About $10–20 as sent, $0 API, 3–5 hours.
+  - The task list waits on the sqlglot screening: tasks every arm always passes add no sensitivity.
+- **One-hour probe, rerun** (the user's run of `runs/ttl-1h-long-20261008.sh`, API key):
+  - `runs/m0-replication-ttl-1h-long-20261010-173120` stopped at call 19 of 42. The first 40-minute read timed out connecting at 18:11:37, with no retry.
+  - $0.82 known, cost incomplete. 18 writes and no read, so the hour is still unmeasured.
+  - The other session's `bench-20261010-173816` had 3 transport timeouts in the 4 minutes before: a network outage on this computer.
+- **Tests:** 728 of 729 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/midtask-compaction-regression-py312.log`). The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-compaction`). New: `tests/test_midtask_compaction.py` (11).
+  - The suite ran 17:58–18:05 beside the other session's live sqlglot run (`bench-20261010-173816`), so its wall times then may carry a little noise.
+  - A first run from 17:55 was stopped after two minutes, before the rebase onto `main`.
+- **`CLAUDE.md`:** dropped "System Python 3.9 has two known `test_transport` errors" (the file requires Python 3.10 or later; earlier entries keep the note) to stay under 8 KB.
+
 ## October 10, 2026: harder tasks, sqlglot stage 1: 8 tasks built (offline)
 
 $0, user decisions: Haiku 5.5 no longer a session setting ("if Haiku passes, the tests are too easy"); harder tasks before item 8's labels, from sqlglot, in stages. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 1".

@@ -651,7 +651,7 @@ For comparison, the same 28 tasks as single prompts come to $2.30. Contexts end 
   - A 1h entry is still read after 10 minutes, 6/6; a 5m entry is rewritten, 6/6. So at a 10-minute pause 1h writes do what the sequence comparison assumes.
   - A request marked 1h that reads a warm 5m entry costs only a read (7.6k tokens read, nothing written). But it doesn't extend the entry: 10 minutes later it was rewritten, 6/6. **An entry's lifetime is set when it is written, so the turn-end upgrade idea doesn't work.** Getting an hour means writing at 1h in the first place.
   - A request marked 5m that reads a 1h entry doesn't shorten it (hit 10 minutes later, 6/6).
-- **Not measured**: whether a 1h entry lasts the full hour. The computer slept during those waits, and the harness counted them on a clock that stops in sleep, so they would have ended hours late. The run was stopped by hand. Waits now follow the wall clock, and a late step is marked and left out. The long kinds alone can be rerun with `python3 -m modelpilot.cache_replication --suite ttl-1h-long --live --budget 3`: 42 requests, at most $1.34, about 90 minutes with the computer kept awake (`caffeinate -i`). The policy's 3600 s for 1h entries stays nominal until then.
+- **Not measured**: whether a 1h entry lasts the full hour. The computer slept during those waits, and the harness counted them on a clock that stops in sleep, so they would have ended hours late. The run was stopped by hand. Waits now follow the wall clock, and a late step is marked and left out. The long kinds alone can be rerun with `python3 -m modelpilot.cache_replication --suite ttl-1h-long --live --budget 3`: 42 requests, at most $1.34, about 90 minutes with the computer kept awake (`caffeinate -i`). The policy's 3600 s for 1h entries stays nominal until then. The October 10 run (`runs/m0-replication-ttl-1h-long-20261010-173120`, $0.82) stopped at call 19 of 42 on a connection timeout at its first 40-minute read, a network outage on this computer; no read was measured, so it is still to run.
 
 **Proposed live runs (each needs the user's go).**
 1. **One-hour TTL probe** (first run done, see above; its hour-long kinds still to run) (API key; direct API, as the TTL probes are): `python3 -m modelpilot.cache_replication --suite ttl-1h --live --budget 4`. 102 requests on Sonnet 5.5 and Opus 5.5, 3 repeats of seven kinds (`TTL_1H_KINDS`): 1h entries read after 10 and 50 minutes, expired at 60.5, a read at 40 minutes refreshing to 80, a 5m control after 10 minutes, and two cross-lifetime questions. Can a request marked 1h move a warm 5m entry to the hour, and is it billed as a read? Does a request marked 5m shorten a 1h entry? About 90 minutes. At most $2.82 if every request wrote; about half that if the reads hit. `ttl-summary.json` gives each kind's outcome.
@@ -662,6 +662,38 @@ For comparison, the same 28 tasks as single prompts come to $2.30. Contexts end 
 Afterwards ($0): `python3 -m modelpilot.long_session report runs/bench-<ts> --out runs/long-session-report-<ts>.json`. Per arm it gives subtasks passed, dollars per sequence, how many returns read the conversation back (`return_read_fraction` ≥ 0.5) and compaction cost. It pairs arms per subtask (28 pairs; each subtask's turn plus the compaction turn that prepared it, cold-equivalent).
 
 **What the result would decide.** If the probe confirms the hour and a lifetime-tagged upgrade is billed as a read, a governor lever follows: at a turn's end, upgrade the conversation's entry to the hour for about a read, only when a pause is likely. That would be a new prewarm-like request, so it stays a proposal for the user, as shadow warming is off by default. If compaction holds strict passes, compacting before a pause is the other lever.
+
+### Mid-task compaction (plan items 6 and 14; built offline October 10, $0)
+
+User request: does a compaction summary keep the work, and does it matter who writes it? ModelPilot never compacts; the client does, near its context limit or on `/compact`, and the summary replaces the conversation. Nothing on record measures what that costs in quality: benchmark contexts end at 28–47k tokens, under the client's 100k auto-compaction minimum, so no run has compacted. Run 3 above can't answer it either: between tasks, the next task barely needs the conversation, so every summarizer would look alike.
+
+**Shape** (`--shape split`, `modelpilot/midtask_compaction.py`). Each task is two turns of one session: a plan turn (investigate and plan, no edits; `PLAN_PREAMBLE`) and a fix turn ("Now make the change you planned…", `FIX_PROMPT`). An arm with a `compaction` entry adds a `/compact` turn between them, so the fix turn starts from the summary alone, the task included. The offline test checks this on the pinned client: after `/compact` the fix turn's requests carry the summary and not the plan turn. The checkout is graded once, after the fix turn, as a single trial is, so `bench_report` and `regrade` read these runs unchanged. Turns run back to back (no gap); fixed arms and tuning tasks only.
+
+| Arm | Summary written by |
+| --- | --- |
+| `sonnet-5.5-low-concise` | none: the control, both turns with the whole conversation |
+| `sonnet-5.5-low-concise-compact` | the session's own setting, Sonnet 5.5 low, as the client does |
+| `sonnet-5.5-low-concise-compact-haiku` | Haiku 5.5: the proxy sends the compaction request there (`proxy.compaction_model`) |
+
+- **The rewrite.** Only the compaction request changes model, at the client's effort (low), through `policy_actions.transform_request`, so the thinking-history gate applies (Sonnet 5.5 → Haiku 5.5 is verified). A request the gate refuses goes as the client sent it, and its row says why. The pinned client's compaction request, checked at $0 against the fixture: Sonnet 5.5, low effort, adaptive thinking, `max_tokens` 128,000, the 6 tools, a mid-conversation system message. Haiku 5.5 served 344 Sonnet-shaped requests like it in `bench-20261010-090944`, all 200. The client prices the summary at Sonnet's rates, so the Haiku arm's `client_cost_matches` is false; reports use the proxy's.
+- **Checks.** `compaction_check`: every compaction request went to the arm's model, and the control compacted not at all. A trial that fails it is excluded (`compaction_not_applied` in `bench_report.ineligible_reason`). `plan_turn_edits` records a plan turn that changed the checkout; such a trial is graded as the session left it.
+- **Report** ($0): `python3 -m modelpilot.midtask_compaction runs/bench-<ts> --out runs/midtask-compaction-report-<ts>.json`: per arm, eligible trials, strict passes, plan turns that edited, mean plan, compaction and fix-turn dollars, the summary's output tokens and what the fix turn wrote. Pass rates and costs paired per task: `python3 -m modelpilot.bench_report` with the latest re-grade.
+
+**Pre-registered analysis** (fixed October 10, before any run):
+1. Primary: strict passes per task, paired per task with a bootstrap 95% interval (`bench_report`), for Sonnet's summary against the control, Haiku's against the control, and Haiku's against Sonnet's. A loss is claimed only when the interval excludes 0.
+2. Excluded: incomplete trials (usage limit, account error) and `compaction_not_applied`. Trials whose plan turn edited stay in; a secondary analysis leaves them out.
+3. Cost: cold-equivalent dollars per task, with the compaction and fix turns apart. Contexts at the compaction here are far below 100k, where Haiku 5.5 is priced lowest; real auto-compaction starts above 100k, in its upper tier.
+4. What follows:
+   - Sonnet's summary loses passes against the control: compacting mid-task is a quality risk. "Compact before a pause" (above) then needs its own check.
+   - Haiku's summary loses against Sonnet's: Haiku stays out of compaction.
+   - Neither: only large losses are ruled out with about 11 tasks. Haiku compaction would then be worth considering only when Sonnet's cache is cold. At about 120k tokens, a warm Sonnet summary costs about $0.04, Haiku about $0.07–0.08, a cold Sonnet one about $0.27–0.33.
+
+**Proposed run** (needs the user's go; subscription, $0 API; after item 8's subscription runs, since a 429 stops a run):
+1. Smoke ($0 API, about $0.15 as sent, 5 minutes): `parse-decimal-grouping` × `sonnet-5.5-low-concise-compact-haiku` × 1 trial, to see the rewrite and `/compact` work live.
+2. The run: `python3 -m modelpilot.bench --shape split --tasks parse-decimal-grouping,tomli-decode-error-attrs,nx-ismags-monomorphism,<the 8 sqlglot stage-1 tasks> --arms sonnet-5.5-low-concise,sonnet-5.5-low-concise-compact,sonnet-5.5-low-concise-compact-haiku --subscription-arms <the same three> --trials 3 --seed 12 --run-budget 1 --live`. 99 trials. About $10–20 as sent: low concise costs $0.07–0.16 a trial on the first three tasks, and the extra turn adds more. sqlglot's cost is unknown until its screening run. 3–5 hours. The task list waits on that screening: tasks every arm always passes add trials but no sensitivity.
+3. Plan-only check (October 10, $0): 3 tasks × 3 arms × 3 trials, references graded, preflight passed.
+
+An Opus 5.5 summary arm is one line in `bench.ARMS`, added only if Sonnet's summaries lose work.
 
 ### Labelling batch (plan item 8; built offline October 6, $0)
 

@@ -562,7 +562,7 @@ def pair_summary(a, b, cells_a, cells_b, rng, resamples, scopes=('complete', 'co
 
 def ineligible_reason(record):
     """Why a trial is excluded from comparisons, or None: its router or adapter says so, or a fixed arm's
-    requested effort, appended system prompt or cache lifetime didn't reach the wire."""
+    requested effort, appended system prompt, cache lifetime or compaction model didn't reach the wire."""
     routing = record.get('routing') or {}
     if routing.get('benchmark_eligible') is False:
         return routing.get('ineligible_reason', 'adapter_not_benchmark_eligible')
@@ -572,6 +572,8 @@ def ineligible_reason(record):
         return 'prompt_not_applied'
     if (record.get('ttl_check') or {}).get('applied') is False:
         return 'ttl_not_applied'
+    if (record.get('compaction_check') or {}).get('applied') is False:
+        return 'compaction_not_applied'  # a summary by another model than the arm's, or a control that compacted
     return None
 
 
