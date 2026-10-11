@@ -2,6 +2,22 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 10, 2026 (evening): the sqlglot screen, half lost to a network outage; Jev's answers collected
+
+$0 API. The user's runs: the screen (`runs/bench-20261010-173816`, commit `8f88cca`, subscription, seed 12, no retries) and the Jev collection (TypeSafe, unpriced).
+
+- **The screen: 8 of 16 trials usable, all strict passes.** Every trial that reached the model passed:
+  - Opus 5.5, 5/5: clickhouse, collate, mysql, pivot, postgres. $2.06 API-key equivalent, $0.22–0.82 a task, 77–277 s.
+  - Low concise, 3/3: clickhouse, sqlite, starrocks. $0.54, $0.14–0.23 a task, 94–113 s.
+  - Only clickhouse has both arms. No miss seen yet. The $0 re-grade agrees with every recorded grade (`regrade-bench-20261010-173816-20261010-180908`).
+- **The other 8 were lost to the network, not the models.** From 18:02:59 to 18:08:43, each trial's first request (the third, for low concise on mysql) timed out at the proxy's upstream connection (`TimeoutError` after about 11 s). The client saw a 502 and stopped (`transport_error`), so these trials say nothing about misses.
+  - Lost: low concise on collate, duckdb, mysql, pivot, postgres; Opus on duckdb, sqlite, starrocks.
+  - The 1-hour TTL probe running at the same time from the main checkout, a direct API client, also lost its connection, at 18:11:37 (`URLError`, `m0-replication-ttl-1h-long-20261010-173120`, stopped at 19 of 42 calls). A plain request to api.anthropic.com answered in 0.1 s afterwards.
+- **Jev's answers for item 8** (`runs/jev-features-20261010.json`): 38 tasks × 3 answers, no errors, median 203 ms.
+  - Picks: Sonnet 5.5 110, Opus 5.5 4; effort medium 84, high 27, xhigh 3.
+  - TypeSafe's price is still unknown.
+- **Next:** rerun the 8 lost trials into a new run directory before deciding on a second batch (subscription, about 15 minutes, about $1.5–2 API-key equivalent). Item 8 doesn't wait on it: the screen decides only stage 2, and item 8's test set already holds stage 1 whole.
+
 ## October 10, 2026: harder tasks, sqlglot stage 1: 8 tasks built (offline)
 
 $0, user decisions: Haiku 5.5 no longer a session setting ("if Haiku passes, the tests are too easy"); harder tasks before item 8's labels, from sqlglot, in stages. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 1".
