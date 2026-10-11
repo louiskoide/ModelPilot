@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Updated October 9, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
+Updated October 10, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
 
 ## Objective
 
@@ -61,14 +61,14 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 ```
 
 - Latest test count and log: the newest `docs/changelog.md` entry; record counts there.
-- Put the pinned client 2.1.284 (`work/claude-client/node_modules/.bin`) first on PATH: 2.1.289 retries refused requests. System Python 3.9 has two known `test_transport` errors.
+- Put the pinned client 2.1.284 (`work/claude-client/node_modules/.bin`) first on PATH: 2.1.289 retries refused requests.
 - Real-client, bench and Jev tests need `work/` and node; CI (3.10, 3.14) skips them. With `work/` symlinked into a worktree, the Jev launcher's checkout-path test fails.
 - Paid, all behind `--live` (inspect each plan first): `cache_probe`, `claude_check`, `worker_check`, `cascade_check`, `evaluate`, `jev_check`, `jev_route_check`, `governed_session`, `bench`, `thinking_probe`. Limits are stopping thresholds, not billing caps.
 
 ## Code map (`modelpilot/`; detail in `docs/code-map.md`)
 
 - Cache and proxy: `cache_probe`, `proxy`, `fixtures`, `soak`. Ledger and governor: `m2`, `m2_mcp`, `governor`, `hooks`, `governed_session` (`docs/governor.md`).
-- Benchmark: `bench`, `bench_tasks`, `bench_report`, `regrade`, `long_session`, `late_fix` (`docs/m6-benchmark-plan.md`). Jev arms: `bench_jev`, `jev_*` (`docs/bench-adapters.md`).
+- Benchmark: `bench`, `bench_tasks`, `bench_report`, `regrade`, `long_session`, `midtask_compaction`, `late_fix` (`docs/m6-benchmark-plan.md`). Jev arms: `bench_jev`, `jev_*` (`docs/bench-adapters.md`).
 - ModelPilot arm: `active_policy`, `switch_policy`, `advisor`, `delegation`, `policy_replay`, `modelpilot_adapter`, `bench_tools`, `fixture_dispatch`, `policy_actions` (`docs/m6-modelpilot-policy.md`, `configs/modelpilot-policy.json`).
 
 ## Plan, in order
@@ -76,7 +76,7 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 Built offline first; live runs need the user's approval. 1–4 done October 6; 4 found no pre-run miss signal.
 
 5. Dropped for the quality floor (user decision, October 8).
-6. Long sessions: built offline; 1h TTL probe and sequence runs await approval.
+6. Long sessions, mid-task compaction (`split` shape): built offline; runs await approval.
 7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
 8. 30 labelling tasks: built offline; runs await approval.
 9. Caveman: parked (user decision); its $0 pass found at most 1%, all lossy.

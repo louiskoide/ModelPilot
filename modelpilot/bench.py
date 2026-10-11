@@ -8,9 +8,11 @@ commands inside their checkout: this is not an OS sandbox, so only use trusted t
 
 Session shapes: 'single' is one prompt. 'followup' resumes the same session with FOLLOW_UP
 after --gap seconds (0 keeps the prompt cache warm; 330 lets it expire); other trials run
-while one waits. Before any request, each task's reference is graded once ($0), and a trial
-must pass as many hidden tests as its reference did. Costs are reported cold-equivalent
-(see bench_report) next to measured. The client binary is pinned for the whole run.
+while one waits. 'split' gives a task as a plan turn and a fix turn, compacted between them for
+arms with a compaction entry (midtask_compaction; 'sequence' is long_session's). Before any
+request, each task's reference is graded once ($0), and a trial must pass as many hidden
+tests as its reference did. Costs are reported cold-equivalent (see bench_report) next to
+measured. The client binary is pinned for the whole run.
 
 Jev arms (see bench_jev) run Jev's own proxy for the whole trial in front of the trial's
 ModelPilot proxy, with the jev-router sentinel instead of --model. Their dollars are provider
@@ -77,6 +79,16 @@ ARMS = {
                                   'append_system_prompt': 'bench/prompts/concise.md', 'prompt_cache_ttl': '5m'},
     'sonnet-5.5-low-concise-1h': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low',
                                   'append_system_prompt': 'bench/prompts/concise.md', 'prompt_cache_ttl': '1h'},
+    # Mid-task compaction (user request, October 10; midtask_compaction): low concise with a '/compact' turn between
+    # the split shape's plan and fix turns. 'compaction' names who writes the summary: 'session', the session's own
+    # setting, as the client does; a model id, and the proxy sends the compaction request there at the client's effort
+    # (proxy.compaction_model). Plain low concise in the split shape is their control. In other shapes the entry only
+    # redirects whatever compaction happens.
+    'sonnet-5.5-low-concise-compact': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low',
+                                       'append_system_prompt': 'bench/prompts/concise.md', 'compaction': 'session'},
+    'sonnet-5.5-low-concise-compact-haiku': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low',
+                                             'append_system_prompt': 'bench/prompts/concise.md',
+                                             'compaction': 'claude-haiku-5-5'},
     'haiku-4.5': {'kind': 'fixed', 'model': 'claude-haiku-4-5-20251001'},  # kept so its earlier runs reproduce
     # Haiku 5.5 (October 8): the policy's cheapest tier in place of Haiku 4.5, and cheaper per token at any prompt length
     # than every other tier. Is it enough on the tuning tasks? Without an effort the client sends medium (2.1.284, checked
@@ -361,6 +373,24 @@ def ttl_check(rows, ttl):
             'applied': set(marked) == {ttl} if marked else None}
 
 
+def compaction_model(arm):
+    """The model an arm sends the client's compaction requests to (proxy.compaction_model), or None: no 'compaction'
+    entry, or 'session', the session's own model."""
+    return None if arm.get('compaction') in (None, 'session') else arm['compaction']
+
+
+def compaction_check(rows, model):
+    """Whether a trial's compaction requests went to the model meant to write the summary; model None: the trial
+    expects none (the split shape's control), and any compaction fails the check. applied is None when an arm that
+    compacts sent no compaction request: the session's stop reason, not this check, says what happened."""
+    compaction = [r for r in rows if r.get('kind') == 'messages' and r.get('compaction')]
+    served = Counter(r.get('model') for r in compaction)
+    return {'requested': model, 'served': dict(sorted(served.items())),
+            'not_rewritten': [r['compaction_model'].get('reason') for r in compaction
+                              if r.get('compaction_model') and not r['compaction_model'].get('applied')],
+            'applied': not compaction if model is None else set(served) == {model} if compaction else None}
+
+
 def appended_prompt(arm):
     """An arm's appended system prompt (fixed arms, and the ModelPilot arms since October 6): its file, text and hash;
     None without one."""
@@ -565,9 +595,12 @@ class Trial:
         self.jev_key, self.jev_stub = jev_key, jev_stub
         self.appended = appended_prompt(arm)
         self.client_extra = []  # more client flags for every session (the sequence shape's --autocompact)
+        # Who should write any compaction summary, checked when the arm names one (the split shape checks every arm).
+        self.check_compaction = 'compaction' in arm
+        self.compaction_expected = compaction_model(arm) or (arm['model'] if 'compaction' in arm else None)
         self.record = {'task': task['id'], 'arm': arm_id, 'trial': trial, 'model': arm['model'], 'effort': arm.get('effort'),
                        'append_system_prompt': {k: self.appended[k] for k in ('path', 'sha256')} if self.appended else None,
-                       'prompt_cache_ttl': arm.get('prompt_cache_ttl'),
+                       'prompt_cache_ttl': arm.get('prompt_cache_ttl'), 'compaction': arm.get('compaction'),
                        'spec_sha256': bench_tasks.spec_hash(task), 'shape': shape,
                        'gap_requested_seconds': gap if shape == 'followup' else None,
                        'expected_hidden_passed': expected_hidden_passed, 'limits': self.limits,
@@ -639,6 +672,8 @@ class Trial:
             options['catalog'] = self.arm['models']
         if self.appended:
             options['system_marker'] = self.appended['text']
+        if compaction_model(self.arm):
+            options['compaction_model'] = compaction_model(self.arm)
         self.proxy = ProxyServer(('127.0.0.1', 0), self.upstream, self.log, self.rates, **options)
         self.proxy_thread = threading.Thread(target=self.proxy.serve_forever, daemon=True)
         self.proxy_thread.start()
@@ -748,6 +783,8 @@ class Trial:
             self.record['prompt_check'] = prompt_check(rows, self.appended['sha256'])
         if self.arm.get('prompt_cache_ttl'):
             self.record['ttl_check'] = ttl_check(rows, self.arm['prompt_cache_ttl'])
+        if self.check_compaction:
+            self.record['compaction_check'] = compaction_check(rows, self.compaction_expected)
         if self.auth == 'subscription':
             self.record['as_sent'] = {'cache': bench_report.cache_attribution(rows, self.rates),
                                       'cost_components': bench_report.cost_components(rows, self.rates)}
@@ -952,9 +989,14 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
     """subscription_arms: fixed arms whose client logs in with a Claude subscription token (oauth_token) instead of
     the API key. Their tokens are not billed to the API account, so the run budget counts only API-key trials.
     shape 'sequence' (long_session): tasks are sequences ({'id', 'tasks'}), each run as one session of task turns,
-    gap seconds apart, with compaction turns as compact says and the client's autocompact window."""
-    from . import long_session
+    gap seconds apart, with compaction turns as compact says and the client's autocompact window.
+    shape 'split' (midtask_compaction): each task as a plan turn and a fix turn, with a compaction turn between them
+    for arms with a compaction entry; fixed arms only."""
+    from . import long_session, midtask_compaction
     sequences = tasks if shape == 'sequence' else None
+    split = shape == 'split'
+    if split and any(ARMS[a]['kind'] != 'fixed' for a in arms):
+        raise ValueError('The split shape runs fixed arms only')
     if sequences:
         tasks = [t for unit in sequences for t in unit['tasks']]
         unsupported = [a for a in arms if a in long_session.UNSUPPORTED_ARMS]
@@ -972,7 +1014,7 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
         cli, client_version = resolve_client(cli)
     gap = gap if shape in ('followup', 'sequence') else 0
     steps = len(long_session.plan(max(len(u['tasks']) for u in sequences), gap, compact)) if sequences else None
-    sessions = steps or (2 if shape == 'followup' else 1)  # the most any trial runs
+    sessions = steps or (3 if split else 2 if shape == 'followup' else 1)  # the most any trial runs
     manifest = {'seed': seed, 'order': order, 'arms': {a: ARMS[a] for a in arms}, 'trials': trials,
                 'tasks': {t['id']: bench_tasks.spec_hash(t) for t in tasks}, 'client': str(cli),
                 'client_version': client_version, 'code': code_revision(),
@@ -993,6 +1035,9 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
                 'sequences': {u['id']: [t['id'] for t in u['tasks']] for u in sequences} if sequences else None,
                 'sequence_preamble': long_session.PREAMBLE if sequences else None,
                 'compact': compact if sequences else None, 'autocompact': autocompact if sequences else None,
+                'split_prompts': {'plan_preamble': midtask_compaction.PLAN_PREAMBLE, 'fix': midtask_compaction.FIX_PROMPT,
+                                  'steps': {a: midtask_compaction.steps(ARMS[a]) for a in arms}} if split else None,
+                'compaction': {a: ARMS[a]['compaction'] for a in arms if 'compaction' in ARMS[a]} or None,
                 'prompt_cache_ttl': {a: ARMS[a]['prompt_cache_ttl'] for a in arms if ARMS[a].get('prompt_cache_ttl')} or None,
                 'client_unpriced_arms': {a: ARMS[a]['model'] for a in arms if ARMS[a]['model'] in CLIENT_UNPRICED} or None,
                 'note': 'Stop thresholds are not billing caps: per session, and the run threshold between sessions. No retries.'
@@ -1012,6 +1057,11 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
                 adapter=arm_adapter(arm, limits.get('budget_usd', 1.0), count, jev_key),
                 auth='subscription' if subscription else 'api_key', oauth_token=oauth_token if subscription else None,
                 expected=expected, **limits)
+        if split:
+            return midtask_compaction.SplitTrial(
+                task, arm, trial_dir, cli, key, upstream, price_table, trial=n, client_version=client_version,
+                auth='subscription' if subscription else 'api_key', oauth_token=oauth_token if subscription else None,
+                expected_hidden_passed=((expected or {}).get(task['id']) or {}).get('hidden_passed'), **limits)
         adapter = arm_adapter(arm, limits.get('budget_usd', 1.0), 2 if shape == 'followup' else 1, jev_key)
         return Trial(task, arm, trial_dir, cli, key, upstream, price_table, trial=n, shape=shape, gap=gap,
                      client_version=client_version, jev_key=jev_key, adapter=adapter,
@@ -1069,7 +1119,9 @@ def main():
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--max-turns', type=int, default=30)
     parser.add_argument('--budget', type=float, default=1.0, help='Per-session client stop threshold, not a billing cap')
-    parser.add_argument('--shape', choices=SHAPES + ('sequence',), default='single')
+    parser.add_argument('--shape', choices=SHAPES + ('sequence', 'split'), default='single',
+                        help='split: a plan turn and a fix turn per task, compacted between them for arms with a '
+                             'compaction entry (fixed arms only; modelpilot.midtask_compaction)')
     parser.add_argument('--gap', type=float, default=0,
                         help='Seconds before the follow-up (followup shape: 0 warm, 330 cold), or between task turns '
                              '(sequence shape)')
@@ -1110,8 +1162,10 @@ def main():
         raise SystemExit(f'Not supported in sequences: {", ".join(long_session.UNSUPPORTED_ARMS)}.')
     if args.autocompact is not None and not 100_000 <= args.autocompact <= 1_000_000:
         raise SystemExit('--autocompact takes 100000 to 1000000 tokens.')
-    if args.gap and args.shape == 'single':
+    if args.gap and args.shape in ('single', 'split'):
         raise SystemExit('--gap applies only to --shape followup or sequence.')
+    if args.shape == 'split' and any(ARMS[a]['kind'] != 'fixed' for a in arms):
+        raise SystemExit('--shape split runs fixed arms only.')
     subscription_arms = [a for a in args.subscription_arms.split(',') if a]
     wrong = [a for a in subscription_arms if a not in arms or ARMS[a]['kind'] not in SUBSCRIPTION_KINDS]
     if wrong:
@@ -1119,6 +1173,8 @@ def main():
     api_arms = [a for a in arms if a not in subscription_arms]
     if bench_tasks.SPLITS.exists():
         final = [t['id'] for t in tasks if bench_tasks.split_of(t['id']) == 'final']
+        if final and args.shape == 'split':
+            raise SystemExit(f'--shape split runs tuning tasks only: {final}.')
         if final and not args.final:
             raise SystemExit(f'Final-split tasks {final} need --final: they are reserved for the frozen evaluation.')
         changed = bench_tasks.check_lock(bench_tasks.load())
@@ -1130,7 +1186,8 @@ def main():
     jev_arms = [a for a in arms if ARMS[a]['kind'] == 'jev']
     table = rates()
     served = sorted({m for a in arms for m in (ARMS[a].get('models', bench_jev.JEV_MODELS) if a in jev_arms
-                                                 else ARMS[a].get('served_models', [ARMS[a]['model']]))})
+                                                 else ARMS[a].get('served_models', [ARMS[a]['model']]))}
+                    | {compaction_model(ARMS[a]) for a in arms if compaction_model(ARMS[a])})
     missing = [m for m in served if m not in table]
     if missing:
         raise SystemExit(f'No configured rates for {missing}.')
@@ -1153,7 +1210,7 @@ def main():
     print('Preflight passed: ' + ', '.join(f"{i} ({e['hidden_passed']} hidden)" for i, e in expected.items()), flush=True)
     runs = len(units or tasks) * len(arms) * args.trials
     plans = [long_session.plan(len(u['tasks']), args.gap, args.compact) for u in units] if units else None
-    sessions = max(len(p) for p in plans) if plans else 2 if args.shape == 'followup' else 1
+    sessions = max(len(p) for p in plans) if plans else 3 if args.shape == 'split' else 2 if args.shape == 'followup' else 1
     session_total = sum(len(p) for p in plans) if plans else len(tasks) * sessions  # per arm and trial
     try:
         planned = client_problem(resolve_client(args.claude or shutil.which('claude') or 'claude')[1])
@@ -1163,6 +1220,8 @@ def main():
         if planned:
             print('Client: ' + planned + ' A live run would stop here.')
         shape = (f'follow-up after {args.gap:g} s' if args.shape == 'followup' else
+                 'a plan turn and a fix turn, compacted between them for arms with a compaction entry'
+                 if args.shape == 'split' else
                  f'sequences of {min(len(u["tasks"]) for u in units)}-{max(len(u["tasks"]) for u in units)} task turns '
                  f'{args.gap:g} s apart, compaction {args.compact}'
                  + (f', autocompact window {args.autocompact}' if args.autocompact else '') if units else 'single prompt')

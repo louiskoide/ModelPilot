@@ -6,6 +6,10 @@ active_policy.ActivePolicy, the ModelPilot benchmark arm only, applies escalatio
 enforces admission: a refused request gets an API-style error from the proxy and is never sent.
 That policy may also have the proxy send requests of its own (side_call: consults and handoff
 notes), each admitted, settled and logged as kind side_call.
+
+A benchmark arm may also name a compaction model (compaction_model, fixed arms only): the
+client's compaction request goes to that model instead, so arms can compare who writes the
+summary. Nothing else is changed.
 """
 import argparse
 import hashlib
@@ -288,12 +292,17 @@ class ProxyServer(ThreadingHTTPServer):
     # server_close must join request handlers before closing their shared accounting log.
     # Client and upstream socket operations already have 120-second timeouts.
     daemon_threads = False
-    def __init__(self, address, upstream, log_path, rates, governor=None, policy=None, catalog=None, system_marker=None):
+    def __init__(self, address, upstream, log_path, rates, governor=None, policy=None, catalog=None, system_marker=None,
+                 compaction_model=None):
         """catalog: model ids a model-constrained arm may discover; the model catalog is filtered to them.
-        system_marker: text an arm adds to the system prompt; each Messages row records whether it was there."""
+        system_marker: text an arm adds to the system prompt; each Messages row records whether it was there.
+        compaction_model: the model the client's compaction requests go to instead of its own (no policy)."""
         if system_marker is not None and (not isinstance(system_marker, str) or not system_marker.strip()):
             raise ValueError('system_marker must be non-empty text')
         self.system_marker = system_marker
+        if compaction_model is not None and (policy is not None or compaction_model not in rates):
+            raise ValueError('compaction_model must be a priced model, for an arm without a policy')
+        self.compaction_model = compaction_model
         if catalog is not None and (isinstance(catalog, str) or not catalog or
                                     not all(isinstance(m, str) and m for m in catalog)):
             raise ValueError('catalog must be a non-empty collection of model ids')
@@ -449,6 +458,17 @@ class ProxyServer(ThreadingHTTPServer):
             self.record(row)
         out.update(status=row['status'], cost_usd=row['cost_usd'])
         return out
+
+    def rewrite_compaction(self, request):
+        """(request, record): the compaction request for compaction_model at the client's effort, through the policy's
+        own transform (thinking-history gate, system messages). One it refuses goes as the client sent it, and the
+        record says why, so a trial can be left out rather than counted under the wrong summarizer."""
+        from .policy_actions import transform_request  # policy_actions imports this module
+        record = {'model': self.compaction_model, 'client_model': request.get('model')}
+        try:
+            return transform_request(request, self.compaction_model, request_effort(request)), dict(record, applied=True)
+        except ValueError as e:
+            return request, dict(record, applied=False, reason=str(e))
 
     def finish_policy(self, ticket, row, observer):
         gov = self.open_governor()
@@ -647,6 +667,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     policy_row['rewritten'] = 'effort_messages'
                     if outcome.get('deliveries'):
                         policy_row['deliveries'] = outcome['deliveries']
+        compaction = compaction_request(request)
+        rewrite = None
+        if compaction and self.server.compaction_model and path.path == '/v1/messages':
+            request, rewrite = self.server.rewrite_compaction(request)
+            raw = json.dumps(request).encode() if rewrite['applied'] else raw
         headers = clean_headers(self.headers)
         extra_beta = (outcome.get('beta') if governed and self.server.policy is not None else None)
         if extra_beta:
@@ -673,8 +698,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
         ttls = cache_ttls(request)
         if ttls:
             row['cache_ttl'] = ttls  # what the breakpoints asked for; usage says what was written
-        if compaction_request(request):
+        if compaction:
             row['compaction'] = True
+        if rewrite is not None:
+            row['compaction_model'] = rewrite
+            if rewrite['applied']:
+                row['client_request_sha256'] = client_sha
         effective = effective_effort(request)
         if effective != row['effort'] and (effective is None or isinstance(effective, str) and len(effective) <= 16):
             row['effective_effort'] = effective  # set by an effort-only system message (per-message effort)
