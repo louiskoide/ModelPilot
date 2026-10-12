@@ -912,6 +912,37 @@ The rule under "4a design" (proposed September 27) still waits on the user's con
 - **What would settle the assumption.** A second `modelpilot` trial on the tuning tasks: about $2.4 API plus unpriced TypeSafe calls for 29 tasks, or about $0.35 for the four tasks the variance check originally named, too few to estimate a spread well.
 - **What 4b would compare now.** On the tuning tasks the ModelPilot arm never left low concise, so a 4b run today mostly measures its overhead against low concise. Its arm set and timing are the user's decision. **User decision, October 6: 4b is held.** At n = 1, five arms (low concise, ModelPilot, Sonnet 5.5 medium, Opus 5.5, `jev-compat-o55`) on 24 final tasks cost roughly $14 at tuning-task means; final tasks are smaller, so probably less.
 
+### 4b, ready to run (October 11, $0; still held)
+
+Prepared unattended at the user's request (item C of the night's list); nothing has run, not even the plan-only check (the session wasn't permitted to start `modelpilot.bench` unattended). The comparison itself has been pre-registered since October 8 (`docs/m6-modelpilot-policy.md`, "What would count against it"): each ModelPilot arm against its floor's baseline on cost per passed task at a pass rate not significantly lower, and against compat Jev; low concise as the reference.
+
+**The trial-count rule for today's pairings** (`runs/trial-count-rule-20261011.py` → `.json`; every single-prompt run on record, priced at October 11's prices, trials counted as item 8 counted them). Item 8's repeats make the spreads much firmer than on October 6: within-task SD low concise $0.014 (108 degrees of freedom), Sonnet 5.5 medium $0.017 (71), Opus 5.5 $0.041 (52; on October 6, 4 tasks with repeats).
+- `modelpilot-for-sonnet` vs `sonnet-5.5`, with low concise standing in (the arm decides as `modelpilot` does and stays on low concise): 67 tasks, mean −$0.015, between-task SD $0.010. 95% half-width at n = 1: $0.0096, against a target of 15% × $0.090 = $0.0135. **n = 1**, holding while the between-task SD stays under $0.026.
+- `modelpilot-for-opus` vs `opus-5.5`: no run on record. Stand-in: the concise prompt's effect on Sonnet 5.5 medium (23 tasks), scaled ×2.76 to Opus's cost; between-task SD estimates as 0. Half-width at n = 1: $0.023, against 15% × $0.248 = $0.037. **n = 1**, holding while the between-task SD stays under $0.073. The concise prompt's effect on Opus is unmeasured, so this is the weaker of the two.
+- `modelpilot` against low concise in its one run (26 tasks): +$0.0034 a task, SD $0.012, the overhead the Sonnet-side comparison mostly measures.
+
+**Cost at n = 1** (24 final tasks, means of the 29 original tuning tasks at today's prices; final tasks may be smaller):
+
+| Arm | Login | Per task | 24 tasks |
+| --- | --- | --- | --- |
+| `sonnet-5.5-low-concise` | subscription | $0.072 | $1.72 as sent |
+| `sonnet-5.5` | subscription | $0.090 | $2.16 as sent |
+| `opus-5.5` | subscription | $0.248 | $5.95 as sent |
+| `modelpilot-for-sonnet` | API key | $0.075 | $1.80 |
+| `modelpilot-for-opus` | API key | about $0.22 (unmeasured) | about $5.40 |
+| `jev-compat-o55` | API key + TypeSafe | $0.081 (15 tasks; lower bound) | about $1.95 + unpriced TypeSafe |
+
+So about $19: $9.80 of subscription usage as sent ($0 API) and about $9.10 on the API key, plus TypeSafe; about $7.20 on the key without Jev. About 2–3 hours: median sessions of 25–48 s, 144 trials, after a few minutes of preflight.
+
+**Before running it**, three things are the user's call:
+1. **Whether now.** The final split is one-shot: once its results are seen, later policy changes (the cache levers of item 6, a per-task predictor from harder tasks) can't be judged on it. Today `modelpilot-for-sonnet` would run low concise plus overhead and `modelpilot-for-opus` Opus 5.5 medium with the concise prompt, so 4b would mostly measure overhead and the concise prompt on Opus.
+2. **The arm set.** The pre-registration names all six. Without Jev it needs no TypeSafe key; without the Opus pair it costs about $7.60 in all.
+3. **A smoke trial first.** `modelpilot-for-opus` has never run live: one tuning task (`parse-hyphen-field`), API key, about $0.25.
+
+`runs/4b-final-20261011.sh plan|smoke|full|nojev` (not committed) runs each step: the plan-only check, the smoke trial, and the run in one bench run (fixed arms on the subscription, the others on the API key, seed 4, `--final`, `--run-budget 15`). The bench refuses final tasks whose specs changed since the lock; checked unchanged October 11 (`bench_tasks.check_lock`). Final tasks have no edge suites (`bench/edge_tests/README.md`, rule 3), so they're graded on their hidden tests alone.
+
+**Plan text fixed.** Since October 11 every ModelPilot arm runs without an advisor, and `bench`'s plan described each one as the exploration arm (random switches to Opus 5.5), without its quality floor. `bench.modelpilot_plan` now describes each arm by what it runs (exploration draw, Jev's advice, or measured rates alone), with its floor and delegation.
+
 ### Haiku 5.5 (October 8; plan set by user decisions; live runs need the user's go)
 
 Haiku 5.5 replaced Haiku 4.5 as the policy's bottom tier (`docs/m6-modelpilot-policy.md`, "Tier set"). It isn't a candidate yet, so no ModelPilot arm moves to it. User decisions (October 8): test it as a cheap default and work toward making it a routing candidate; quality first, so the candidate work waits for the arms; handle the client's 40× price with a raised `--budget` rather than a repin; price Sonnet 5.5's cache reads by date; up to $3 of paid spend before the user sees results. In order:

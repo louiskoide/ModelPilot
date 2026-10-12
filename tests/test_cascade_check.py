@@ -2,12 +2,12 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from modelpilot.cascade_check import FALLBACK_MODEL, governed_fallback
+from modelpilot.cascade_check import DRAFT_MODEL, FALLBACK_MODEL, governed_fallback
 from modelpilot.governor import Governor
 from modelpilot.m4 import sha
 
-RATES = {'claude-sonnet-4-6': dict(input=3, output=15, read=.3, write_5m=3.75, write_1h=6),
-         'claude-opus-4-6': dict(input=5, output=25, read=.5, write_5m=6.25, write_1h=10)}
+RATES = {'claude-sonnet-5-5': dict(input=2, output=10, read=.1, write_5m=2.5, write_1h=4),
+         'claude-opus-5-5': dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)}
 USAGE = {'input_tokens': 100, 'output_tokens': 10, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0}
 
 
@@ -29,8 +29,8 @@ class GovernedFallbackTests(unittest.TestCase):
         return transport
 
     def draft(self, source, text):
-        request = {'model': 'claude-sonnet-4-6', 'max_tokens': 192, 'messages': [{'role': 'user', 'content': source}]}
-        response = {'model': 'claude-sonnet-4-6', 'stop_reason': 'end_turn', 'usage': USAGE,
+        request = {'model': DRAFT_MODEL, 'max_tokens': 192, 'messages': [{'role': 'user', 'content': source}]}
+        response = {'model': DRAFT_MODEL, 'stop_reason': 'end_turn', 'usage': USAGE,
                     'content': [{'type': 'text', 'text': text}]}
         return request, response, {'revision': 1, 'text': source, 'current_source_sha256': sha(source)}
 
@@ -39,7 +39,7 @@ class GovernedFallbackTests(unittest.TestCase):
         result = governed_fallback(self.gov, RATES, request, response, evidence, transport=self.respond('{}'))
         self.assertEqual((result['action'], result['fallback']['executed']), ('would_defer', True))
         self.assertEqual([r['model'] for r in self.sent], [FALLBACK_MODEL])
-        self.assertAlmostEqual(result['fallback']['cost_usd'], (100*5+10*25)/1e6)
+        self.assertAlmostEqual(result['fallback']['cost_usd'], (100*4+10*20)/1e6)
 
     def test_fallback_that_finds_the_real_span_is_accepted(self):
         source = 'TOKEN_X is the verification token.'

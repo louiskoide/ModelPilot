@@ -14,7 +14,7 @@ from .cache_probe import send,cost,error_details
 from .governor import Governor,execute_fallback,governed_transport
 from .m4 import cascade,sha
 
-FALLBACK_MODEL='claude-opus-4-6'
+DRAFT_MODEL,FALLBACK_MODEL='claude-sonnet-5-5','claude-opus-5-5'  # the session models; a stuck task goes to Opus 5.5
 
 
 def parse_candidate(response,evidence):
@@ -54,14 +54,15 @@ def main():
     parser.add_argument('--execute-fallback',action='store_true',help='Also run one governed Opus fallback for an escalated draft')
     args=parser.parse_args()
     if not args.live:
-        print('Plan: two Sonnet drafts, dry-run verification; '+
-              ('one governed Opus fallback for the escalated draft, re-verified; ' if args.execute_fallback else 'no escalation; ')+
+        print(f'Plan: two {DRAFT_MODEL} drafts, dry-run verification; '+
+              (f'one governed {FALLBACK_MODEL} fallback for the escalated draft, re-verified; ' if args.execute_fallback else 'no escalation; ')+
               'no shadow warming. Add --live to run.');return
     key=os.environ.get('ANTHROPIC_API_KEY') or getpass.getpass('Paste API key (hidden): ').strip()
     if not key.startswith('sk-ant-') or any(c.isspace() for c in key):raise SystemExit('Invalid API key format.')
     os.environ['ANTHROPIC_API_KEY']=key
     root=Path(__file__).resolve().parents[1];run=root/'runs'/('m4-cascade-'+time.strftime('%Y%m%d-%H%M%S'));run.mkdir(mode=0o700)
-    rates=json.loads((root/'configs/m0.json').read_text())['rates'];model='claude-sonnet-4-6'
+    from .bench import rates as rate_table
+    rates=rate_table();model=DRAFT_MODEL
     report={'status':'running','cases':[],'escalations_executed':0,'shadow_requests':0}
     gov=Governor(run/'ledger.sqlite3','cascade',1.0) if args.execute_fallback else None
     transport=governed_transport(gov,send,rates,.02) if gov else send
