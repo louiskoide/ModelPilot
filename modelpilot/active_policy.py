@@ -127,8 +127,11 @@ class ActiveDispatcher(Dispatcher):
 class ActivePolicy(ProxyPolicy):
     active, mode, gate, keep_kind, Dispatch = True, 'active', 'spent', 'policy_keep', ActiveDispatcher
 
-    def __init__(self, client_model, owner, advisor=None, config=None):
+    def __init__(self, client_model, owner, advisor=None, config=None, advised=None):
         self.client_model, self.owner, self.advisor = client_model, owner, advisor
+        # advised: the arm was built with an advisor (default: one was given); one that has none here, its key missing,
+        # stays where its answer is needed rather than moving on the measured rates alone (switch_policy.decide)
+        self.advised = advisor is not None if advised is None else advised
         self.config = config or switch_policy.load()
         self.catalog, self.prompt_prefix = [], ''  # set by the adapter once the trial is set up
         # task -> {setting: (unix time, prefix tokens, content positions)}: where each setting's cache entry ends
@@ -314,7 +317,8 @@ class ActivePolicy(ProxyPolicy):
                         brief_tokens=len(text.encode()) / self.config['bytes_per_token'],
                         force_consult=bool(facts) and (facts['cause'] in consult['force'] or
                                                        bool(facts.get('first_pass')) and 'tests_pass' in consult['force']))
-        decision = switch_policy.decide(self.config, rates, usable, setting, prof, trigger)
+        decision = switch_policy.decide(self.config, rates, usable, setting, prof, trigger,
+                                        advised=self.advised)
         if gate is not None:
             decision['gate'] = gate
             # Jev wasn't asked: no answer it could give moves this point (a quality floor move keeps its own reason)

@@ -609,6 +609,65 @@ class MeasuredCandidateTests(unittest.TestCase):
                 sp.with_overrides(self.cfg, {'measured_candidates': bad})
 
 
+class UnadvisedTests(unittest.TestCase):
+    """User decision, October 11: Jev no longer advises the ModelPilot arms. Without an advisor, turn starts weigh the
+    measured settings on their measured rates alone; stuck evidence moves to Opus 5.5."""
+    def setUp(self):
+        self.cfg, self.rates = sp.load(), bench.rates()
+        self.prof = sp.profile(self.cfg, request(20), False)
+
+    def decide(self, current, trigger, cfg=None):
+        return sp.decide(cfg or self.cfg, self.rates, None, current, self.prof, trigger, advised=False)
+
+    def test_a_turn_start_weighs_the_measured_settings_on_their_rates_alone(self):
+        low = self.decide((S, 'low'), 'turn_start')
+        self.assertEqual((low['action'], low['reason'], low['basis']), ('stay', 'current_is_cheapest', 'measured_only'))
+        self.assertNotIn('jev', low)
+        self.assertEqual({c['setting'] for c in low['candidates'] if c.get('measured_only')},
+                         {f'{S}/medium', f'{O}/medium'})
+        for row in low['candidates']:
+            self.assertNotIn('p_jev', row)
+            self.assertEqual(row['p_ok'], row['p_measured'])
+        # The same numbers as an advised decision with the current setting named and Jev's weight 0.
+        named = {'model': {'choice': S, 'confidence': 1.0, 'probabilities': {S: 1.0}},
+                 'effort': {'choice': 'low', 'confidence': 1.0, 'probabilities': {'low': 1.0}}}
+        plain = sp.with_overrides(self.cfg, {'calibration': {'jev_weight': 0.0}})
+        same = sp.decide(plain, self.rates, named, (S, 'low'), self.prof, 'turn_start')
+        self.assertEqual([c['expected_usd'] for c in low['candidates']], [c['expected_usd'] for c in same['candidates']])
+
+    def test_from_opus_a_measured_downgrade_can_pay_unless_the_floor_forbids_it(self):
+        free = self.decide((O, 'medium'), 'turn_start')
+        self.assertEqual((free['action'], free['downgrade']), ('jump', True))
+        floored = sp.with_overrides(self.cfg, {'quality_floor': {'enabled': True, 'baseline': f'{O}/medium'}})
+        self.assertEqual(self.decide((O, 'medium'), 'turn_start', floored)['action'], 'stay')
+
+    def test_elsewhere_the_setting_stays(self):
+        self.assertEqual(self.decide((S, 'low'), 'step')['reason'], 'advice_unavailable')
+        # An advised arm whose answer is missing stays at a turn start, as before October 11.
+        self.assertEqual(sp.decide(self.cfg, self.rates, None, (S, 'low'), self.prof, 'turn_start')['reason'],
+                         'advice_unavailable')
+
+    def test_stuck_evidence_moves_to_opus_at_the_turns_effort_or_stops_on_it(self):
+        self.assertEqual((self.cfg['stuck_escalation']['model'], self.cfg['stuck_escalation']['effort']), (O, 'medium'))
+        stuck = self.decide((S, 'low'), 'stuck_evidence')
+        self.assertEqual((stuck['action'], stuck['target'], stuck['reason']), ('jump', [O, 'low'], 'stuck_escalation'))
+        self.assertEqual(self.decide((O, 'medium'), 'stuck_evidence')['reason'], 'no_stronger_setting')
+        # Where effort may change on stuck evidence, the move takes stuck_escalation's effort.
+        cfg = sp.with_overrides(self.cfg, {'effort_changes_at': ['turn_start', 'stuck_evidence']})
+        self.assertEqual(self.decide((S, 'low'), 'stuck_evidence', cfg)['target'], [O, 'medium'])
+        # Without stuck_escalation it stays, as an advised arm without an answer does.
+        bare = copy.deepcopy(self.cfg)
+        del bare['stuck_escalation']
+        self.assertEqual(self.decide((S, 'low'), 'stuck_evidence', bare)['reason'], 'advice_unavailable')
+        for bad in ({'model': 'claude-unknown', 'effort': 'medium'}, {'model': O, 'effort': 'extreme'},
+                    {'model': H, 'effort': 'medium'}):  # Haiku 5.5 isn't a session candidate (October 10)
+            with tempfile.NamedTemporaryFile('w', suffix='.json') as f:
+                json.dump(dict(self.cfg, stuck_escalation=bad), f)
+                f.flush()
+                with self.assertRaisesRegex(ValueError, 'stuck_escalation'):
+                    sp.load(f.name)
+
+
 class ExplorationPlanTests(unittest.TestCase):
     def cfg(self, **spec):
         return sp.with_overrides(sp.load(), {'exploration': dict({'enabled': True}, **spec)})

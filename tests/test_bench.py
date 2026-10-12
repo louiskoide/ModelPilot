@@ -39,9 +39,23 @@ class ScheduleTests(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             bench.run_trial({'id': 't'}, 'modelpilot', '/nonexistent', 'claude', 'k', 'http://127.0.0.1:1', RATES)
 
-    def test_the_modelpilot_arm_gets_the_active_policy_jev_as_advisor_and_the_same_limit_per_session(self):
+    def test_the_modelpilot_arm_gets_the_active_policy_no_advisor_and_the_same_limit_per_session(self):
         self.assertIsNone(bench.arm_adapter('sonnet-5', 1.5, 1))
-        adapter = bench.arm_adapter('modelpilot', 1.5, 2, jev_key='ts-key')
+        # User decision, October 11: Jev no longer advises any ModelPilot arm, even when a run has a TypeSafe key.
+        for name, arm in bench.ARMS.items():
+            if arm['kind'] == 'modelpilot':
+                self.assertIsNone(arm['advisor'], name)
+                self.assertNotIn('checkout', arm, name)
+                shipped = bench.arm_adapter(name, 1, 1, jev_key='ts-key')
+                self.assertEqual((shipped.advisor, shipped.advised, shipped.policy.advised), (None, False, False), name)
+        # An arm built with Jev as advisor (as until October 11) still gets it.
+        jev_arm = dict(bench.ARMS['modelpilot'], advisor='jev', checkout='work/jev-router-compat')
+        with mock.patch.dict(bench.ARMS, {'modelpilot': jev_arm}):
+            adapter = bench.arm_adapter('modelpilot', 1.5, 2, jev_key='ts-key')
+            unkeyed = bench.arm_adapter('modelpilot', 1, 1)
+            stubbed = bench.arm_adapter('modelpilot', 1, 1, advisor_stub={})
+        self.assertEqual((unkeyed.advisor, unkeyed.advised, unkeyed.policy.advised), (None, True, True))
+        self.assertFalse(stubbed.advisor.live)
         self.assertEqual((adapter.policy.mode, adapter.tools, adapter.channel, adapter.limit), ('active', False, False, 3.0))
         delegate = bench.arm_adapter('modelpilot-delegate', 1.5, 2, jev_key='ts-key')  # tools and channel with delegation
         self.assertEqual((delegate.tools, delegate.channel), (True, True))
@@ -50,8 +64,6 @@ class ScheduleTests(unittest.TestCase):
         self.assertIs(adapter.policy.advisor, adapter.advisor)
         self.assertEqual((adapter.advisor.live, adapter.advisor.key, adapter.advisor.checkout),
                          (True, 'ts-key', bench.ROOT/'work/jev-router-compat'))
-        self.assertIsNone(bench.arm_adapter('modelpilot', 1, 1).advisor)  # no key: no advice, never eligible
-        self.assertFalse(bench.arm_adapter('modelpilot', 1, 1, advisor_stub={}).advisor.live)
         arm = bench.ARMS['modelpilot']
         self.assertEqual((arm['served_models'], arm['models']),  # Haiku 5.5 not a session setting (October 10)
                          (['claude-opus-5-5', 'claude-sonnet-5-5'], POLICY_TIERS))

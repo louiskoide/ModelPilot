@@ -49,6 +49,10 @@ with that of each direct move:
   quality bar, and a miss is never given a price. A setting may run when it is at least as strong as that baseline,
   or when, over enough tuning tasks, it adds no miss the baseline doesn't make (floor_allows). A move up from an
   allowed setting is always allowed; a setting below the floor moves to the cheapest allowed one without Jev.
+- no advisor (user decision, October 11: Jev no longer advises the ModelPilot arms, after item 8 found no turn-start
+  signal in its answers): where measured_candidates and calibration apply, the measured settings are weighed on their
+  measured pass rates alone (jev_weight 0); elsewhere the setting stays. Stuck evidence moves to stuck_escalation's
+  model (at the turn's effort when effort can't change there), or stops when nothing stronger is runnable.
 
 A move goes straight to its target and never climbs. It must beat staying by the hysteresis, scaled
 by how plausible the current setting is: the margin protects a setting that may well be enough from
@@ -98,6 +102,10 @@ def load(path=CONFIG):
         raise ValueError(f'decision_points must be among {TRIGGERS}')
     if type(gate(cfg)['enabled']) is not bool:
         raise ValueError('jev_gate: enabled is a boolean')
+    esc = cfg.get('stuck_escalation')
+    if esc is not None and (esc.get('model') not in cfg['models'] or not cfg['models'][esc['model']]['candidate']
+                            or esc.get('effort') not in (cfg['models'][esc['model']]['efforts'] or [None])):
+        raise ValueError('stuck_escalation: a candidate model and one of its efforts')
     step = cfg['step']
     if (type(step['enabled']) is not bool or not _count(step['min_requests_between'], 1)
             or not _count(step['max_per_revision'], 0) or not _at_least_number(step['overrun_factor'], 0)
@@ -534,12 +542,13 @@ def _consult_target(cfg, current, model, effort, forced=False):
     return None
 
 
-def decide(cfg, rates, advice, current, prof, trigger):
+def decide(cfg, rates, advice, current, prof, trigger, advised=True):
     """Stay, jump straight to a target, or stop (stuck with nothing stronger). Returns the decision with every
     candidate's numbers, so the journal shows why, forecast_usd: run() on the setting it leaves the task on,
     which a later step compares measured spend against, and with the quality floor on, the floor's verdict on the
-    current setting and every setting it allows."""
-    decision = _decide(cfg, rates, advice, current, prof, trigger)
+    current setting and every setting it allows. advised: whether the arm has an advisor; without one the decision
+    rests on the measured rates and stuck_escalation (_unadvised), where an advised arm's missing answer stays."""
+    decision = _decide(cfg, rates, advice, current, prof, trigger, advised=advised)
     decision['forecast_usd'] = run_cost(cfg, rates, tuple(decision['target']), prof)
     floor = quality_floor(cfg)
     if floor['enabled']:
@@ -572,6 +581,34 @@ def _floor_move(cfg, rates, current, prof, trigger, runnable, out):
     best = min(rows, key=lambda r: r['expected_usd'])
     return dict(out, action='jump', target=list(allowed[best['setting']]), reason='below_quality_floor',
                 candidates=rows)
+
+
+def _unadvised(cfg, rates, current, prof, trigger, runnable, out):
+    """The arm has no advisor (user decision, October 11). Stuck evidence moves to stuck_escalation's model, at the
+    turn's effort when effort can't change here (user decision, October 11), or stops with nothing stronger runnable.
+    Where measured_candidates and calibration apply, the measured settings are weighed on their measured pass rates
+    alone: the current setting stands in as the named one, with jev_weight 0, as a quality floor move weighs its own."""
+    if trigger == 'stuck_evidence':
+        esc = cfg.get('stuck_escalation')
+        if not esc:
+            return dict(out, action='stay', reason='advice_unavailable')
+        effort = esc['effort'] if trigger in cfg['effort_changes_at'] else current[1]
+        target = (esc['model'], effort if cfg['models'][esc['model']]['efforts'] else None)
+        if target == current or target not in runnable or not at_least(cfg, target, current):
+            return dict(out, action='stop', reason='no_stronger_setting')
+        return dict(out, action='jump', target=list(target), reason='stuck_escalation')
+    cal, measured = cfg['calibration'], cfg.get('measured_candidates') or {'enabled': False, 'at': []}
+    if not (measured['enabled'] and trigger in measured['at'] and cal['enabled'] and trigger in cal['applies_at']):
+        return dict(out, action='stay', reason='advice_unavailable')
+    named = {'model': {'choice': current[0], 'confidence': 1.0, 'probabilities': {current[0]: 1.0}}}
+    if current[1] is not None:
+        named['effort'] = {'choice': current[1], 'confidence': 1.0, 'probabilities': {current[1]: 1.0}}
+    plain = dict(cfg, calibration=dict(cal, jev_weight=0.0))
+    decision = _decide(plain, rates, named, current, prof, trigger)
+    decision.pop('jev', None)
+    for row in decision.get('candidates') or []:
+        row.pop('p_jev', None)
+    return dict(decision, basis='measured_only')
 
 
 def answer_shapes(cfg):
@@ -619,7 +656,7 @@ def jev_gate(cfg, rates, current, prof, trigger):
     return {'can_change': False, 'reason': 'every_answer_stays', 'shapes': shapes, 'closest_usd': closest}
 
 
-def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None):
+def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None, advised=True):
     """jev_estimate: Jev's estimate for every setting, in place of its probabilities (jev_gate's bounds)."""
     if trigger not in TRIGGERS:
         raise ValueError(f'Unknown decision point {trigger!r}')
@@ -635,6 +672,8 @@ def _decide(cfg, rates, advice, current, prof, trigger, jev_estimate=None):
         return _floor_move(cfg, rates, current, prof, trigger, runnable, out)
     if quality_floor(cfg)['enabled']:  # a move up from an allowed setting is always allowed; others must meet the floor
         runnable = [c for c in runnable if at_least(cfg, c, current) or floor_allows(cfg, c)['allowed']]
+    if not advice and not advised:
+        return _unadvised(cfg, rates, current, prof, trigger, runnable, out)
     probabilities = sufficiency(cfg, advice) if advice else None
     if probabilities is None:
         return dict(out, action='stay', reason='advice_unavailable')

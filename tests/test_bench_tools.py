@@ -20,6 +20,11 @@ BROKEN = 'def last(items):\n    return None\n'
 EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 
 
+def advised(arm):
+    """The arm as it ran until October 11, with Jev (the compat checkout) as its advisor: the shipped arms have none."""
+    return mock.patch.dict(bench.ARMS, {arm: dict(bench.ARMS[arm], advisor='jev', checkout='work/jev-router-compat')})
+
+
 class ServerTests(unittest.TestCase):
     def setUp(self):
         self.repo_case = synthetic.BenchTaskTests('test_valid_task_fails_on_base_and_passes_on_reference')
@@ -203,7 +208,7 @@ class ToolTrialTests(unittest.TestCase):
                           'probabilities': {m: .9 if m == model else .05 for m in POLICY_TIERS}},
                 'effort': {'choice': effort, 'confidence': .85,
                            'probabilities': {e: .85 if e == effort else .0375 for e in EFFORTS}}}
-        with mock.patch.object(switch_policy, 'load', return_value=config):
+        with mock.patch.object(switch_policy, 'load', return_value=config), advised(arm):
             adapter = bench.arm_adapter(arm, limit, 1, advisor_stub=stub, tools=tools)
             with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
                 return self.modelpilot_trial(name, script, adapter, **kwargs)
@@ -273,6 +278,23 @@ class ToolTrialTests(unittest.TestCase):
         self.assertTrue(routing['accounting_matches'], routing)
         self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
         self.assertEqual(record['accounting']['cost_scope'], 'complete')  # a stub costs nothing; live Jev is unpriced
+
+    def test_without_an_advisor_stuck_evidence_moves_to_opus_at_the_turns_effort(self):
+        """User decision, October 11: with no advisor, a stuck task goes straight to Opus 5.5 (stuck_escalation); inside
+        the turn the effort holds at the arm's low."""
+        script = self.STALLED + [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
+                                 {'tool': 'mcp__modelpilot__run_tests', 'input': {}}, {'text': 'Done.'}]
+        with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
+            record = self.modelpilot_trial('unadvised-stuck', script, bench.arm_adapter('modelpilot', 1, 1, tools=True),
+                                           rates=self.OPUS_RATES)
+        self.assertTrue(record['passed'], record['grade'])
+        self.assertEqual(self.main_loop(), [('claude-sonnet-5-5', 'low')]*4 + [('claude-opus-5-5', 'low')]*3)
+        routing = record['routing']
+        self.assertEqual((routing['benchmark_eligible'], routing['advisor']['calls']), (True, 0))
+        self.assertEqual([(d['trigger'], d['action'], d['reason']) for d in routing['policy']['decisions']],
+                         [('turn_start', 'stay', 'current_is_cheapest'),
+                          ('stuck_evidence', 'jump', 'stuck_escalation')])
+        self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
 
     def test_per_message_effort_through_the_real_client(self):
         """With per-message effort on, the jump to Jev's effort rides in an effort-only system message: every main-loop
@@ -426,11 +448,29 @@ class ToolTrialTests(unittest.TestCase):
         self.assertEqual((len(policy['stops']), policy['refusals']), (1, ['policy_stop:no_stronger_setting']))
         self.assertTrue(record['accounting']['cost_complete'], record['accounting'])
 
-    def test_without_a_typesafe_key_the_arm_stays_at_its_start_and_is_ineligible(self):
+    def test_the_shipped_arm_has_no_advisor_stays_at_its_start_and_is_eligible(self):
+        """User decision, October 11: Jev no longer advises the ModelPilot arms; a trial needs no TypeSafe key."""
         script = [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
                   {'tool': 'Bash', 'input': {'command': 'python3 -m unittest 2>&1 | tail -3', 'description': 'tests'}},
                   {'text': 'Done.'}]
         with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG):
+            record = self.modelpilot_trial('unadvised', script, bench.arm_adapter('modelpilot', 1, 1),
+                                           rates=self.OPUS_RATES)  # Opus 5.5 is a measured candidate
+        self.assertTrue(record['passed'], record['grade'])
+        self.assertEqual(set(self.main_loop()), {('claude-sonnet-5-5', 'low')})
+        routing = record['routing']
+        self.assertEqual((routing['benchmark_eligible'], routing.get('ineligible_reason')), (True, None))
+        self.assertEqual((routing['advisor']['live'], routing['advisor']['calls']), (False, 0))
+        turn = routing['policy']['decisions'][0]
+        self.assertEqual((turn['trigger'], turn['action'], turn['reason']), ('turn_start', 'stay', 'current_is_cheapest'))
+        self.assertIsNone(turn['jev'])
+        self.assertEqual(record['accounting']['cost_scope'], 'complete')  # no unpriced router calls
+
+    def test_without_a_typesafe_key_an_advised_arm_stays_at_its_start_and_is_ineligible(self):
+        script = [{'tool': 'Write', 'input': {'file_path': 'pkg/__init__.py', 'content': synthetic.FIXED}},
+                  {'tool': 'Bash', 'input': {'command': 'python3 -m unittest 2>&1 | tail -3', 'description': 'tests'}},
+                  {'text': 'Done.'}]
+        with mock.patch.object(fixtures, 'CATALOG', ACCOUNT_CATALOG), advised('modelpilot'):
             record = self.modelpilot_trial('no-key', script, bench.arm_adapter('modelpilot', 1, 1))
         self.assertTrue(record['passed'], record['grade'])
         self.assertEqual(set(self.main_loop()), {('claude-sonnet-5-5', 'low')})  # low concise since October 6

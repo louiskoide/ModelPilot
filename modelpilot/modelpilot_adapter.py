@@ -3,8 +3,9 @@
 Observe-only by default. tools=True adds the R5 tools (bench_tools MCP server). A
 fixture_policy (the owned fixtures.FixtureServer) applies ladder escalations offline; those
 trials stay ineligible for comparisons. mode='active' runs the arm's policy
-(active_policy.ActivePolicy, user-approved for the benchmark arm only) with Jev as its advisor;
-only such trials with a live advisor and the complete catalog are benchmark-eligible. The active
+(active_policy.ActivePolicy, user-approved for the benchmark arm only), without an advisor since
+October 11 (an advised arm has Jev as its advisor). Active trials with the complete catalog are
+benchmark-eligible; an advised arm's also need its live advisor. The active
 arm declares the correction channel only while delegation is on: nothing else speaks to the agent.
 """
 import hashlib
@@ -66,7 +67,8 @@ class ModelPilotAdapter:
     key=''
 
     def __init__(self,limit_usd=1.,mode='dry-run',tools=False,threshold=8192,fixture_policy=None,
-                 arm_id='modelpilot',model='claude-sonnet-5-5',effort='medium',advisor=None,models=None,overrides=None):
+                 arm_id='modelpilot',model='claude-sonnet-5-5',effort='medium',advisor=None,models=None,overrides=None,
+                 advised=False):
         from .policy_actions import MODELS,setting
         setting(model,effort)
         if model==MODELS[0]:
@@ -82,12 +84,13 @@ class ModelPilotAdapter:
         if isinstance(threshold,bool) or not isinstance(threshold,int) or threshold<256:
             raise ValueError('Excerpt threshold must be an integer of at least 256 bytes')
         self.policy,self.advisor,self.models,self.catalog,self.overrides=None,advisor,models,None,overrides
+        self.advised=advised or advisor is not None  # an arm built with Jev as advisor needs its live answers
         self.channel=True  # the observer and fixture modes keep the declared channel
         if mode=='active':
             from . import switch_policy
             from .active_policy import ActivePolicy
             config=switch_policy.with_overrides(switch_policy.load(),overrides)
-            self.policy=ActivePolicy(self.model,OWNER,advisor=advisor,config=config)
+            self.policy=ActivePolicy(self.model,OWNER,advisor=advisor,config=config,advised=self.advised)
             self.channel=switch_policy.delegating(config)
         elif overrides:
             raise ValueError('Policy overrides apply to the active arm only')
@@ -225,8 +228,9 @@ class ModelPilotAdapter:
         catalog_ok=bool(self.catalog) and self.catalog.get('status')==200 and set(self.catalog.get('models') or [])==set(self.models or ())
         from . import switch_policy
         exploring=bool(active and hasattr(self.policy,'config') and switch_policy.exploration(self.policy.config)['enabled'])
-        # The exploration arm has no advisor by design: its moves are drawn at random, not advised.
-        eligible=active and (live or exploring) and catalog_ok
+        # Arms without an advisor by design (every ModelPilot arm since October 11, and the exploration arm, whose moves
+        # are drawn at random) are eligible without one; an advised arm needs Jev's live answers.
+        eligible=active and (live or not self.advised) and catalog_ok
         out={'kind':'modelpilot_policy','mode':mode,'applied':any(r.get('applied') for r in messages),
              'active_policy_implemented':active,'benchmark_eligible':eligible,
              'tools':{'enabled':self.tools,'threshold_bytes':self.threshold,'calls':tool_calls},
