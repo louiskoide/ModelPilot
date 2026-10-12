@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Updated October 10, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
+Updated October 11, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
 
 ## Objective
 
@@ -29,6 +29,7 @@ Files are under `runs/`; the full table, failures included: `docs/evidence.md`.
 - Cheapest at equal quality: `sonnet-5.5-low-concise`, $0.0689 a task, $0.0180 below Sonnet 5.5 medium on 23 tuning tasks (`paired-low-concise-23-20261004.json`); $0.107 against $0.140 on networkx.
 - Sonnet 5.5 falls short (strict) on `parse-decimal-grouping` (medium 1/6, Opus 4/4), `tomli-decode-error-attrs` (0/10, 2/4) and `nx-ismags-monomorphism` (5/8, 4/4). Every Sonnet/Opus failure reported success; a redo costs about $0.25 a task (`redo-cost-20261004.json`).
 - The ModelPilot arm never left low concise on the 29 tuning tasks (`bench-20261006-134508`): +$0.0045 a task against it, no difference shown; a third of Opus 5.5's cost, 0.915 against 0.981 strict (`opus-vs-modelpilot-20261006.json`). `jev_weight` 0.03 (maximum likelihood 0): Jev doesn't predict the misses.
+- Item 8: no turn-start rule finds misses (38 tasks; strict low concise 95.5%, Sonnet medium 93.2%, Opus 100%; `item8-prereg-score-20261011.json`).
 - A forced Opus review at the finish rescued none of 27 tuning tasks (26/27 strict either way), +$0.069 a task (`bench-20261006-093401`).
 - Cache writes are about 45% of cost, mostly growth, never rebuilds (`cache-write-sources-20261003.json`). Tool-result bytes are 80–90% source read or searched, 6–10% test output (`tool-result-split-20261005.txt`).
 
@@ -78,9 +79,9 @@ Built offline first; live runs need the user's approval. 1–4 done October 6; 4
 5. Dropped for the quality floor (user decision, October 8).
 6. Long sessions, mid-task compaction (`split` shape): built offline; runs await approval.
 7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
-8. 30 labelling tasks: built offline; runs await approval.
+8. Done Oct 11: fail.
 9. Caveman: parked (user decision); its $0 pass found at most 1%, all lossy.
-10. Per-task floor evidence (a predictor) only if 8 shows misses predictable; never edit Jev. Next: blast radius at the first edit (`exposure`).
+10. Dropped (8 failed); Jev's advisor role: user's call.
 11. 4b held (user decision; its trial-count rule gives n=1).
 12. Governor: live evidence for turn-end delivery and observed rebuilds; dry-run meanwhile.
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.

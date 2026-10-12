@@ -784,6 +784,40 @@ Also reported, outside the verdict: each rule's flags against Y_S and Y_O, its e
 - **Jev's features** must cover every test task. The collection's `--tasks test` captures the sqlglot tasks too; all 38 were captured and dry-run on October 10.
 - **Scoring:** the same script, amended, SHA-256 `798cd2065de5f5da18ef3515467c02834bf2584c2db5028ef0d3599db1ca55c0`. The version first committed (`8e5bf2fb4581b74c82e81d8a7cac33111bca8fd1a5379d84c2becb81cc758d24`) is kept as `runs/item8-prereg-score-20261010-v1.py`. Its `--dev` run still gives "fail" on the 29 earlier tasks, with the same flags and p-values.
 
+### Item 8 result (October 11, $0 scoring): fail
+
+The amended script (SHA-256 `798cd206…`, checked before scoring) over item 8's runs: `runs/item8-prereg-score-20261011.json`. 36 runs (`bench-20261010-183249` to `bench-20261011-173815`), subscription, seed 8, no retries: 342 trials run, $36.10 as sent, $0 API. 266 count (114 low concise, 76 Sonnet 5.5 medium, 76 Opus 5.5 medium, every task at its target). The other 76 were lost to network drops and one 429; the missing trials were rerun into new run directories (`runs/item8-rerun-20261010.sh`).
+
+**Verdict: fail.** m = 6 of 38, and no rule passes:
+
+| Rule | Caught | p | 5p | Pooled AUC (67 tasks) |
+| --- | --- | --- | --- | --- |
+| R1 Jev task complexity | 3/6 | 0.328 | 1 | 0.535 |
+| R2 Jev P(Opus 5.5) | 2/6 | 0.686 | 1 | 0.494 |
+| R3 Jev effort index | 2/6 | 0.686 | 1 | 0.506 |
+| R4 instruction length | 3/6 | 0.328 | 1 | 0.565 |
+| R5 stated expectations | 3/6 | 0.953 | 1 | 0.526 |
+
+As committed, item 10 is dropped and Jev's advisor role goes to the user. Reported only: Y_S has 2 tasks and Y_O 4. R1 and R4 flag both Y_S tasks, and R4 flags 3 of the Y_O tasks; with so few positives that is descriptive, not a test.
+
+**Pass rates (counted trials, strict).** API-key-equivalent cost as measured, a trial:
+
+| Setting | Passes | Without petersen | Mean cost |
+| --- | --- | --- | --- |
+| Sonnet 5.5 low concise | 106/114 | 106/111 | $0.063 |
+| Sonnet 5.5 medium | 69/76 | 69/74 | $0.073 |
+| Opus 5.5 medium | 74/76 | 74/74 | $0.216 |
+
+The M tasks: `mi-subfactorial` (low concise 1/3, Sonnet medium 0/2, Opus 2/2), `nx-tree-centroid` (2/3, 0/2, 2/2), `nx-edge-betweenness-k-scaling` (2/3, 2/2, 2/2), `sqlglot-duckdb-macro-overloads` (2/3, 2/2, 2/2), `nx-floyd-warshall-negative-cycle` (3/3, 1/2, 2/2) and `nx-generalized-petersen` (0/3, 0/2, 0/2).
+
+**`nx-generalized-petersen` was a defective spec.** Every trial failed one hidden assertion, `pytest.raises(..., match="Directed Graph not supported ")`, with a trailing space. The instruction said only that the message starts with 'Directed Graph not supported', and all 21 recorded diffs (lost trials included) raised exactly that. Their graphs were right: GP(10, 4) has diameter and radius 4, as stated. The instruction now gives the reference's full message, `'Directed Graph not supported in create_using'`, and the spec's tuning hash is updated (October 11). The verdict stands as scored. Without the task (37 tasks, 5 M) it is still fail: R1 and R4 catch 3/5 at p 0.223.
+
+**What it shows.**
+- Nothing ModelPilot knows at a turn start separates the misses, as item 4 found on 29 tasks.
+- For a Sonnet user, low concise holds the floor: it misses no more than Sonnet medium (95.5% against 93.2% without petersen).
+- For an Opus user it doesn't: low concise misses where Opus passes on 4 of 37 valid tasks (Y_O), and nothing here predicts which.
+- sqlglot stage 1 is too easy to separate settings: 1 miss in 56 counted trials (low concise on duckdb, 1 of 3).
+
 ### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
 
 User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku passes, the tests are too easy"), so harder tasks come before item 8's labels, from sqlglot (MIT; surveyed October 4, above), in stages. Stage 1 builds 8 tasks and screens them with one low concise and one Opus 5.5 trial each; a full batch follows only if the repository produces misses. sqlglot joins the tuning split; the final split and its lock are unchanged.
@@ -818,7 +852,7 @@ User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku 
 
 **The screen (not run; the user's go).** `sonnet-5.5-low-concise` and `opus-5.5` × 1 on the 8 tasks, seed 12, on the subscription: $0 API, roughly $2.50–5 API-key equivalent (sqlglot's modules are large, so sessions may read more than the tuning tasks' do) and about 20–30 minutes after a 3-minute preflight. Script: `runs/sqlglot-screen-20261010.sh` (not committed). It decides only whether to build a second batch, never which tasks enter item 8.
 
-**The screen, run October 10** (`bench-20261010-173816`): half was lost to a network outage. 8 of 16 trials failed with `transport_error` from 18:03 to 18:09, before any model work. The 8 usable trials all passed strictly: Opus 5.5 5/5, low concise 3/3. Next: rerun the 8 lost trials, then decide on stage 2. Details: `docs/changelog.md`, October 10 (evening).
+**The screen, run October 10** (`bench-20261010-173816`): half was lost to a network outage. 8 of 16 trials failed with `transport_error` from 18:03 to 18:09, before any model work. The 8 usable trials all passed strictly: Opus 5.5 5/5, low concise 3/3. Details: `docs/changelog.md`, October 10 (evening). The rerun of the 8 lost trials is no longer needed: item 8's runs gave each stage 1 task 7 counted trials, with one miss (see "Item 8 result"). Whether to build stage 2 is the user's call.
 
 ### Caveman's engine over recorded tool results (plan item 9, first step; October 6, $0)
 
