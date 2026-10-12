@@ -1,0 +1,61 @@
+{
+  "id": "sqlglot-postgres-create-trigger",
+  "repo": "sqlglot",
+  "url": "https://github.com/tobymao/sqlglot",
+  "license": "MIT",
+  "test_dir": "tests/dialects",
+  "pythonpath": ".",
+  "requires_python": "3.12",
+  "suite_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests",
+    "--ignore=tests/dialects/test_bigquery.py",
+    "--ignore=tests/test_optimizer.py",
+    "--ignore=tests/test_executor.py",
+    "--ignore=tests/test_expressions.py",
+    "--deselect",
+    "tests/dialects/test_dialect.py::TestDialect::test_lazy_load"
+  ],
+  "type": "feature",
+  "base": "aa142974382fa4115234834e082ca594e00eefa4",
+  "reference": "3e0f11abbdabf2e203e2f5777aa678a7735e14c7",
+  "fix_commits": [
+    "f6cbd27fd61937efba6879f20f5ff0239e678469",
+    "3e0f11abbdabf2e203e2f5777aa678a7735e14c7"
+  ],
+  "hidden_tests": [
+    "tests/dialects/test_mysql.py",
+    "tests/dialects/test_oracle.py",
+    "tests/dialects/test_postgres.py",
+    "tests/dialects/test_sqlite.py",
+    "tests/dialects/test_tsql.py"
+  ],
+  "hidden_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests/dialects/test_mysql.py",
+    "tests/dialects/test_oracle.py",
+    "tests/dialects/test_postgres.py",
+    "tests/dialects/test_sqlite.py",
+    "tests/dialects/test_tsql.py"
+  ],
+  "setup_files": {
+    "sqlglot/_version.py": "__version__ = '0.0.0'\n__version_tuple__ = (0, 0, 0)\n"
+  },
+  "source": "https://github.com/tobymao/sqlglot/commit/f6cbd27fd61937efba6879f20f5ff0239e678469 and https://github.com/tobymao/sqlglot/commit/3e0f11abbdabf2e203e2f5777aa678a7735e14c7",
+  "instruction": "Give PostgreSQL's CREATE TRIGGER (https://www.postgresql.org/docs/current/sql-createtrigger.html) a structured parse in sqlglot; today it falls back to an opaque exp.Command. The grammar to support:\n`CREATE [OR REPLACE] [CONSTRAINT] TRIGGER name {BEFORE | AFTER | INSTEAD OF} event [OR event ...] ON table [FROM referenced_table] [[NOT] DEFERRABLE [INITIALLY {IMMEDIATE | DEFERRED}]] [REFERENCING {OLD | NEW} TABLE [AS] name [{OLD | NEW} TABLE [AS] name]] [FOR EACH {ROW | STATEMENT}] [WHEN (condition)] EXECUTE {FUNCTION | PROCEDURE} function_name(arguments)`, an event being INSERT, UPDATE [OF column [, ...]], DELETE or TRUNCATE.\nSuch a statement parses to an exp.Create of kind \"TRIGGER\" (with `replace` set for OR REPLACE) whose `this` is the trigger's name and whose properties hold one new exp.TriggerProperties node, with these args:\n- `table` and `referenced_table`: the tables, as exp.Table;\n- `timing`: \"BEFORE\", \"AFTER\" or \"INSTEAD OF\";\n- `events`: a list of new exp.TriggerEvent nodes, `this` the event (\"INSERT\", \"UPDATE\", \"DELETE\" or \"TRUNCATE\") and `columns` an UPDATE OF's columns;\n- `execute`: a new exp.TriggerExecute whose `this` is the function call;\n- `constraint`: true for a CONSTRAINT TRIGGER;\n- `deferrable`: \"DEFERRABLE\" or \"NOT DEFERRABLE\", and `initially`: \"IMMEDIATE\" or \"DEFERRED\";\n- `referencing`: a new exp.TriggerReferencing whose `old` and `new` are the transition tables' names;\n- `for_each`: \"ROW\" or \"STATEMENT\", and `when`: the condition.\nIt is written back in the order above, with AS before a transition table's name, EXECUTE FUNCTION in place of EXECUTE PROCEDURE (the older spelling of the same thing), and the function call as sqlglot writes any call. A trigger that doesn't fit this grammar, such as MySQL's, Oracle's, SQLite's or T-SQL's with a BEGIN ... END body, still falls back to an exp.Command with sqlglot's usual \"contains unsupported syntax\" warning, and is written back unchanged.\nParsed and written with PostgreSQL (input -> output; written back unchanged where no output is given):\n- CREATE CONSTRAINT TRIGGER my_trigger AFTER INSERT OR DELETE OR UPDATE OF col_a, col_b ON public.my_table DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION DO_STH()\n- CREATE TRIGGER check_update BEFORE UPDATE ON accounts FOR EACH ROW EXECUTE FUNCTION CHECK_ACCOUNT_UPDATE()\n- CREATE TRIGGER log_insert AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION LOG_CHANGES()\n- CREATE TRIGGER audit_changes AFTER INSERT OR UPDATE OR DELETE ON products FOR EACH ROW EXECUTE FUNCTION AUDIT_LOG()\n- CREATE TRIGGER check_balance BEFORE UPDATE OF balance, status ON accounts FOR EACH ROW EXECUTE FUNCTION VALIDATE_BALANCE()\n- CREATE TRIGGER conditional_trigger BEFORE UPDATE ON users FOR EACH ROW WHEN (OLD.id <> NEW.id) EXECUTE FUNCTION CHECK_ID_CHANGE()\n- CREATE TRIGGER statement_trigger AFTER INSERT ON orders FOR EACH STATEMENT EXECUTE FUNCTION UPDATE_SUMMARY()\n- CREATE TRIGGER instead_trigger INSTEAD OF INSERT ON user_view FOR EACH ROW EXECUTE FUNCTION HANDLE_INSERT()\n- CREATE OR REPLACE TRIGGER replace_trigger BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION LOG_INSERT()\n- CREATE TRIGGER param_trigger BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION LOG_WITH_PARAMS('insert', 'users')\n- CREATE TRIGGER my_trigger BEFORE INSERT ON myschema.users FOR EACH ROW EXECUTE FUNCTION LOG_CHANGES()\n- CREATE TRIGGER truncate_trigger BEFORE TRUNCATE ON users FOR EACH STATEMENT EXECUTE FUNCTION LOG_TRUNCATE()\n- CREATE TRIGGER complex_when BEFORE UPDATE ON accounts FOR EACH ROW WHEN (OLD.balance IS DISTINCT FROM NEW.balance AND NEW.balance > 0) EXECUTE FUNCTION CHECK_BALANCE()\n- CREATE TRIGGER emp_stamp BEFORE INSERT OR UPDATE ON emp FOR EACH ROW EXECUTE FUNCTION EMP_STAMP()\n- CREATE TRIGGER view_insert INSTEAD OF INSERT ON my_view FOR EACH ROW EXECUTE FUNCTION VIEW_INSERT_ROW()\n- CREATE TRIGGER check_update BEFORE UPDATE OF balance ON accounts FOR EACH ROW EXECUTE FUNCTION CHECK_ACCOUNT_UPDATE()\n- CREATE TRIGGER restock AFTER UPDATE ON products FOR EACH ROW WHEN (OLD.count <> NEW.count) EXECUTE FUNCTION RESTOCK_ITEM()\n- CREATE TRIGGER multi_col_update BEFORE UPDATE OF col1, col2, col3, col4 ON accounts FOR EACH ROW EXECUTE FUNCTION CHECK_COLUMNS()\n- CREATE TRIGGER all_events AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON audit_table FOR EACH STATEMENT EXECUTE FUNCTION LOG_ALL_CHANGES()\n- CREATE TRIGGER track_new_rows AFTER INSERT ON users REFERENCING NEW TABLE AS new_data FOR EACH STATEMENT EXECUTE FUNCTION PROCESS_NEW_USERS()\n- CREATE TRIGGER track_changes AFTER UPDATE ON accounts REFERENCING OLD TABLE AS old_data NEW TABLE AS new_data FOR EACH STATEMENT EXECUTE FUNCTION COMPARE_CHANGES()\n- CREATE TRIGGER statistics_update AFTER UPDATE ON sales REFERENCING OLD TABLE AS old_sales NEW TABLE AS new_sales FOR EACH STATEMENT EXECUTE FUNCTION UPDATE_STATISTICS()\n- CREATE CONSTRAINT TRIGGER check_integrity AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION VALIDATE_USER()\n- CREATE CONSTRAINT TRIGGER deferred_check AFTER INSERT ON orders DEFERRABLE FOR EACH ROW EXECUTE FUNCTION CHECK_ORDER()\n- CREATE CONSTRAINT TRIGGER deferred_check AFTER INSERT ON orders DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION CHECK_ORDER()\n- CREATE CONSTRAINT TRIGGER immediate_check AFTER INSERT ON orders NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION CHECK_ORDER()\n- CREATE CONSTRAINT TRIGGER fk_check AFTER UPDATE ON orders FROM users FOR EACH ROW EXECUTE FUNCTION CHECK_FOREIGN_KEY()\n- CREATE CONSTRAINT TRIGGER fk_check AFTER UPDATE ON orders FROM public.users FOR EACH ROW EXECUTE FUNCTION CHECK_FOREIGN_KEY()\n- CREATE CONSTRAINT TRIGGER if_dist_exists AFTER INSERT OR UPDATE ON films DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION CHECK_FOREIGN_KEY('distributors', 'did')\n- CREATE CONSTRAINT TRIGGER check_fk AFTER INSERT ON orders FROM customers FOR EACH ROW EXECUTE FUNCTION CHECK_CUSTOMER_EXISTS()\n- CREATE CONSTRAINT TRIGGER complex_trigger AFTER UPDATE OF col1, col2 ON mytable FROM reftable DEFERRABLE INITIALLY DEFERRED REFERENCING OLD TABLE AS old_data NEW TABLE AS new_data FOR EACH STATEMENT WHEN (OLD.status <> NEW.status) EXECUTE FUNCTION COMPLEX_CHECK('param1', 'param2')\n- CREATE TRIGGER \"MyTrigger\" BEFORE INSERT ON \"MyTable\" FOR EACH ROW EXECUTE FUNCTION MYFUNCTION()\n- CREATE TRIGGER proc_trigger BEFORE INSERT ON users FOR EACH ROW EXECUTE PROCEDURE LOG_CHANGES() -> CREATE TRIGGER proc_trigger BEFORE INSERT ON users FOR EACH ROW EXECUTE FUNCTION LOG_CHANGES()\nStill a Command, with the warning, and written back unchanged by its own dialect:\n- MySQL: CREATE TRIGGER check_age BEFORE INSERT ON users FOR EACH ROW BEGIN SET NEW.created_at = NOW() END\n- MySQL: CREATE TRIGGER audit_update AFTER UPDATE ON accounts FOR EACH ROW BEGIN INSERT INTO audit_log (user_id, old_balance, new_balance, changed_at) VALUES (OLD.user_id, OLD.balance, NEW.balance, NOW()) END\n- MySQL: CREATE TRIGGER track_deletes BEFORE DELETE ON orders FOR EACH ROW BEGIN UPDATE statistics SET delete_count = delete_count + 1 WHERE table_name = 'orders' END\n- Oracle: CREATE TRIGGER check_salary BEFORE INSERT ON employees FOR EACH ROW BEGIN :NEW.status := 'PENDING' END\n- Oracle: CREATE TRIGGER audit_trigger AFTER UPDATE ON accounts FOR EACH ROW BEGIN INSERT INTO audit_log (user_id, old_balance, new_balance, changed_at) VALUES (:OLD.id, :OLD.balance, :NEW.balance, SYSDATE) END\n- Oracle: CREATE TRIGGER view_insert INSTEAD OF INSERT ON employee_view FOR EACH ROW BEGIN INSERT INTO employees (id, name, dept_id) VALUES (:NEW.id, :NEW.name, :NEW.dept_id) END\n- SQLite: CREATE TRIGGER log_insert AFTER INSERT ON users BEGIN INSERT INTO audit_log (user_id, action, created_at) VALUES (NEW.id, 'INSERT', datetime('now')) END\n- SQLite: CREATE TRIGGER check_balance BEFORE UPDATE OF balance ON accounts WHEN NEW.balance < 0 BEGIN UPDATE accounts SET balance = 0 WHERE id = NEW.id END\n- SQLite: CREATE TRIGGER view_insert INSTEAD OF INSERT ON employee_view BEGIN INSERT INTO employees (id, name, department) VALUES (NEW.id, NEW.name, NEW.department) END\n- T-SQL: CREATE TRIGGER reminder ON customers AFTER INSERT AS BEGIN INSERT INTO audit_log (customer_id, action, created_at) SELECT id, 'INSERT', GETDATE() FROM inserted END\n- T-SQL: CREATE TRIGGER updview ON vw_employees INSTEAD OF UPDATE AS BEGIN UPDATE employees SET salary = inserted.salary FROM inserted WHERE employees.id = inserted.id END\n- T-SQL: CREATE TRIGGER ddl_trig ON DATABASE FOR CREATE_TABLE AS BEGIN INSERT INTO schema_changes (event_type, event_time, login_name) VALUES ('CREATE_TABLE', GETDATE(), SYSTEM_USER) END\nAdd tests.",
+  "batch": "sqlglot-stage-2",
+  "notes": "Harder tuning tasks, stage 2 (built October 11, 2026, unattended at the user's request; not screened): sqlglot (MIT), mined from 2026 commits whose subject and body credit no agent, with hidden tests outside the test files that need pytz, duckdb or pandas (the suite leaves those out, and test_lazy_load, which runs a bare `python`). Stage 2 takes the larger behavioural commits stage 1 left, without long arbitrary templates. Tuning only. This task's reference is the fix commit plus the maintainer's same-day, source-only follow-up (fix_commits): the fix commit alone fails its own WHEN tests (a `_pasre_wrapped` typo).",
+  "instruction_source": "written from the fix commit message and the hidden tests (the linked pull request not read), plus the reference's code for the tree the instruction names and the edge suite checks (exp.TriggerProperties and its args); describes behavior, not the change"
+}
