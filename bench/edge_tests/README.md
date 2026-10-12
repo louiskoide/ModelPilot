@@ -157,6 +157,7 @@ what sqlglot writes in SQLite and checks the column's storage (`PRAGMA table_xin
 | sqlglot-snowflake-corr-nan | 5 | 2 |
 | sqlglot-snowflake-filter-within-group | 5 | 1 |
 | sqlglot-sqlite-generated-columns | 4 | 1 |
+| sqlglot-postgres-create-trigger (optional, branch `sqlglot-trigger-task`) | 5 | 1 |
 
 Known label caveat (user decision, October 6, 2026: noted, suite unchanged):
 
