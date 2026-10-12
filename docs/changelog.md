@@ -2,6 +2,25 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 11, 2026: item 8 scored: fail; a defective task spec fixed
+
+$0 scoring, the user's runs. Details: `docs/m6-benchmark-plan.md`, "Item 8 result".
+
+- **Runs:** 36 runs (`bench-20261010-183249` to `bench-20261011-173815`), subscription, seed 8, no retries. 342 trials run, $36.10 as sent, $0 API.
+  - 266 trials count: low concise ×3, Sonnet 5.5 medium ×2 and Opus 5.5 medium ×2 on all 38 test tasks.
+  - The other 76 were lost to network drops on October 10 and 11 (`transport_error`) and one 429. They were rerun into new run directories by `runs/item8-rerun-20261010.sh` (not committed), which counts trials as the scorer does.
+- **Verdict: fail** (`runs/item8-prereg-score-20261011.json`, scored with the amended script, its SHA-256 checked). m = 6 of 38. The best rules (Jev's task complexity, instruction length) catch 3/6 at p 0.33, so 5p is 1. Pooled AUCs are 0.49–0.57. As committed, item 10 is dropped, and Jev's advisor role goes to the user.
+- **Pass rates (strict):**
+  - Low concise 106/114, $0.063 a trial.
+  - Sonnet 5.5 medium 69/76, $0.073.
+  - Opus 5.5 medium 74/76, $0.216.
+  - Without the defective task: 95.5%, 93.2% and 100%.
+  - Low concise misses where Opus passes on 4 tasks: subfactorial, tree centroid, edge betweenness, duckdb macros.
+- **Defective spec, `nx-generalized-petersen`:** every trial of every setting failed it. The hidden test matches `"Directed Graph not supported "` (trailing space), but the instruction gave only the message's start, `'Directed Graph not supported'`, which all 21 recorded diffs raised. The instruction now gives the reference's full message, and its tuning hash in `bench/splits.json` is updated; the final split and its lock are unchanged. The verdict stands as scored; without the task it is still fail (3/5 caught at best, p 0.22).
+  - Not revalidated: `bench_tasks validate` writes into the shared `work/` checkout and wasn't run. The change touches only the instruction, which grading doesn't read.
+- **sqlglot stage 1** gave one miss in 56 counted trials, so the screen's 8 lost trials (PR 50's next step) won't be rerun. Stage 2 is the user's call.
+- **Tests:** 728 of 729 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/item8-result-regression-py312.log`). The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-item8-result`).
+
 ## October 10, 2026 (evening): the sqlglot screen, half lost to a network outage; Jev's answers collected
 
 $0 API. The user's runs: the screen (`runs/bench-20261010-173816`, commit `8f88cca`, subscription, seed 12, no retries) and the Jev collection (TypeSafe, unpriced).

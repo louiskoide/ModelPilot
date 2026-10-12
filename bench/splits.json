@@ -44,7 +44,7 @@
   "nx-dominating-set-greedy-cost": "7101bf96feecdf5b9a29bb39de951a43cd7dbc0e262adb5d5e680875691495d3",
   "nx-edge-betweenness-k-scaling": "8956deacfedd9e579201839621414360c9f217db2af1e00c7f19c638eca9f299",
   "nx-floyd-warshall-negative-cycle": "6d7ed4dd8c98d29bf0c3c08443eb59638fe0f8f076d0483626f339f09b5c769e",
-  "nx-generalized-petersen": "36953e5b02029b65b985e4583cc05841bd95f5c48f79ffcedee46755f6efd8ad",
+  "nx-generalized-petersen": "e3f9de2a4e277286e4e17695b9c915dce929d634036c05109b89f298f8612112",
   "nx-gexf-dynamic-booleans": "ef1f96763b7db1e95af56538cb0d5da8fb3ad6200c1306d8e135e9a76d78b0f4",
   "nx-hyper-wiener-index": "e540c8ac26b5a1844a58a0854e9c9c0873af9f8d72181e9a05a13f72c61d66f6",
   "nx-is-perfect-graph": "870ea35d07068c04ec6e27c560d94e3a98761d854610899cbdbd1c75535d5ce0",
