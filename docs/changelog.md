@@ -24,6 +24,15 @@ $0, user request (item E of the night's list), built unattended; not run. Detail
 - **Proposed run** (the user's go; API key): `runs/governor-live-20261012.sh --live` (not committed), about $0.10–0.30 and 7 minutes.
 - **Tests:** 736 of 737 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/governor-live-regression-py312.log`), run under `nice` beside the live mid-task compaction run. The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-governor-live`).
 
+## October 12, 2026 (night): a trial that lost its connection no longer counts as a failure (proposed, offline)
+
+$0, found unattended while checking the mid-task compaction run (`bench-20261011-234003`); on its own branch, `exclude-transport-errors`, because it changes how a pre-registered comparison is counted. Details: `docs/m6-benchmark-plan.md`, "Mid-task compaction", "Lost connections".
+
+- **The problem.** `bench` sets `complete` from stop reasons, account errors and rate limits only, so a trial whose session ended on `transport_error` counts as complete, and its checkout is graded as the dropped session left it. `bench_report` and `midtask_compaction.report` then counted it a failure. Item 8's scorer dropped such trials; nothing else did. In the compaction run, 4 of the first 5 were in `sonnet-5.5-low-concise-compact`, each graded a failure because its fix turn never ran.
+- **The change:** `bench_report.ineligible_reason` returns `transport_error` for any trial with such a session, whatever its grade, so every report built on it leaves the trial out and lists it. Records without sessions are unchanged. New: `test_a_trial_whose_session_lost_its_connection_is_excluded_whatever_its_grade`.
+- **On the compaction run as it stopped** (55 of 99 trials, a 429 at 01:33; 8 lost connections: 3 control, 5 Sonnet-summary): pooled strict passes, control 14/16 counting them and 12/13 without, Sonnet's summary 16/25 and 16/20, Haiku's 8/13 either way. Not the pre-registered paired analysis, and the run is incomplete.
+- **Tests:** 735 of 736 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/exclude-transport-errors-regression-py312.log`). The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-transport`).
+
 ## October 12, 2026 (night): an optional seventh sqlglot task, Postgres CREATE TRIGGER, and the validation rule it needs (offline)
 
 $0, built unattended on its own branch (`sqlglot-trigger-task`, on top of stage 2) because adopting it is the user's call. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 2", optional seventh task.

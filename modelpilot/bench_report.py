@@ -561,11 +561,16 @@ def pair_summary(a, b, cells_a, cells_b, rng, resamples, scopes=('complete', 'co
 
 
 def ineligible_reason(record):
-    """Why a trial is excluded from comparisons, or None: its router or adapter says so, or a fixed arm's
-    requested effort, appended system prompt, cache lifetime or compaction model didn't reach the wire."""
+    """Why a trial is excluded from comparisons, or None: its router or adapter says so, a session ended on a lost
+    connection, or a fixed arm's requested effort, appended system prompt, cache lifetime or compaction model didn't
+    reach the wire."""
     routing = record.get('routing') or {}
     if routing.get('benchmark_eligible') is False:
         return routing.get('ineligible_reason', 'adapter_not_benchmark_eligible')
+    # The connection failed, not the model (October 12): such a trial says nothing about the model, whatever it was
+    # graded. bench marks it complete, so until now every report counted it as a failure; item 8's scorer dropped it.
+    if any(s.get('stop') == 'transport_error' for s in record.get('sessions') or ()):
+        return 'transport_error'
     if (record.get('effort_check') or {}).get('applied') is False:
         return 'effort_not_applied'
     if (record.get('prompt_check') or {}).get('applied') is False:
