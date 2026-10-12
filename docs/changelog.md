@@ -2,6 +2,16 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 12, 2026 (night): harder tasks, sqlglot stage 2: 6 tasks built (offline)
+
+$0, user request (item D of the night's list), built unattended while the mid-task compaction run went on; nothing screened. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 2".
+
+- **6 tasks** from the larger behavioural 2026 commits stage 1 left (61–82 source lines over 2–7 files), all valid (`runs/bench-validate-20261012-001546.json`), each with a 4–5-test edge suite the reference passes in full (`bench/edge_tests/README.md`). They join `bench/splits.json` under `tuning` (73 tuning tasks); the final split and its lock are unchanged.
+  - `sqlglot-snowflake-filter-within-group`, `sqlglot-dax-dialect` (a new dialect), `sqlglot-from-first-multi-insert`, `sqlglot-array-append-nulls`, `sqlglot-snowflake-corr-nan`, `sqlglot-sqlite-generated-columns`.
+- **Left out:** 22 of the 28 remaining candidates, as refactors, long arbitrary templates or no harder than stage 1. The strongest, Postgres CREATE TRIGGER (269 lines), fails its own tests at its commit (a `_pasre_wrapped` typo that the next commit fixed), so it needs a reference one commit later, which `validate` refuses: the user's call.
+- **Proposed** (the user's go): the stage 1 screen on these six, `runs/sqlglot-stage2-screen-20261012.sh` (not committed): subscription, $0 API, about $3.70 as sent, about 25 minutes.
+- **Tests:** 734 of 735 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/sqlglot-stage2-regression-py312.log`), run under `nice` beside the live mid-task compaction run. The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-sqlglot-2`).
+
 ## October 11, 2026 (night): 4b made ready to run, still held; the plan text of ModelPilot arms fixed (offline)
 
 $0, user request (item C of the night's list): build what 4b needs short of running it. Nothing ran. Details: `docs/m6-benchmark-plan.md`, "4b, ready to run".
