@@ -55,6 +55,17 @@ $0, user request (item C of the night's list): build what 4b needs short of runn
 - Final specs unchanged since the lock (`bench_tasks.check_lock`, October 11).
 - **Tests:** 735 of 736 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/final-split-plan-regression-py312.log`), run under `nice` beside the live mid-task compaction run. The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-final-split`).
 
+## October 11, 2026 (night): long sessions on Opus 5.5: a fresh estimate and two lifetime arms (offline)
+
+$0, user request (item B of the night's list): where could `modelpilot-for-opus` save, given that it just runs Opus 5.5 medium? Built unattended while the mid-task compaction run went on; no run started. Details: `docs/m6-benchmark-plan.md`, "Fresh estimate, with Opus 5.5".
+
+- **Forecast** (`runs/long-session-forecast-20261011.py` → `.json`, not committed): the October 6 method, which it reproduces first, now at Sonnet 5.5's $0.10 reads, for Opus 5.5 medium from its single-prompt trials on the 28 sequence tasks, and with compaction before the gap at an assumed summary size. The mid-task smoke trial (`bench-20261011-233506`) gave the one compaction on record: a 3,034-token summary, and a 6,227-token prefix still read after it.
+- **Opus 5.5, 8 sequences:** $9.84 with 5m writes at pauses of 5–60 minutes; 1h writes $8.20 (−17%); compaction before the pause $7.88–8.41 at a 2–3k summary (−15 to −20%, at any pause over 5 minutes). Without pauses 1h costs +19% and compaction +5 to +13%; past an hour 1h costs +32%. Single prompts: $6.72. Low concise, repriced: $2.92 at mid pauses, $2.37 with 1h, about break-even with compaction.
+- **So** for an Opus user the levers are worth about what low concise saves a Sonnet user, and only in long sessions with likely pauses. Compaction's quality cost is unmeasured between tasks.
+- **Arms:** `opus-5.5-5m` and `opus-5.5-1h`, plain `opus-5.5` with the lifetime set. The offline sequence test now checks that the pinned client marks the lifetime on Opus requests on a subscription. New: `test_each_lifetime_arm_is_its_base_arm_with_the_lifetime_set`.
+- **Proposed runs** (the user's go; subscription, $0 API, as sent): Opus lifetime pair at a 600 s gap about $18; with `--compact warm` about $16.60–20; controls `--gap 0` about $15, `--gap 3900` about $23. Each about 2–3 hours. Their plan-only check wasn't run: the session's permissions didn't allow starting `modelpilot.bench` unattended.
+- **Tests:** 735 of 736 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/long-session-opus-regression-py312.log`), run under `nice` beside the live mid-task compaction run. The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-long-session-opus`).
+
 ## October 11, 2026 (evening): Jev no longer advises ModelPilot; stuck tasks go to Opus 5.5 (offline)
 
 $0, user decisions after item 8's fail: Jev's advisor role is dropped (Jev stays as the comparison arm), and a stuck task moves straight to Opus 5.5. A turn-start or in-run predictor of ModelPilot's own is parked: the tuning tasks are too easy to separate Sonnet from Opus (Opus 74/74, low concise 95.5%), so it waits for tasks where they differ. Details: `docs/m6-modelpilot-policy.md`, "No advisor".
