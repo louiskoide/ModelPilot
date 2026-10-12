@@ -818,6 +818,8 @@ User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku 
 
 **The screen (not run; the user's go).** `sonnet-5.5-low-concise` and `opus-5.5` × 1 on the 8 tasks, seed 12, on the subscription: $0 API, roughly $2.50–5 API-key equivalent (sqlglot's modules are large, so sessions may read more than the tuning tasks' do) and about 20–30 minutes after a 3-minute preflight. Script: `runs/sqlglot-screen-20261010.sh` (not committed). It decides only whether to build a second batch, never which tasks enter item 8.
 
+**The screen, run October 10** (`bench-20261010-173816`): half was lost to a network outage. 8 of 16 trials failed with `transport_error` from 18:03 to 18:09, before any model work. The 8 usable trials all passed strictly: Opus 5.5 5/5, low concise 3/3. Next: rerun the 8 lost trials, then decide on stage 2. Details: `docs/changelog.md`, October 10 (evening).
+
 ### Caveman's engine over recorded tool results (plan item 9, first step; October 6, $0)
 
 Item 9's first step is a $0 pass of caveman's engine over tool results our agents actually received. A live arm (low concise behind caveman's proxy) was to follow only if this pass showed a real cut.
