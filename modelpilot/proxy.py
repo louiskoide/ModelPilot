@@ -241,7 +241,12 @@ def reservation_estimate(raw, request, rates):
     return (len(raw) / 3 * input_rate + max_tokens * output_rate) / 1e6
 
 
-def forecast(request, usage, rates):
+# The session models a switch could go to (configs/modelpilot-policy.json). Superseded models keep their rates so old
+# runs reprice, and Haiku 5.5 is a helper only (October 10), so neither is a target.
+SWITCH_TARGETS = ('claude-sonnet-5-5', 'claude-opus-5-5')
+
+
+def forecast(request, usage, rates, targets=SWITCH_TARGETS):
     """Cost-only sensitivity model. Never authorizes a switch or estimates quality."""
     source = request.get('model')
     base = rates.get(source)
@@ -252,10 +257,10 @@ def forecast(request, usage, rates):
     tail, output = usage['input_tokens'], usage['output_tokens']
     base = tier(base, prefix + tail)
     scenarios = []
-    for target, rate in rates.items():
-        if target == source:
+    for target in targets:
+        if target == source or target not in rates:
             continue
-        rate = tier(rate, prefix + tail)
+        rate = tier(rates[target], prefix + tail)
         for steps in (1, 5, 20):
             stay = steps * (prefix * base['read'] + tail * base['input'] + output * base['output']) / 1e6
             # Assume target cold; retained target caches and future context growth are UNKNOWN.

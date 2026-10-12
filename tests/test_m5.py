@@ -1,7 +1,7 @@
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import unittest
-from modelpilot.m5 import Budget, RebaseQueue, demo, learn
+from modelpilot.m5 import IDLE_BOUNDARY_SECONDS, Budget, RebaseQueue, demo, learn
 
 
 class RebaseTests(unittest.TestCase):
@@ -29,9 +29,16 @@ class RebaseTests(unittest.TestCase):
     def test_each_boundary(self):
         q = RebaseQueue()
         q.queue('compact', True, 1)
-        for trigger in ({'idle_seconds': 300}, {'cache_expired': True},
+        for trigger in ({'idle_seconds': IDLE_BOUNDARY_SECONDS}, {'cache_expired': True},
                         {'switch_justified': True}, {'explicit_boundary': True}):
             self.assertEqual(q.plan(1, **trigger)['action'], 'would_rebase')
+
+    def test_idle_waits_past_a_5m_entry_seen_warm(self):
+        # The live governed session read its whole 5m entry 305.6 s after last use; 330 s was always a rewrite.
+        q = RebaseQueue()
+        q.queue('compact', True, 1)
+        self.assertEqual(q.plan(1, idle_seconds=305.6)['action'], 'defer')
+        self.assertEqual(q.plan(1, idle_seconds=330)['action'], 'would_rebase')
 
 
 class BudgetTests(unittest.TestCase):

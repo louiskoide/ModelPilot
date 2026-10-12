@@ -7,7 +7,7 @@ changes the client's model, effort or context. With --live this sends billable r
 
 --scenario turn-end-rebuild (plan item 12) runs one session as four client invocations: a correction that arrives
 during the turn's last model call (only the blocked Stop can deliver it), then, after an idle gap past the hook's
-300 s boundary, a rebuild plan shown at the next prompt and acknowledged when the session is seen running it
+330 s boundary, a rebuild plan shown at the next prompt and acknowledged when the session is seen running it
 (/compact, then the planned effort).
 """
 import argparse
@@ -25,6 +25,7 @@ import uuid
 from .governor import Governor, reconcile_log
 from .hooks import EVENTS, channel_declaration
 from .jev_route_check import TOKEN_FIELDS, check_anthropic_key, parse_events
+from .m5 import IDLE_BOUNDARY_SECONDS
 from .proxy import ProxyServer
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -236,7 +237,7 @@ def live_scenario():
 
 
 # Plan item 12: live evidence for turn-end delivery and an observed rebuild, in one session of four invocations.
-REBUILD_IDLE_SECONDS = 305  # past the UserPromptSubmit hook's 300 s idle boundary (and a 5m cache entry's life)
+REBUILD_IDLE_SECONDS = IDLE_BOUNDARY_SECONDS + 5  # past the UserPromptSubmit hook's idle boundary and a 5m entry's life
 REBUILD_STEPS = ('task', 'follow_up', 'compact', 'rebuilt')
 
 
@@ -291,7 +292,7 @@ def run_rebuild_session(run, cli, key, upstream, rates, *, prompt, instruction, 
                         tools='Read', limit_usd=5, budget_usd=.5, max_turns=6, timeout=300, idle=None):
     """Four invocations of one isolated session through the governed proxy (dry-run; nothing is applied):
     1. task: the task, corrected during the turn's last model call (correct_at_turn_end);
-    then the coordinator queues an effort change and a compaction, and the session idles past 300 s (idle(db, session,
+    then the coordinator queues an effort change and a compaction, and the session idles past 330 s (idle(db, session,
     limit), wait_idle_gap by default);
     2. follow_up: --resume at the same setting; UserPromptSubmit plans the rebuild and shows it to the user;
     3. compact: '/compact', as the plan says; the SessionStart hook reports it;

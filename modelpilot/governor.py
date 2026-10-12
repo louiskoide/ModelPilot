@@ -13,6 +13,7 @@ import uuid
 from .cache_probe import priced_usage
 from .m2 import State
 from .m4 import cascade, nonnegative, sha
+from .m5 import IDLE_BOUNDARY_SECONDS
 
 KINDS = ('model', 'effort', 'prune', 'compact')
 # Settings the host can see the client use: model and effort on the wire, compaction from a hook. A prune
@@ -256,7 +257,7 @@ class Governor:
         return [{'kind': r['kind'], 'change_id': r['change_id'], 'value': json.loads(r['value']),
                  'revision': r['revision']} for r in rows]
 
-    def plan_rebase(self, revision, *, idle_seconds=0, idle_threshold=300, cache_expired=False,
+    def plan_rebase(self, revision, *, idle_seconds=0, idle_threshold=IDLE_BOUNDARY_SECONDS, cache_expired=False,
                     switch_justified=False, explicit_boundary=False, in_flight=0):
         """Same boundaries as M5 RebaseQueue.plan; a ready plan is recorded for acknowledgment."""
         nonnegative(idle_seconds, 'idle_seconds')
