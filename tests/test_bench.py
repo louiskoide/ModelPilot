@@ -83,6 +83,27 @@ class ScheduleTests(unittest.TestCase):
         self.assertNotIn('ladder', parameters)
         self.assertIsNone(bench.modelpilot_manifest(['sonnet-5'], 1.0, 1))
 
+    def test_the_plan_describes_each_modelpilot_arm_by_what_it_runs(self):
+        # Until October 11 every arm without Jev was described as the exploration arm.
+        plans = {a: '\n'.join(bench.modelpilot_plan(a, 2.0)) for a, arm in bench.ARMS.items() if arm['kind'] == 'modelpilot'}
+        self.assertEqual(sorted(a for a, text in plans.items() if 'exploration arm' in text), ['modelpilot-explore'])
+        for arm in ('modelpilot', 'modelpilot-delegate', 'modelpilot-for-sonnet', 'modelpilot-for-opus'):
+            self.assertIn('no advisor', plans[arm])
+            self.assertIn('stuck evidence moves to Opus 5.5', plans[arm])
+            self.assertIn('$2.00 per trial', plans[arm])
+            self.assertNotIn('TypeSafe key.', plans[arm].replace('No TypeSafe key needed.', ''))
+        self.assertIn('starts at claude-opus-5-5/medium', plans['modelpilot-for-opus'])
+        self.assertIn('Quality floor: only settings no worse than claude-opus-5-5/medium', plans['modelpilot-for-opus'])
+        self.assertIn('Quality floor: only settings no worse than claude-sonnet-5-5/medium', plans['modelpilot-for-sonnet'])
+        self.assertNotIn('Quality floor', plans['modelpilot'])
+        self.assertIn('when the agent ends its turn', plans['modelpilot-delegate'])
+        self.assertNotIn('Delegation', plans['modelpilot'])
+        jev_arm = dict(bench.ARMS['modelpilot-for-sonnet'], advisor='jev', checkout='work/jev-router-compat')
+        with mock.patch.dict(bench.ARMS, {'modelpilot-for-sonnet': jev_arm}):
+            advised = '\n'.join(bench.modelpilot_plan('modelpilot-for-sonnet', 2.0))
+        self.assertIn('Jev (compat checkout, advice only)', advised)
+        self.assertIn('cheapest allowed setting without Jev.', advised)
+
     def test_refused_requests_are_counted_apart_from_sent_ones(self):
         rows = [{'kind': 'messages', 'http_status': 200, 'cost_usd': .01, 'usage': {'input_tokens': 5}},
                 {'kind': 'refused', 'refusal': 'insufficient_budget', 'http_status': 400, 'cost_usd': 0.0}]
