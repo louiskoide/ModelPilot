@@ -143,6 +143,21 @@ expression must evaluate in SQLite (3.53) to what the input does.
 | sqlglot-sqlite-json-arrow-precedence | 4 | 2 |
 | sqlglot-starrocks-partitions | 4 | 0 |
 
+sqlglot stage 2, harder tuning tasks (added October 11-12, 2026, before any trial ran on them; same rules). Each suite
+was run against fresh reference and base trees (`bench_tasks.task_tree`) with the benchmark Python, and checks only
+what its task's instruction states. Where the reference writes one of several equivalent forms (three nested DAX
+FILTERs come out as `(a AND b) AND c`), the test checks the parsed tree instead of the text. The SQLite suite also runs
+what sqlglot writes in SQLite and checks the column's storage (`PRAGMA table_xinfo`).
+
+| Task | Tests | Base passes |
+| --- | --- | --- |
+| sqlglot-array-append-nulls | 4 | 1 |
+| sqlglot-dax-dialect | 5 | 0 |
+| sqlglot-from-first-multi-insert | 5 | 0 |
+| sqlglot-snowflake-corr-nan | 5 | 2 |
+| sqlglot-snowflake-filter-within-group | 5 | 1 |
+| sqlglot-sqlite-generated-columns | 4 | 1 |
+
 Known label caveat (user decision, October 6, 2026: noted, suite unchanged):
 
 - `tomli-decode-error-attrs`, `test_line_starts_and_keywords`: it requires keyword construction,

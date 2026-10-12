@@ -854,6 +854,31 @@ User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku 
 
 **The screen, run October 10** (`bench-20261010-173816`): half was lost to a network outage. 8 of 16 trials failed with `transport_error` from 18:03 to 18:09, before any model work. The 8 usable trials all passed strictly: Opus 5.5 5/5, low concise 3/3. Details: `docs/changelog.md`, October 10 (evening). The rerun of the 8 lost trials is no longer needed: item 8's runs gave each stage 1 task 7 counted trials, with one miss (see "Item 8 result"). Whether to build stage 2 is the user's call.
 
+### Harder tasks: sqlglot, stage 2 (October 11–12, offline, $0; built, not screened)
+
+Built unattended at the user's request (item D of the night's list: "the tasks the parked predictor and the stuck rule need"). Stage 1 gave one miss in 56 counted trials (`sqlglot-duckdb-macro-overloads`), so stage 2 takes the larger behavioural commits stage 1 left. No trial has run on them.
+
+**Mining.** Stage 1's filters on the same clone (head `a00dc2e5`): 2026 commits, at most 400 source lines, 60+ over 2+ files, no agent named in subject or body, no hidden tests in the four excluded test files or in fixtures. Beyond stage 1's eight, 28 commits pass. Only one commit of 400–900 lines exists, a parser refactor. Of the 28:
+- Left out as refactors or chores without new behaviour (typing, decorators, the GETBIT flag, `nth_value` clean-up), or with too little test (`IDENTIFIER()`, 9 lines; a 2-line follow-up).
+- Left out because the checked output is a long arbitrary template the instruction would have to hand over: STRTOK (dropped in stage 1 too), Snowflake's SPLIT_PART, ARRAY_TO_STRING and ARRAY_INTERSECTION in DuckDB (up to 352 characters), ARRAY_INSERT, ARRAY_REMOVE_AT and ARRAY_REMOVE (slice and concatenation templates), and RPAD/LPAD's binary form.
+- Left out as no harder than stage 1: ARRAY_AGG WITHIN GROUP to DuckDB (2 statements), Doris/StarRocks multi-table UPDATE, Snowflake's boolean-logic rounding, StarRocks properties and the MySQL/Doris/StarRocks partition syntax refactor (stage 1 has a StarRocks partition task from the same day), the `%m`/`%d` format refactor (its test imports an internal regex).
+- Left out for now: T-SQL stored procedures (272 lines, but 327 rewritten test lines; a fair instruction would be mostly expected output) and **Postgres CREATE TRIGGER** (`f6cbd27fd`, 269 lines over 5 files, the strongest candidate). Its commit fails its own tests: a typo, `_pasre_wrapped`, breaks every `WHEN` clause, and the maintainer fixed it the same day in the next commit (`3e0f11ab`, source only). As a task it needs base `f6cbd27fd^` and reference `3e0f11ab`, which `bench_tasks.validate` refuses (`base_is_not_reference_parent`). Allowing a same-day, source-only follow-up as the reference is the user's call.
+
+**The six tasks** (all valid, `runs/bench-validate-20261012-001546.json`; batch `sqlglot-stage-2`):
+
+| Task | Commit | Source lines, files | What it asks | Hidden tests (reference passes) | Edge tests (base passes) |
+| --- | --- | --- | --- | --- | --- |
+| `sqlglot-snowflake-filter-within-group` | `2f9c6280b`, Jul 17 | 82, 2 | FILTER into Snowflake when the aggregate has WITHIN GROUP: the argument for ARRAY_AGG and LISTAGG, the ORDER BY key for percentiles and MODE, unsupported otherwise | 258 | 5 (1) |
+| `sqlglot-dax-dialect` | `a60ec8136`, Jul 17 | 77, 5 | A new parse-only DAX dialect: EVALUATE, nested FILTER, `Table[Column]`, `'Quoted Table'`, `""` escapes, `&&`/`\|\|`, ORDER BY | 103 | 5 (0) |
+| `sqlglot-from-first-multi-insert` | `6de29fdce`, Oct 6 | 70, 4 | Parenthesized FROM-first queries with set operations and LATERAL VIEW (DuckDB drops `FROM t1` at base), QUALIFY in Hive multi-insert branches, Oracle's `INSERT WHEN` as ALL | 115 | 5 (0) |
+| `sqlglot-array-append-nulls` | `8cda928b3`, Jan 19 | 80, 7 | ARRAY_APPEND on a NULL array: NULL in Snowflake/Databricks/Spark, an array in DuckDB/PostgreSQL; guard or coalesce between the kinds | 95 | 4 (1) |
+| `sqlglot-snowflake-corr-nan` | `91f607181`, Jan 7 | 62, 3 | Snowflake's CORR in DuckDB: NaN becomes NULL, around the whole FILTER/OVER chain | 97 | 5 (2) |
+| `sqlglot-sqlite-generated-columns` | `353d0ffca`, Aug 11 | 61, 3 | SQLite's STORED/VIRTUAL generated columns, typeless ones, `GENERATED ALWAYS AS (expr)` not taken for identity | 13 | 4 (1) |
+
+**Specs** follow stage 1's: behaviour in prose, every checked statement as `input -> output`, and the AST facts an edge test checks; written from the commit message and the hidden tests, the linked pull requests not read, plus the reference's behaviour where a test needed it. Reference quirks are left out of both instruction and suite: LISTAGG(DISTINCT x, ',') also wraps its separator; three nested DAX FILTERs come out parenthesized. Same suite, setup file and Python as stage 1; tuning split only (73 tuning tasks); the final split and its lock are unchanged (`bench_tasks.check_lock`).
+
+**Proposed next step (the user's go; subscription, $0 API).** The same screen as stage 1: `runs/sqlglot-stage2-screen-20261012.sh` (not committed), low concise and Opus 5.5 × 1 on the 6 tasks, seed 12. About $3.70 as sent at item 8's sqlglot means ($0.16 a low concise trial, $0.45 an Opus one) and about 25 minutes. Item 8's labelling design instead (low concise ×3, Sonnet 5.5 medium ×2, Opus ×2) would be 42 trials, about $10.50 and 70 minutes. With CREATE TRIGGER added, each grows by a seventh.
+
 ### Caveman's engine over recorded tool results (plan item 9, first step; October 6, $0)
 
 Item 9's first step is a $0 pass of caveman's engine over tool results our agents actually received. A live arm (low concise behind caveman's proxy) was to follow only if this pass showed a real cut.

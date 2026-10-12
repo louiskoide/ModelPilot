@@ -1,0 +1,55 @@
+{
+  "id": "sqlglot-from-first-multi-insert",
+  "repo": "sqlglot",
+  "url": "https://github.com/tobymao/sqlglot",
+  "license": "MIT",
+  "test_dir": "tests/dialects",
+  "pythonpath": ".",
+  "requires_python": "3.12",
+  "suite_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests",
+    "--ignore=tests/dialects/test_bigquery.py",
+    "--ignore=tests/test_optimizer.py",
+    "--ignore=tests/test_executor.py",
+    "--ignore=tests/test_expressions.py",
+    "--deselect",
+    "tests/dialects/test_dialect.py::TestDialect::test_lazy_load"
+  ],
+  "type": "bug_fix",
+  "base": "5b7b413451e2a7a35bfc8c076d3b3636f8a7b203",
+  "reference": "6de29fdce762e564002e0ae0d8d09c388ebc4cfb",
+  "hidden_tests": [
+    "tests/dialects/test_duckdb.py",
+    "tests/dialects/test_hive.py",
+    "tests/dialects/test_oracle.py",
+    "tests/dialects/test_spark.py"
+  ],
+  "hidden_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests/dialects/test_duckdb.py",
+    "tests/dialects/test_hive.py",
+    "tests/dialects/test_oracle.py",
+    "tests/dialects/test_spark.py"
+  ],
+  "setup_files": {
+    "sqlglot/_version.py": "__version__ = '0.0.0'\n__version_tuple__ = (0, 0, 0)\n"
+  },
+  "source": "https://github.com/tobymao/sqlglot/commit/6de29fdce762e564002e0ae0d8d09c388ebc4cfb",
+  "instruction": "Fix sqlglot's FROM-first queries and multi-table INSERTs:\n- A parenthesized FROM-first query (DuckDB's `FROM t SELECT ...`, Hive's `FROM x ... SELECT ...`) can be followed by a set operation inside the parentheses and can carry LATERAL VIEWs, and it must keep its own FROM. Today DuckDB's `FROM (FROM t1 SELECT foo1 UNION ALL SELECT foo2 FROM t2)` loses `FROM t1`, and Hive can't parse the LATERAL VIEW forms below.\n- Such a query can also be the source of Hive's FROM-first multi-table INSERT (`FROM <source> INSERT ... SELECT ... INSERT ... SELECT ...`).\n- A branch of a FROM-first multi-table INSERT shares the statement's FROM, so a QUALIFY in a branch can't be rewritten into a subquery of its own. Hive and Spark have no QUALIFY: writing such a branch for them must raise UnsupportedError (under ErrorLevel.RAISE) rather than give the branch its own FROM. Databricks has QUALIFY and writes it unchanged. A QUALIFY inside the source subquery is still rewritten for Spark, as in any other query.\n- Oracle's conditional multi-table INSERT may leave out ALL or FIRST (`INSERT WHEN ... THEN INTO ... [ELSE INTO ...] SELECT ...`), which means ALL: parse it, and write it with ALL.\nParsed and written with the named dialect (input -> output):\n- DuckDB: FROM (FROM t1 SELECT foo1 UNION ALL SELECT foo2 FROM t2) -> SELECT * FROM (SELECT foo1 FROM t1 UNION ALL SELECT foo2 FROM t2)\n- Hive: SELECT * FROM (FROM x LATERAL VIEW EXPLODE(y) t AS a SELECT a) AS q -> SELECT * FROM (SELECT a FROM x LATERAL VIEW EXPLODE(y) t AS a) AS q\n- Hive: FROM (FROM x LATERAL VIEW EXPLODE(arr) a AS c SELECT k, c) AS s INSERT INTO t SELECT s.c INSERT INTO u SELECT s.k -> FROM (SELECT k, c FROM x LATERAL VIEW EXPLODE(arr) a AS c) AS s INSERT INTO t SELECT s.c INSERT INTO u SELECT s.k\n- Spark: FROM (SELECT k, v FROM x QUALIFY ROW_NUMBER() OVER (PARTITION BY k ORDER BY v) = 1) AS s INSERT INTO t SELECT s.v INSERT INTO u SELECT s.k -> FROM (SELECT k, v FROM (SELECT k, v, ROW_NUMBER() OVER (PARTITION BY k ORDER BY v) AS _w FROM x) AS _t WHERE _w = 1) AS s INSERT INTO t SELECT s.v INSERT INTO u SELECT s.k\nRead with Hive, `FROM x INSERT INTO t SELECT v QUALIFY ROW_NUMBER() OVER (PARTITION BY k ORDER BY v) = 1` raises UnsupportedError when written with Hive or Spark, and is written unchanged with Databricks.\nRead with Oracle, `INSERT WHEN k > 1 THEN INTO t VALUES (k) ELSE INTO u VALUES (k) SELECT k FROM x` is written `INSERT ALL WHEN k > 1 THEN INTO t VALUES (k) ELSE INTO u VALUES (k) SELECT k FROM x` with Oracle and with Snowflake.\nAdd tests.",
+  "batch": "sqlglot-stage-2",
+  "notes": "Harder tuning tasks, stage 2 (built October 11, 2026, unattended at the user's request; not screened): sqlglot (MIT), mined from 2026 commits whose subject and body credit no agent, with hidden tests outside the test files that need pytz, duckdb or pandas (the suite leaves those out, and test_lazy_load, which runs a bare `python`). Stage 2 takes the larger behavioural commits stage 1 left, without long arbitrary templates. Tuning only.",
+  "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}
