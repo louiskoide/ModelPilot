@@ -2,6 +2,17 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 12, 2026 (night): plan item 12, the governor's live test of turn-end delivery and an observed rebuild, built (offline)
+
+$0, user request (item E of the night's list), built unattended; not run. Details: `docs/governor.md`, "Turn-end delivery and an observed rebuild".
+
+- **`governed_session --scenario turn-end-rebuild`**: one isolated Sonnet 5.5 session of four invocations through the governed proxy, dry-run. A correction issued during the turn's last model call (only the blocked `Stop` can deliver it); after 305 s idle, the next prompt's hook plans the queued rebuild (medium effort, compaction); `/compact`; then the planned effort, which the proxy should see and acknowledge as `observed`.
+- **Timing.** The coordinator corrects once the proxy admits a request after the first `PostToolUse` hook began. The hook journals its event before it delivers, so that event alone would race.
+- **Status:** `passed`, `failed`, or `inconclusive` when the model called a tool after the correction (a tool hook delivered it). Token counts must match the client's cumulative totals; cost is reported only, since the pinned client may price Sonnet 5.5 reads at the rate before October 7. A failed invocation ends the session before the idle wait.
+- **Offline** (real client, scripted fixture, the idle gap simulated): passes, with the client's cumulative totals equal to the wire's over all four invocations, compaction included. New: `test_a_turn_end_correction_then_a_rebuild_plan_acknowledged_by_observation` and `RebuildStatusTests` in `tests/test_governed_session.py`.
+- **Proposed run** (the user's go; API key): `runs/governor-live-20261012.sh --live` (not committed), about $0.10–0.30 and 7 minutes.
+- **Tests:** 736 of 737 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/governor-live-regression-py312.log`), run under `nice` beside the live mid-task compaction run. The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-governor-live`).
+
 ## October 11, 2026 (evening): Jev no longer advises ModelPilot; stuck tasks go to Opus 5.5 (offline)
 
 $0, user decisions after item 8's fail: Jev's advisor role is dropped (Jev stays as the comparison arm), and a stuck task moves straight to Opus 5.5. A turn-start or in-run predictor of ModelPilot's own is parked: the tuning tasks are too easy to separate Sonnet from Opus (Opus 74/74, low concise 95.5%), so it waits for tasks where they differ. Details: `docs/m6-modelpilot-policy.md`, "No advisor".
