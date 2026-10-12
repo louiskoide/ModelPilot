@@ -1,5 +1,5 @@
 {
-  "about": "ModelPilot's execution policy (switch_policy.py). Jev predicts the model and effort a task needs; ModelPilot switches there directly only when the expected total cost says it pays and, with quality_floor on, only among settings no worse than the user's own model. Models, efforts, cache behaviour and the cost model live here so they can change without code. Prices come from the rate files merged by bench.rates().",
+  "about": "ModelPilot's execution policy (switch_policy.py). ModelPilot weighs the settings with measured pass rates (Jev advised until October 11; an advised arm still can) and switches directly only when the expected total cost says it pays and, with quality_floor on, only among settings no worse than the user's own model. Models, efforts, cache behaviour and the cost model live here so they can change without code. Prices come from the rate files merged by bench.rates().",
   "models": {
     "claude-haiku-5-5": {
       "rank": 0, "efforts": ["low", "medium", "high", "xhigh", "max"], "mid_conversation_system": true,
@@ -99,7 +99,11 @@
   },
   "measured_candidates": {
     "enabled": true, "at": ["turn_start"],
-    "about": "User decision, October 8: at a turn start every runnable setting with measured tuning outcomes (calibration.outcomes) is weighed beside Jev's pick, on the same expected cost, whether or not Jev names it: Jev's weight is 0.03 because it doesn't predict the misses, so the candidates it names shouldn't decide which measured settings are weighed. A measured candidate Jev didn't name may be a downgrade without Jev's confidence (its evidence is the measured rate), but pays the downgrade's extra hysteresis. Without Jev's answer nothing moves (advice_unavailable), as before; the gate prices these candidates too, so it asks Jev wherever a move could pay. Replayed over the recorded runs before it was turned on: runs/measured-candidates-replay-20261008.json."
+    "about": "User decision, October 8: at a turn start every runnable setting with measured tuning outcomes (calibration.outcomes) is weighed beside Jev's pick, on the same expected cost, whether or not Jev names it: Jev's weight is 0.03 because it doesn't predict the misses, so the candidates it names shouldn't decide which measured settings are weighed. A measured candidate Jev didn't name may be a downgrade without Jev's confidence (its evidence is the measured rate), but pays the downgrade's extra hysteresis. Without an advisor answer (since October 11 the arms have none) the measured settings are weighed on their measured rates alone, with the current setting standing in as the named one (switch_policy._unadvised); the gate prices these candidates too, so it asks Jev wherever a move could pay. Replayed over the recorded runs before it was turned on: runs/measured-candidates-replay-20261008.json."
+  },
+  "stuck_escalation": {
+    "model": "claude-opus-5-5", "effort": "medium",
+    "about": "User decision, October 11: Jev no longer advises the ModelPilot arms (item 8 found nothing in its answers that picks out the misses, and its fitted weight is 0), so stuck evidence (host tests failing on the current setting) moves straight to Opus 5.5 instead of where Jev's probabilities pointed. Inside a turn the effort can't change (effort_changes_at), so the move keeps the turn's effort; effort is used only where effort_changes_at includes stuck_evidence. Nothing stronger runnable: stop. On record, Opus 5.5 passed every task low concise missed except tomli-decode-error-attrs (2/4) and the defective nx-generalized-petersen; stuck evidence was never journaled in 146 ModelPilot trials, so the rule has no live evidence yet."
   },
   "jev_gate": {
     "enabled": true,

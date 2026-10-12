@@ -107,14 +107,15 @@ ARMS = {
     # its fallback is its static claude-opus-5.
     'jev-compat-o55': {'kind': 'jev', 'variant': 'compat', 'model': 'jev-router', 'checkout': 'work/jev-router-compat',
                        'patch': PATCH, 'models': POLICY_TIERS},
-    # Jev (the compat checkout, advice only) predicts the model and effort; ModelPilot's proxy jumps there when the
-    # expected cost says it pays (active_policy). The client asks for the fallback start (S0), used while Jev is
-    # unavailable. Like jev-compat-o55 it discovers only the policy's models, so Jev's model question is the same.
+    # ModelPilot's proxy moves the session when the expected cost says it pays (active_policy), on measured pass rates.
+    # Jev advised these arms (the compat checkout, advice only) until October 11, when the user dropped it: item 8
+    # found no turn-start signal in its answers and its fitted weight is 0 (switch_policy._unadvised). 'advisor': 'jev'
+    # still wires it, for replays. The client asks for the start setting (S0).
     # Since October 6 the start is low concise, the cheapest fixed setting at equal strict passes (plan item 2): the
     # client runs at low effort with the concise prompt appended, which stays in every request whatever the setting.
-    'modelpilot': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'low', 'advisor': 'jev',
+    'modelpilot': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'low', 'advisor': None,
                    'append_system_prompt': 'bench/prompts/concise.md',
-                   'checkout': 'work/jev-router-compat', 'models': POLICY_TIERS,
+                   'models': POLICY_TIERS,
                    'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}),
                    'policy': 'docs/m6-modelpilot-policy.md'},
     # The same arm with delegation on (October 5; docs/m6-modelpilot-policy.md, "Delegation"): priced consults and
@@ -122,9 +123,9 @@ ARMS = {
     # finish once per turn), to measure what a review by a stronger setting is worth. Reported as its own arm.
     # From the low start (October 6) the forced review goes to Jev's setting when that is stronger, usually Sonnet 5.5
     # medium, where from medium it went to Opus 5.5 medium (switch_policy._consult_target).
-    'modelpilot-delegate': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'low', 'advisor': 'jev',
+    'modelpilot-delegate': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'low', 'advisor': None,
                             'append_system_prompt': 'bench/prompts/concise.md',
-                            'checkout': 'work/jev-router-compat', 'models': POLICY_TIERS,
+                            'models': POLICY_TIERS,
                             'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}),
                             'policy': 'docs/m6-modelpilot-policy.md',
                             'policy_overrides': {'delegation': {'consult': {'enabled': True, 'force': ['agent_finish']},
@@ -141,16 +142,16 @@ ARMS = {
     # floor"): no worse than the user's own model, one arm per baseline, each compared with that baseline's fixed arm
     # (sonnet-5.5, opus-5.5). Each starts at the cheapest setting its floor allows on the October 8 evidence: low concise
     # against Sonnet 5.5 medium, Opus 5.5 medium (with the concise prompt) against Opus 5.5 medium.
-    'modelpilot-for-sonnet': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'low', 'advisor': 'jev',
+    'modelpilot-for-sonnet': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'low', 'advisor': None,
                               'append_system_prompt': 'bench/prompts/concise.md',
-                              'checkout': 'work/jev-router-compat', 'models': POLICY_TIERS,
+                              'models': POLICY_TIERS,
                               'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}),
                               'policy': 'docs/m6-modelpilot-policy.md',
                               'policy_overrides': {'quality_floor': {'enabled': True,
                                                                      'baseline': 'claude-sonnet-5-5/medium'}}},
-    'modelpilot-for-opus': {'kind': 'modelpilot', 'model': 'claude-opus-5-5', 'effort': 'medium', 'advisor': 'jev',
+    'modelpilot-for-opus': {'kind': 'modelpilot', 'model': 'claude-opus-5-5', 'effort': 'medium', 'advisor': None,
                             'append_system_prompt': 'bench/prompts/concise.md',
-                            'checkout': 'work/jev-router-compat', 'models': POLICY_TIERS,
+                            'models': POLICY_TIERS,
                             'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}),
                             'policy': 'docs/m6-modelpilot-policy.md',
                             'policy_overrides': {'quality_floor': {'enabled': True,
@@ -215,18 +216,19 @@ def arm_tools(arm):
 
 
 def arm_adapter(arm, budget_usd, sessions, jev_key=None, advisor_stub=None, tools=None):
-    """The ModelPilot arm's adapter: active policy with Jev as advisor, the R5 tools while delegation is on, and the
-    per-session limit for each session. Without a TypeSafe key (or an offline stub) there is no advisor and the trial
-    is ineligible. tools overrides arm_tools for offline tests that drive the policy through host test runs."""
+    """The ModelPilot arm's adapter: active policy (with Jev as advisor on an arm whose advisor is 'jev'), the R5 tools
+    while delegation is on, and the per-session limit for each session. An advised arm without a TypeSafe key (or an
+    offline stub) has no advisor and its trial is ineligible. tools overrides arm_tools for offline tests that drive the policy through host test runs."""
     if ARMS[arm]['kind'] != 'modelpilot':
         return None
     from .advisor import JevAdvisor
     from .modelpilot_adapter import ModelPilotAdapter
+    advised = ARMS[arm].get('advisor') == 'jev'
     advisor = (JevAdvisor(ROOT/ARMS[arm]['checkout'], key=jev_key, stub=advisor_stub)
-               if ARMS[arm].get('advisor') == 'jev' and (jev_key or advisor_stub is not None) else None)
+               if advised and (jev_key or advisor_stub is not None) else None)
     return ModelPilotAdapter(limit_usd=budget_usd * sessions, mode='active',
                              tools=arm_tools(arm) if tools is None else tools, arm_id=arm,
-                             model=ARMS[arm]['model'], effort=ARMS[arm]['effort'], advisor=advisor,
+                             model=ARMS[arm]['model'], effort=ARMS[arm]['effort'], advisor=advisor, advised=advised,
                              models=ARMS[arm].get('models'), overrides=ARMS[arm].get('policy_overrides'))
 
 

@@ -2,6 +2,16 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 11, 2026 (evening): Jev no longer advises ModelPilot; stuck tasks go to Opus 5.5 (offline)
+
+$0, user decisions after item 8's fail: Jev's advisor role is dropped (Jev stays as the comparison arm), and a stuck task moves straight to Opus 5.5. A turn-start or in-run predictor of ModelPilot's own is parked: the tuning tasks are too easy to separate Sonnet from Opus (Opus 74/74, low concise 95.5%), so it waits for tasks where they differ. Details: `docs/m6-modelpilot-policy.md`, "No advisor".
+
+- **Policy** (`switch_policy._unadvised`, `decide(advised=False)`): with no advisor, turn starts weigh the measured settings on their measured rates alone (`basis: measured_only`); steps stay; stuck evidence jumps to `stuck_escalation` (Opus 5.5, at the turn's effort inside a turn) or stops on Opus. An advised arm keeps its old behaviour, including staying when Jev has no answer.
+- **Arms:** the four ModelPilot arms have `'advisor': None` and no Jev checkout. Trials are eligible without a TypeSafe key, and their cost is complete (no unpriced router calls). ModelPilot arms still need the API key.
+- **Replay** ($0, `runs/drop-jev-replay-20261011.json`): all 229 recorded decisions keep their action and target without Jev. The stuck rule has no live evidence: no stuck decision is on record.
+- **Tests:** 734 of 735 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/drop-jev-advisor-regression-py312.log`). The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-drop-jev`). A first full run on the system Python 3.9 (unsupported) gave 13 failures in untouched modules and was replaced. New: `UnadvisedTests` in `tests/test_switch_policy.py` (4), and two real-client trials in `tests/test_bench_tools.py` (the unadvised arm stays and is eligible; a stuck one moves to Opus 5.5 low). Tests of Jev's plumbing now build an advised arm explicitly.
+- **`CLAUDE.md`:** the ModelPilot arm line and plan item 10.
+
 ## October 11, 2026: item 8 scored: fail; a defective task spec fixed
 
 $0 scoring, the user's runs. Details: `docs/m6-benchmark-plan.md`, "Item 8 result".
