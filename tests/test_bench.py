@@ -107,6 +107,13 @@ class ScheduleTests(unittest.TestCase):
         fixed = {arm['model'] for arm in bench.ARMS.values() if arm['kind'] == 'fixed'}
         self.assertTrue(set(MODELS) <= fixed)
 
+    def test_each_lifetime_arm_is_its_base_arm_with_the_lifetime_set(self):
+        for base in ('sonnet-5.5-low-concise', 'opus-5.5'):
+            for ttl in ('5m', '1h'):
+                self.assertEqual(bench.ARMS[f'{base}-{ttl}'], dict(bench.ARMS[base], prompt_cache_ttl=ttl))
+        lifetimes = sorted(a for a, arm in bench.ARMS.items() if arm.get('prompt_cache_ttl'))
+        self.assertEqual(lifetimes, ['opus-5.5-1h', 'opus-5.5-5m', 'sonnet-5.5-low-concise-1h', 'sonnet-5.5-low-concise-5m'])
+
     def test_policy_tiers_have_rates_with_provenance(self):
         from modelpilot.cache_probe import dated
         from modelpilot.cache_replication import RATES

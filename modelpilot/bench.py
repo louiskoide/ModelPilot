@@ -79,6 +79,10 @@ ARMS = {
                                   'append_system_prompt': 'bench/prompts/concise.md', 'prompt_cache_ttl': '5m'},
     'sonnet-5.5-low-concise-1h': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low',
                                   'append_system_prompt': 'bench/prompts/concise.md', 'prompt_cache_ttl': '1h'},
+    # The same pair at Opus 5.5 medium (October 11): modelpilot-for-opus runs its baseline's setting, so any saving it
+    # makes for an Opus user has to come from the cache levers (plan item 6). Plain opus-5.5 plus the lifetime.
+    'opus-5.5-5m': {'kind': 'fixed', 'model': 'claude-opus-5-5', 'prompt_cache_ttl': '5m'},
+    'opus-5.5-1h': {'kind': 'fixed', 'model': 'claude-opus-5-5', 'prompt_cache_ttl': '1h'},
     # Mid-task compaction (user request, October 10; midtask_compaction): low concise with a '/compact' turn between
     # the split shape's plan and fix turns. 'compaction' names who writes the summary: 'session', the session's own
     # setting, as the client does; a model id, and the proxy sends the compaction request there at the client's effort

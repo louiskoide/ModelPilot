@@ -663,6 +663,35 @@ Afterwards ($0): `python3 -m modelpilot.long_session report runs/bench-<ts> --ou
 
 **What the result would decide.** If the probe confirms the hour and a lifetime-tagged upgrade is billed as a read, a governor lever follows: at a turn's end, upgrade the conversation's entry to the hour for about a read, only when a pause is likely. That would be a new prewarm-like request, so it stays a proposal for the user, as shadow warming is off by default. If compaction holds strict passes, compacting before a pause is the other lever.
 
+**Fresh estimate, with Opus 5.5 (October 11, $0; `runs/long-session-forecast-20261011.py` → `.json`).** `modelpilot-for-opus` runs its baseline's setting, Opus 5.5 medium, so for an Opus user any saving has to come from the cache levers, the concise prompt or per-task evidence (item 8 found none). This asks what the levers are worth there. Same method as October 6, which the script reproduces first at the old read price. What's new:
+- Sonnet 5.5 reads at $0.10 (from October 7).
+- Opus 5.5 medium, from the fixed arm's single-prompt trials on the same 28 tasks (the five runs `opus-vs-modelpilot-20261006` used), at `configs/opus-5-5-rates.json` (writes derived from the standard multipliers).
+- Compaction before the gap (`--compact warm`) at an assumed summary size. After a compaction the client rewrites from its first system block, so the next task writes the summary and the rest of the prefix whatever the gap, and reads only the tools prefix while that is warm. The one compaction on record, the mid-task smoke trial (`bench-20261011-233506`), shows both: a 3,034-token Haiku summary, and a 6,227-token read on the fix turn's first request. A summary of several tasks may be longer.
+
+Totals over the 8 sequences (as sent at the named lifetime, cold-equivalent; compaction at a 2k / 3k / 5k-token summary, with 5m writes):
+
+| Gaps between task turns | Opus 5m | Opus 1h | Opus 5m + compaction | Low concise 5m | Low concise 1h | Low concise 5m + compaction |
+| --- | --- | --- | --- | --- | --- | --- |
+| under 5 minutes | $6.92 | $8.20 | $7.28 / $7.81 / $8.88 | $1.96 | $2.37 | $2.36 / $2.63 / $3.15 |
+| 5 minutes to an hour | $9.84 | $8.20 | $7.88 / $8.41 / $9.48 | $2.92 | $2.37 | $2.66 / $2.92 / $3.45 |
+| over an hour | $9.84 | $12.94 | $7.88 / $8.41 / $9.48 | $2.92 | $3.92 | $2.66 / $2.92 / $3.45 |
+
+The same tasks as single prompts: Opus $6.72, low concise $2.10. Opus contexts end at 43–70k tokens (low concise 28–47k), still under the 100k auto-compaction minimum. Compaction with 1h writes is dearer than with 5m in every row (`.json`, `levers_usd`): after a compaction nothing is left to keep warm.
+
+**What this says about Opus (a forecast, not a measurement).**
+- The hour lifetime works out the same in proportion as on Sonnet: −17% at pauses of 5–60 minutes, +19% without pauses, +32% past an hour.
+- Compaction before a pause is the larger lever on Opus, because its contexts are larger: −15 to −20% at any pause over 5 minutes with a 2–3k summary, against +5 to +13% with no pause. On low concise it only breaks even at a 3k summary.
+- Either way, the saving for an Opus user who pauses is about what low concise saves a Sonnet user (about 20%), and only in long sessions with pauses. Both levers need a pause to be likely, and compaction needs to keep strict passes: the mid-task run (A) measures that within a task; between tasks the risk should be lower, and is unmeasured.
+
+**Opus arms (built, $0).** `opus-5.5-5m` and `opus-5.5-1h`: plain `opus-5.5` (the client's default, medium) with the lifetime set, as for low concise. The offline sequence test checks that the pinned client marks every breakpoint with the set lifetime on Opus requests too, on a subscription. The plan-only check of the run below hasn't been run (the session that built it wasn't permitted to start the bench's entry point unattended).
+
+**Proposed Opus runs (each needs the user's go; subscription, $0 API; dollars as sent, from the forecast).** Each is 16 trials, 2 arms × 8 sequences. About 2–3 hours: 32 minutes of single-prompt session time per arm on record, more in long contexts, with the gaps filled by other trials' work.
+1. **Lifetime at a mid gap:** `python3 -m modelpilot.bench --shape sequence --sequences all --arms opus-5.5-5m,opus-5.5-1h --subscription-arms opus-5.5-5m,opus-5.5-1h --gap 600 --run-budget 1 --live`. About $18 ($9.84 + $8.20).
+2. **Compaction at a mid gap:** the same with `--compact warm`, about $16.60–20 depending on the summary.
+3. Optional controls: `--gap 0` (about $15) and `--gap 3900` (about $23, at least 4.5 hours).
+
+Opus spends a subscription's usage about three times as fast as low concise, and a 429 stops the run. The low concise runs above now forecast about $5.30 (run 2), $5.50–7.20 (run 3), $4.30 (`--gap 0`) and $6.80 (`--gap 3900`). Afterwards, the same $0 report; `long_session report` takes several run directories, so an Opus run pairs with its own arms.
+
 ### Mid-task compaction (plan items 6 and 14; built offline October 10, $0)
 
 User request: does a compaction summary keep the work, and does it matter who writes it? ModelPilot never compacts; the client does, near its context limit or on `/compact`, and the summary replaces the conversation. Nothing on record measures what that costs in quality: benchmark contexts end at 28–47k tokens, under the client's 100k auto-compaction minimum, so no run has compacted. Run 3 above can't answer it either: between tasks, the next task barely needs the conversation, so every summarizer would look alike.

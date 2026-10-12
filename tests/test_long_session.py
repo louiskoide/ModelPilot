@@ -262,8 +262,10 @@ class OfflineSequenceTests(unittest.TestCase):
 
     def test_the_set_lifetime_holds_on_a_subscription_too(self):
         token = 'sk-ant-oat01-offline-fixture-not-a-token-1234'
-        for arm, ttl in (('sonnet-5.5-low-concise-5m', '5m'), ('sonnet-5.5-low-concise-1h', '1h')):
-            record = self.run_sequence(arm, [{'text': 'Done.'}], arm, auth='subscription', oauth_token=token)
+        rates = dict(RATES, **{'claude-opus-5-5': dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)})
+        for arm, ttl in (('sonnet-5.5-low-concise-5m', '5m'), ('sonnet-5.5-low-concise-1h', '1h'),
+                         ('opus-5.5-5m', '5m'), ('opus-5.5-1h', '1h')):
+            record = self.run_sequence(arm, [{'text': 'Done.'}], arm, rates=rates, auth='subscription', oauth_token=token)
             self.assertEqual(record['ttl_check']['marked'], {ttl: 3}, arm)
             self.assertTrue(record['ttl_check']['applied'], arm)
             self.assertIn('none', record['accounting']['repricing'])  # priced as sent: the lifetime is the variable
