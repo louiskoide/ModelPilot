@@ -2,6 +2,16 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 12, 2026 (night): an optional seventh sqlglot task, Postgres CREATE TRIGGER, and the validation rule it needs (offline)
+
+$0, built unattended on its own branch (`sqlglot-trigger-task`, on top of stage 2) because adopting it is the user's call. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 2", optional seventh task.
+
+- **The task** (`sqlglot-postgres-create-trigger`): stage 2's strongest candidate, a structured CREATE TRIGGER in the core parser, 266 source lines over 5 files. Its fix commit fails its own tests (a `_pasre_wrapped` typo breaks every WHEN), and the maintainer's next commit, the same day and source only, fixed it. So the reference is that follow-up.
+- **The rule** (`bench_tasks.chain_problem`): a task may name `fix_commits`, the fix and its follow-ups, oldest first, each the parent of the next, from the base's child to the reference; no follow-up may change a test file. Tasks without the field are validated as before.
+- **Tree, not text:** at base the Postgres statements round-trip as raw Commands, so the instruction names the tree and the 5-test edge suite checks it (reference 5/5, base 1/5).
+- **Checked:** valid (`runs/bench-validate-20261012-013354.json`); 74 tuning tasks, the final split and its lock unchanged. New: `test_a_source_only_follow_up_can_complete_the_fix_when_the_task_names_both`.
+- **Tests:** 735 of 736 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/sqlglot-trigger-task-regression-py312.log`). The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-sqlglot-trigger`).
+
 ## October 12, 2026 (night): harder tasks, sqlglot stage 2: 6 tasks built (offline)
 
 $0, user request (item D of the night's list), built unattended while the mid-task compaction run went on; nothing screened. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 2".
