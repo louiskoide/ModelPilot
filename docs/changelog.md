@@ -2,6 +2,17 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 11, 2026 (night): 4b made ready to run, still held; the plan text of ModelPilot arms fixed (offline)
+
+$0, user request (item C of the night's list): build what 4b needs short of running it. Nothing ran. Details: `docs/m6-benchmark-plan.md`, "4b, ready to run".
+
+- **Trial-count rule for today's pairings** (`runs/trial-count-rule-20261011.py` → `.json`, not committed; every single-prompt run on record at October 11's prices): **n = 1** for `modelpilot-for-sonnet` vs `sonnet-5.5` (half-width $0.0096 against a $0.0135 target) and for `modelpilot-for-opus` vs `opus-5.5` ($0.023 against $0.037, on a stand-in: the concise prompt's effect on Sonnet medium, scaled to Opus). Item 8's repeats firm up the spreads: Opus 5.5's within-task SD now rests on 52 degrees of freedom.
+- **Cost at n = 1**, all six pre-registered arms on the 24 final tasks: about $19, $9.80 of it subscription usage as sent and about $9.10 on the API key, plus unpriced TypeSafe; 2–3 hours. `runs/4b-final-20261011.sh plan|smoke|full|nojev` (not committed). A smoke trial of `modelpilot-for-opus` (never run live) comes first, about $0.25.
+- **The user's call:** whether to spend the one-shot final split now, while the ModelPilot arms would mostly measure their overhead; the arm set.
+- **Fixed:** `bench`'s plan described every ModelPilot arm without Jev as the exploration arm (random switches to Opus 5.5) and left out its quality floor, since October 11 for every arm. `bench.modelpilot_plan` now says what each runs; new test `test_the_plan_describes_each_modelpilot_arm_by_what_it_runs`.
+- Final specs unchanged since the lock (`bench_tasks.check_lock`, October 11).
+- **Tests:** 735 of 736 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/final-split-plan-regression-py312.log`), run under `nice` beside the live mid-task compaction run. The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-final-split`).
+
 ## October 11, 2026 (evening): Jev no longer advises ModelPilot; stuck tasks go to Opus 5.5 (offline)
 
 $0, user decisions after item 8's fail: Jev's advisor role is dropped (Jev stays as the comparison arm), and a stuck task moves straight to Opus 5.5. A turn-start or in-run predictor of ModelPilot's own is parked: the tuning tasks are too easy to separate Sonnet from Opus (Opus 74/74, low concise 95.5%), so it waits for tasks where they differ. Details: `docs/m6-modelpilot-policy.md`, "No advisor".
