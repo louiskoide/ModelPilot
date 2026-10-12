@@ -65,11 +65,16 @@ class ObserverTests(unittest.TestCase):
         self.assertIsNone(observe(False, json.dumps({'model': 'm', 'usage': USAGE}).encode()))
 
     def test_forecast_accounts_for_rebuild_once_and_never_applies(self):
-        result = forecast({'model': 'claude-opus-4-6'}, USAGE, RATES)
+        result = forecast({'model': 'claude-opus-4-6'}, USAGE, RATES, targets=('claude-sonnet-4-6',))
         one = result['scenarios'][0]
         self.assertAlmostEqual(one['switch_usd'], (14750*3.75+10*3+4*15)/1e6)
         self.assertFalse(result['applied'])
         self.assertEqual(result['action'], 'hold')
+
+    def test_forecast_compares_only_current_session_models(self):
+        rates = dict(RATES, **{m: RATES['claude-opus-4-6'] for m in ('claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5')})
+        targets = {s['target'] for s in forecast({'model': 'claude-sonnet-5-5'}, USAGE, rates)['scenarios']}
+        self.assertEqual(targets, {'claude-opus-5-5'})
 
 
 class LoggedFieldTests(unittest.TestCase):

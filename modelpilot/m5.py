@@ -6,6 +6,11 @@ from pathlib import Path
 from threading import RLock
 from .m4 import nonnegative
 
+# Idle seconds after which a queued rebuild may run. A 5m entry was read at 240 s and rewritten at 330 s in every
+# replication, and read again 305.6 s after its last use in the live governed session (October 12): expiry lies
+# somewhere in 305.6-330 s. A rebuild before 330 s could compact a context that is still warm.
+IDLE_BOUNDARY_SECONDS = 330
+
 
 class RebaseQueue:
     """Session-local queue; plans never drain it or mutate a conversation."""
@@ -19,7 +24,7 @@ class RebaseQueue:
             raise ValueError('Invalid task revision')
         self.pending[kind] = {'kind': kind, 'value': copy.deepcopy(value), 'revision': revision}
 
-    def plan(self, revision, *, idle_seconds=0, idle_threshold=300,
+    def plan(self, revision, *, idle_seconds=0, idle_threshold=IDLE_BOUNDARY_SECONDS,
              cache_expired=False, switch_justified=False, explicit_boundary=False,
              in_flight=0):
         nonnegative(idle_seconds, 'idle_seconds')
