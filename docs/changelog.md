@@ -2,6 +2,12 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 12, 2026 (night): the night's four branches together (`overnight-20261011`)
+
+$0. Merges `long-session-opus` (B), `final-split-plan` (C), `sqlglot-stage-2` (D) and `governor-live-evidence` (E), the entries below; only this changelog conflicted. Two branches the user has to decide on stay out: `sqlglot-trigger-task` (a seventh sqlglot task and the `fix_commits` validation rule) and `exclude-transport-errors` (lost connections left out of comparisons).
+
+- **Tests:** 738 of 739 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/overnight-20261011-regression-py312.log`), run after the mid-task compaction run had stopped. The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-overnight`).
+
 ## October 12, 2026 (night): plan item 12, the governor's live test of turn-end delivery and an observed rebuild, built (offline)
 
 $0, user request (item E of the night's list), built unattended; not run. Details: `docs/governor.md`, "Turn-end delivery and an observed rebuild".
