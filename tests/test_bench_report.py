@@ -330,6 +330,18 @@ class IneligibleTrialTests(unittest.TestCase):
         self.assertEqual(next(a for a in result['arms'] if a['arm'] == 'sonnet-5.5-low')['trials'], 2)
         self.assertEqual(next(a for a in result['arms'] if a['arm'] == 'sonnet-5.5-concise')['trials'], 1)
 
+    def test_a_trial_whose_session_lost_its_connection_is_excluded_whatever_its_grade(self):
+        base = dict(arm='sonnet-5.5-low-concise', complete=True, wall_seconds=1, accounting={'cost_usd': .1},
+                    cache={'cold_equivalent_cost_usd': .1})
+        rows = [dict(base, task='x', passed=False, sessions=[{'stop': 'success'}, {'stop': 'transport_error'}]),
+                dict(base, task='y', passed=True, sessions=[{'stop': 'transport_error'}]),
+                dict(base, task='z', passed=False, sessions=[{'stop': 'success'}, {'stop': 'turn_limit'}]),
+                dict(base, task='w', passed=True)]  # records written before sessions were kept
+        result = summarize(rows, ['sonnet-5.5-low-concise'], resamples=10)
+        self.assertEqual([(t['task'], t['reason']) for t in result['excluded_ineligible_trials']],
+                         [('x', 'transport_error'), ('y', 'transport_error')])
+        self.assertEqual(result['arms'][0]['trials'], 2)
+
 
 class WriteSourceTests(unittest.TestCase):
     def side(self, started, read, write):

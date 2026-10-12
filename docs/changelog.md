@@ -2,6 +2,15 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 12, 2026 (night): a trial that lost its connection no longer counts as a failure (proposed, offline)
+
+$0, found unattended while checking the mid-task compaction run (`bench-20261011-234003`); on its own branch, `exclude-transport-errors`, because it changes how a pre-registered comparison is counted. Details: `docs/m6-benchmark-plan.md`, "Mid-task compaction", "Lost connections".
+
+- **The problem.** `bench` sets `complete` from stop reasons, account errors and rate limits only, so a trial whose session ended on `transport_error` counts as complete, and its checkout is graded as the dropped session left it. `bench_report` and `midtask_compaction.report` then counted it a failure. Item 8's scorer dropped such trials; nothing else did. In the compaction run, 4 of the first 5 were in `sonnet-5.5-low-concise-compact`, each graded a failure because its fix turn never ran.
+- **The change:** `bench_report.ineligible_reason` returns `transport_error` for any trial with such a session, whatever its grade, so every report built on it leaves the trial out and lists it. Records without sessions are unchanged. New: `test_a_trial_whose_session_lost_its_connection_is_excluded_whatever_its_grade`.
+- **On the compaction run as it stopped** (55 of 99 trials, a 429 at 01:33; 8 lost connections: 3 control, 5 Sonnet-summary): pooled strict passes, control 14/16 counting them and 12/13 without, Sonnet's summary 16/25 and 16/20, Haiku's 8/13 either way. Not the pre-registered paired analysis, and the run is incomplete.
+- **Tests:** 735 of 736 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/exclude-transport-errors-regression-py312.log`). The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-transport`).
+
 ## October 11, 2026 (evening): Jev no longer advises ModelPilot; stuck tasks go to Opus 5.5 (offline)
 
 $0, user decisions after item 8's fail: Jev's advisor role is dropped (Jev stays as the comparison arm), and a stuck task moves straight to Opus 5.5. A turn-start or in-run predictor of ModelPilot's own is parked: the tuning tasks are too easy to separate Sonnet from Opus (Opus 74/74, low concise 95.5%), so it waits for tasks where they differ. Details: `docs/m6-modelpilot-policy.md`, "No advisor".
