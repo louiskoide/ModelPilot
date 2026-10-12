@@ -1,0 +1,51 @@
+{
+  "id": "sqlglot-dax-dialect",
+  "repo": "sqlglot",
+  "url": "https://github.com/tobymao/sqlglot",
+  "license": "MIT",
+  "test_dir": "tests/dialects",
+  "pythonpath": ".",
+  "requires_python": "3.12",
+  "suite_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests",
+    "--ignore=tests/dialects/test_bigquery.py",
+    "--ignore=tests/test_optimizer.py",
+    "--ignore=tests/test_executor.py",
+    "--ignore=tests/test_expressions.py",
+    "--deselect",
+    "tests/dialects/test_dialect.py::TestDialect::test_lazy_load"
+  ],
+  "type": "feature",
+  "base": "281442123ca0f617b1d877e8ebeacc4a7ad3cd2c",
+  "reference": "a60ec8136fc3ffc7ef5c15c0348dc189a0fd1048",
+  "hidden_tests": [
+    "tests/dialects/test_dax.py",
+    "tests/dialects/test_dialect.py"
+  ],
+  "hidden_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests/dialects/test_dax.py",
+    "tests/dialects/test_dialect.py"
+  ],
+  "setup_files": {
+    "sqlglot/_version.py": "__version__ = '0.0.0'\n__version_tuple__ = (0, 0, 0)\n"
+  },
+  "source": "https://github.com/tobymao/sqlglot/commit/a60ec8136fc3ffc7ef5c15c0348dc189a0fd1048",
+  "instruction": "Add a minimal, parse-only DAX dialect to sqlglot, named \"dax\", in the way the existing PRQL dialect works: a DAX query parses into ordinary sqlglot expressions (an exp.Select), so it can be written in any SQL dialect; writing DAX is not needed. DAX query reference: https://learn.microsoft.com/en-us/dax/dax-queries. Support:\n- `EVALUATE <table>`, where a table is a name (`Sales`) or a single-quoted name (`'Sales Data'`), meaning SELECT * FROM that table;\n- `EVALUATE FILTER(<table expression>, <condition>)`, where the table expression is a table or another FILTER: the conditions make up the WHERE clause, a nested FILTER's conditions combined with AND;\n- column references `Table[Column]` (the table may be single-quoted, `'Sales Data'[Amount]`) and bare `[Column]`, as columns whose name is quoted, qualified by the table when one is given;\n- string literals in double quotes, with `\"\"` standing for a quote inside them, and `&&` and `||` meaning AND and OR;\n- an optional ORDER BY at the end, with ASC or DESC.\nKeywords are case-insensitive. The dialect is available by name like the others (`read=\"dax\"`, `Dialect.get_or_raise(\"dax\")`, `Dialects.DAX`).\nParsed with DAX and written with sqlglot's default dialect (input -> output):\n- EVALUATE Sales -> SELECT * FROM Sales\n- EVALUATE 'Sales Data' -> SELECT * FROM \"Sales Data\"\n- EVALUATE FILTER(Sales, Sales[Amount] > 100) -> SELECT * FROM Sales WHERE Sales.\"Amount\" > 100\n- EVALUATE FILTER('Sales Data', 'Sales Data'[Amount] > 100) -> SELECT * FROM \"Sales Data\" WHERE \"Sales Data\".\"Amount\" > 100\n- EVALUATE FILTER(FILTER(Sales, Sales[Amount] > 100), Sales[Region] = \"West\") -> SELECT * FROM Sales WHERE Sales.\"Amount\" > 100 AND Sales.\"Region\" = 'West'\n- EVALUATE FILTER(Sales, Sales[Amount] > 100 && Sales[Qty] < 5) -> SELECT * FROM Sales WHERE Sales.\"Amount\" > 100 AND Sales.\"Qty\" < 5\n- EVALUATE FILTER(Sales, Sales[Amount] > 100 || Sales[Qty] < 5) -> SELECT * FROM Sales WHERE Sales.\"Amount\" > 100 OR Sales.\"Qty\" < 5\n- EVALUATE FILTER(Sales, [Total Amount] > 100) -> SELECT * FROM Sales WHERE \"Total Amount\" > 100\n- EVALUATE FILTER(Sales, Sales[Note] = \"He said \"\"hi\"\"\") -> SELECT * FROM Sales WHERE Sales.\"Note\" = 'He said \"hi\"'\n- EVALUATE Sales ORDER BY Sales[Amount] DESC, Sales[Qty] -> SELECT * FROM Sales ORDER BY Sales.\"Amount\" DESC, Sales.\"Qty\"\nParsed with DAX and written with DuckDB:\n- EVALUATE FILTER(Sales, Sales[Amount] > 100) -> SELECT * FROM Sales WHERE Sales.\"Amount\" > 100\n- EVALUATE FILTER(Sales, Sales[Amount] > 100) ORDER BY Sales[Amount] -> SELECT * FROM Sales WHERE Sales.\"Amount\" > 100 ORDER BY Sales.\"Amount\" NULLS FIRST\nAdd tests.",
+  "batch": "sqlglot-stage-2",
+  "notes": "Harder tuning tasks, stage 2 (built October 11, 2026, unattended at the user's request; not screened): sqlglot (MIT), mined from 2026 commits whose subject and body credit no agent, with hidden tests outside the test files that need pytz, duckdb or pandas (the suite leaves those out, and test_lazy_load, which runs a bare `python`). Stage 2 takes the larger behavioural commits stage 1 left, without long arbitrary templates. Tuning only.",
+  "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}

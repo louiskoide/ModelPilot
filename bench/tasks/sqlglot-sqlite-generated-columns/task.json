@@ -1,0 +1,49 @@
+{
+  "id": "sqlglot-sqlite-generated-columns",
+  "repo": "sqlglot",
+  "url": "https://github.com/tobymao/sqlglot",
+  "license": "MIT",
+  "test_dir": "tests/dialects",
+  "pythonpath": ".",
+  "requires_python": "3.12",
+  "suite_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests",
+    "--ignore=tests/dialects/test_bigquery.py",
+    "--ignore=tests/test_optimizer.py",
+    "--ignore=tests/test_executor.py",
+    "--ignore=tests/test_expressions.py",
+    "--deselect",
+    "tests/dialects/test_dialect.py::TestDialect::test_lazy_load"
+  ],
+  "type": "bug_fix",
+  "base": "10246bf81d04e6c92c80d616d3b038cc1ec3965d",
+  "reference": "353d0ffca96acbd5407e73b832cadf5c1fedc9fe",
+  "hidden_tests": [
+    "tests/dialects/test_sqlite.py"
+  ],
+  "hidden_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests/dialects/test_sqlite.py"
+  ],
+  "setup_files": {
+    "sqlglot/_version.py": "__version__ = '0.0.0'\n__version_tuple__ = (0, 0, 0)\n"
+  },
+  "source": "https://github.com/tobymao/sqlglot/commit/353d0ffca96acbd5407e73b832cadf5c1fedc9fe",
+  "instruction": "SQLite's generated columns are `name [type] [GENERATED ALWAYS] AS (expr) [STORED | VIRTUAL]`, VIRTUAL being the default (https://www.sqlite.org/gencol.html). sqlglot's SQLite dialect gets them wrong: it writes T-SQL's PERSISTED keyword, which SQLite rejects; after a typeless column it takes STORED or VIRTUAL for a data type; and it turns `GENERATED ALWAYS AS (expr)` into AUTOINCREMENT as if it were an identity column. Fix the SQLite dialect. A generated column is an exp.ComputedColumnConstraint whose `persisted` arg is true for STORED and false otherwise, and it is written as `AS (expr)` followed by ` STORED` when persisted; VIRTUAL, being the default, is not written, and neither is `GENERATED ALWAYS`. A true identity column (`GENERATED ALWAYS AS IDENTITY`) still becomes AUTOINCREMENT. Other dialects keep their current behaviour.\nParsed and written with the SQLite dialect (input -> output; written back unchanged where no output is given):\n- CREATE TABLE t (a INTEGER, b INTEGER AS (a * 2) STORED)\n- CREATE TABLE t (a INTEGER, b INTEGER AS (a * 2))\n- CREATE TABLE t (a INTEGER, b AS (a * 2) STORED)\n- CREATE TABLE t (a INTEGER, b AS (a * 2))\n- CREATE TABLE t (a INTEGER, b INTEGER GENERATED ALWAYS AS (a * 2) STORED) -> CREATE TABLE t (a INTEGER, b INTEGER AS (a * 2) STORED)\n- CREATE TABLE t (a INTEGER, b INTEGER GENERATED ALWAYS AS (a * 2) VIRTUAL) -> CREATE TABLE t (a INTEGER, b INTEGER AS (a * 2))\n- CREATE TABLE t (a INTEGER, b INTEGER GENERATED ALWAYS AS (a * 2)) -> CREATE TABLE t (a INTEGER, b INTEGER AS (a * 2))\n- CREATE TABLE t (a INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY) -> CREATE TABLE t (a INTEGER PRIMARY KEY AUTOINCREMENT)\nRead from T-SQL and written with SQLite: CREATE TABLE t (a INT, b AS (a * 2) PERSISTED NOT NULL) -> CREATE TABLE t (a INTEGER, b AS (a * 2) STORED NOT NULL). Add tests.",
+  "batch": "sqlglot-stage-2",
+  "notes": "Harder tuning tasks, stage 2 (built October 11, 2026, unattended at the user's request; not screened): sqlglot (MIT), mined from 2026 commits whose subject and body credit no agent, with hidden tests outside the test files that need pytz, duckdb or pandas (the suite leaves those out, and test_lazy_load, which runs a bare `python`). Stage 2 takes the larger behavioural commits stage 1 left, without long arbitrary templates. Tuning only.",
+  "instruction_source": "written from the fix commit message and the hidden tests (the linked pull request not read), plus the reference's code for the tree facts the edge suite checks (exp.ComputedColumnConstraint's `persisted`); describes behavior, not the change"
+}

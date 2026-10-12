@@ -1,0 +1,49 @@
+{
+  "id": "sqlglot-array-append-nulls",
+  "repo": "sqlglot",
+  "url": "https://github.com/tobymao/sqlglot",
+  "license": "MIT",
+  "test_dir": "tests/dialects",
+  "pythonpath": ".",
+  "requires_python": "3.12",
+  "suite_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests",
+    "--ignore=tests/dialects/test_bigquery.py",
+    "--ignore=tests/test_optimizer.py",
+    "--ignore=tests/test_executor.py",
+    "--ignore=tests/test_expressions.py",
+    "--deselect",
+    "tests/dialects/test_dialect.py::TestDialect::test_lazy_load"
+  ],
+  "type": "feature",
+  "base": "8634a8a737d5ee6c40b4d33545e9f928e1e07df4",
+  "reference": "8cda928b3807685f6de5e89eac12522433cfddd6",
+  "hidden_tests": [
+    "tests/dialects/test_dialect.py"
+  ],
+  "hidden_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests/dialects/test_dialect.py"
+  ],
+  "setup_files": {
+    "sqlglot/_version.py": "__version__ = '0.0.0'\n__version_tuple__ = (0, 0, 0)\n"
+  },
+  "source": "https://github.com/tobymao/sqlglot/commit/8cda928b3807685f6de5e89eac12522433cfddd6",
+  "instruction": "ARRAY_APPEND(arr, x) on a NULL array returns NULL in Snowflake, Databricks and Spark, but a one-element array in DuckDB (where sqlglot writes it LIST_APPEND) and in PostgreSQL. Make sqlglot keep the source dialect's meaning when it transpiles the call between the two kinds:\n- read with Snowflake, Databricks or Spark and written with DuckDB or PostgreSQL, guard it: `CASE WHEN arr IS NULL THEN NULL ELSE LIST_APPEND(arr, x) END` (DuckDB) and `CASE WHEN arr IS NULL THEN NULL ELSE ARRAY_APPEND(arr, x) END` (PostgreSQL);\n- read with DuckDB or PostgreSQL and written with Snowflake, Databricks or Spark, replace a NULL array by an empty one: `ARRAY_APPEND(COALESCE(arr, []), x)` (Snowflake) and `ARRAY_APPEND(COALESCE(arr, ARRAY()), x)` (Databricks, Spark).\nBetween two dialects of the same kind, and from a dialect to itself, the call is written as is: `LIST_APPEND(arr, x)` in DuckDB and `ARRAY_APPEND(arr, x)` in PostgreSQL, Snowflake, Databricks and Spark each read and written back unchanged. With sqlglot's default dialect, `ARRAY_APPEND(arr, x)` is still written `LIST_APPEND(arr, x)` with DuckDB and `ARRAY_APPEND(arr, x)` with PostgreSQL, and DuckDB's `LIST_APPEND(arr, x)` and PostgreSQL's `ARRAY_APPEND(arr, x)` are read into it as `ARRAY_APPEND(arr, x)`. Add tests.",
+  "batch": "sqlglot-stage-2",
+  "notes": "Harder tuning tasks, stage 2 (built October 11, 2026, unattended at the user's request; not screened): sqlglot (MIT), mined from 2026 commits whose subject and body credit no agent, with hidden tests outside the test files that need pytz, duckdb or pandas (the suite leaves those out, and test_lazy_load, which runs a bare `python`). Stage 2 takes the larger behavioural commits stage 1 left, without long arbitrary templates. Tuning only.",
+  "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}
