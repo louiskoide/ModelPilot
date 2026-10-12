@@ -69,7 +69,7 @@
   "sqlglot-postgres-param-modes": "8ba807b9902022da73b48cf8d72f647286a3b4b16dfd04c04cf72191744c74a6",
   "sqlglot-snowflake-corr-nan": "c696066a5fbf6a43fcdf19e19305311ea2179fb1847c0f9e4d07e7c6fb8dae63",
   "sqlglot-snowflake-filter-within-group": "c83c248add737b8280e0a4681df3cbafe05219a367ce5f9a3d2911607dc9179c",
-  "sqlglot-sqlite-generated-columns": "7f1c36159f9216a2edb0d2aea768f240b1c247ee47e16896762a0b2d59f7850a",
+  "sqlglot-sqlite-generated-columns": "fa7788ac52e80731b4276de3d5ad68b2850e103f66e5e8f0804f0aeb2f4c7795",
   "sqlglot-sqlite-json-arrow-precedence": "f82ef0a9d9695ab5f918ed6d5ac39aaf9ce5c4ff77d0ccedd164dfe44b20f911",
   "sqlglot-starrocks-partitions": "59253cea5cfdf87a882fafe9afbdce13b5111f215d631e22c72cb0b319b99c94",
   "tomli-decode-error-attrs": "e62333df10b7091246f41e0292ff6e132868a3e6e15b075f20157b2056423198",
