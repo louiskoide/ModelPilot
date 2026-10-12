@@ -325,6 +325,32 @@ def grade(task, tree, repo, python, scratch, expected_hidden_passed=None, keep_o
             'expected_hidden_passed': expected_hidden_passed}
 
 
+def is_test_path(path):
+    parts = Path(path).parts
+    return 'tests' in parts[:-1] or 'test' in parts[:-1] or parts[-1].startswith('test') or parts[-1] == 'conftest.py'
+
+
+def chain_problem(task, repo):
+    """Why the reference doesn't follow from the base, or None.
+
+    By default the reference is the fix commit and the base its parent. A task may instead name fix_commits (October
+    12, awaiting the user's decision): the fix commit and the follow-ups that completed it, oldest first, each the
+    parent of the next, the first a child of the base and the last the reference. Follow-ups may change no test file,
+    so the hidden tests are still the fix's own."""
+    commits = [git(repo, 'rev-parse', c).strip() for c in task.get('fix_commits') or [task['reference']]]
+    if commits[-1] != git(repo, 'rev-parse', task['reference']).strip():
+        return 'reference_is_not_the_last_fix_commit'
+    parent = task['base']
+    for commit in commits:
+        if git(repo, 'rev-parse', commit + '^').strip() != parent:
+            return 'base_is_not_reference_parent'
+        parent = commit
+    for commit in commits[1:]:
+        if any(is_test_path(p) for p in git(repo, 'diff-tree', '--no-commit-id', '--name-only', '-r', commit).split()):
+            return 'follow_up_changes_tests'
+    return None
+
+
 def validate(task, repo, python, scratch, repeats=3):
     """Base must fail the grader; reference must pass it every time; base's own suite must pass."""
     scratch = Path(scratch)
@@ -334,8 +360,9 @@ def validate(task, repo, python, scratch, repeats=3):
     missing = [k for k in REQUIRED if k not in task]
     if missing or task['type'] not in TYPES:
         return {'valid': False, 'reason': 'bad_spec', 'missing': missing}
-    if git(repo, 'rev-parse', task['reference'] + '^').strip() != task['base']:
-        return {'valid': False, 'reason': 'base_is_not_reference_parent'}
+    problem = chain_problem(task, repo)
+    if problem:
+        return {'valid': False, 'reason': problem}
     if not python_satisfies(python, task.get('requires_python')):
         return {'valid': False, 'reason': 'python_too_old', 'requires_python': task.get('requires_python')}
     base = task_tree(task, repo, task['base'], scratch/'base')

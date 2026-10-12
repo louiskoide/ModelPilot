@@ -1,0 +1,51 @@
+{
+  "id": "sqlglot-snowflake-corr-nan",
+  "repo": "sqlglot",
+  "url": "https://github.com/tobymao/sqlglot",
+  "license": "MIT",
+  "test_dir": "tests/dialects",
+  "pythonpath": ".",
+  "requires_python": "3.12",
+  "suite_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests",
+    "--ignore=tests/dialects/test_bigquery.py",
+    "--ignore=tests/test_optimizer.py",
+    "--ignore=tests/test_executor.py",
+    "--ignore=tests/test_expressions.py",
+    "--deselect",
+    "tests/dialects/test_dialect.py::TestDialect::test_lazy_load"
+  ],
+  "type": "feature",
+  "base": "8cebe18b37cc9005b66839ceb3e3d96f589c5e61",
+  "reference": "91f607181d4a9476d330496d26b6dc681906f5d3",
+  "hidden_tests": [
+    "tests/dialects/test_postgres.py",
+    "tests/dialects/test_snowflake.py"
+  ],
+  "hidden_command": [
+    "{python}",
+    "-m",
+    "pytest",
+    "-q",
+    "-rfE",
+    "-p",
+    "no:cacheprovider",
+    "tests/dialects/test_postgres.py",
+    "tests/dialects/test_snowflake.py"
+  ],
+  "setup_files": {
+    "sqlglot/_version.py": "__version__ = '0.0.0'\n__version_tuple__ = (0, 0, 0)\n"
+  },
+  "source": "https://github.com/tobymao/sqlglot/commit/91f607181d4a9476d330496d26b6dc681906f5d3",
+  "instruction": "Snowflake's CORR returns NULL when either column has zero variance, where DuckDB's returns NaN. Make sqlglot keep Snowflake's result when it transpiles Snowflake's CORR to DuckDB: write `CASE WHEN ISNAN(<corr>) THEN NULL ELSE <corr> END`, where <corr> is the whole call together with any FILTER and OVER clause. CORR read with any other dialect (PostgreSQL, DuckDB) is written unchanged everywhere, and Snowflake's CORR is written unchanged with Snowflake and PostgreSQL.\nRead with Snowflake and written with DuckDB (input -> output):\n- SELECT CORR(a, b) -> SELECT CASE WHEN ISNAN(CORR(a, b)) THEN NULL ELSE CORR(a, b) END\n- SELECT CORR(a, b) OVER (PARTITION BY c) -> SELECT CASE WHEN ISNAN(CORR(a, b) OVER (PARTITION BY c)) THEN NULL ELSE CORR(a, b) OVER (PARTITION BY c) END\n- SELECT CORR(a, b) FILTER(WHERE c > 0) -> SELECT CASE WHEN ISNAN(CORR(a, b) FILTER(WHERE c > 0)) THEN NULL ELSE CORR(a, b) FILTER(WHERE c > 0) END\n- SELECT CORR(a, b) FILTER(WHERE c > 0) OVER (PARTITION BY d) -> SELECT CASE WHEN ISNAN(CORR(a, b) FILTER(WHERE c > 0) OVER (PARTITION BY d)) THEN NULL ELSE CORR(a, b) FILTER(WHERE c > 0) OVER (PARTITION BY d) END\nWritten unchanged: `SELECT CORR(a, b)` and `SELECT CORR(a, b) OVER (PARTITION BY c)` read with Snowflake or PostgreSQL and written with Snowflake or PostgreSQL; and those two plus `SELECT CORR(a, b) FILTER(WHERE c > 0)` and `SELECT CORR(a, b) FILTER(WHERE c > 0) OVER (PARTITION BY d)` read with PostgreSQL and written with DuckDB or PostgreSQL. Add tests.",
+  "batch": "sqlglot-stage-2",
+  "notes": "Harder tuning tasks, stage 2 (built October 11, 2026, unattended at the user's request; not screened): sqlglot (MIT), mined from 2026 commits whose subject and body credit no agent, with hidden tests outside the test files that need pytz, duckdb or pandas (the suite leaves those out, and test_lazy_load, which runs a bare `python`). Stage 2 takes the larger behavioural commits stage 1 left, without long arbitrary templates. Tuning only.",
+  "instruction_source": "written from the fix commit message and the hidden tests (the linked issue or pull request not read); describes behavior, not the change"
+}
