@@ -989,6 +989,40 @@ def modelpilot_manifest(arms, budget_usd, sessions):
             for a in arms if ARMS[a]['kind'] == 'modelpilot'} or None
 
 
+def modelpilot_plan(arm, limit_usd):
+    """The plan's description of one ModelPilot arm, by what it actually runs: the exploration draw, Jev's advice, or
+    (every ModelPilot arm since October 11) the measured rates alone."""
+    overrides = ARMS[arm].get('policy_overrides') or {}
+    if (overrides.get('exploration') or {}).get('enabled'):
+        return [f'ModelPilot exploration arm {arm}: low concise with no advisor; each trial\'s draw from its task, arm '
+                'and trial number decides whether it switches to Opus 5.5 at the turn\'s effort and at which main-loop '
+                'request (configs/modelpilot-policy.json, exploration). Measurement only; no TypeSafe key needed.']
+    refusal = (f'any request is refused once wire spend reaches ${limit_usd:.2f} per trial or cost is unknown')
+    if ARMS[arm].get('advisor') == 'jev':
+        lines = [f'ModelPilot arm {arm}: active policy (benchmark arm only). Jev (compat checkout, advice only) predicts '
+                 'the model and effort at each turn start and on stuck evidence; ModelPilot jumps straight there when '
+                 'the expected total cost says it pays, else stays (configs/modelpilot-policy.json). Stuck with nothing '
+                 f'stronger, the task stops; {refusal}. TypeSafe advice is billed separately and unpriced, so its '
+                 'dollars are a lower bound; --live asks for a TypeSafe key.']
+    else:
+        lines = [f'ModelPilot arm {arm}: active policy (benchmark arm only), no advisor. It starts at '
+                 f'{ARMS[arm]["model"]}/{ARMS[arm]["effort"]}; each turn start weighs the measured settings on their '
+                 'measured pass rates and moves when the expected total cost says it pays, else stays '
+                 '(configs/modelpilot-policy.json); stuck evidence moves to Opus 5.5 at the turn\'s effort, and on '
+                 f'Opus already the task stops; {refusal}. No TypeSafe key needed.']
+    consult = (overrides.get('delegation') or {}).get('consult') or {}
+    if consult.get('enabled'):
+        lines.append('  Delegation on: priced consults and handoff notes'
+                     + (', plus a consult whatever its price when the agent ends its turn.'
+                        if 'agent_finish' in consult.get('force', ()) else '.'))
+    floor = overrides.get('quality_floor') or {}
+    if floor.get('enabled'):
+        lines.append(f'  Quality floor: only settings no worse than {floor["baseline"]} on the measured tuning tasks, '
+                     'or above the current one; a start below it moves to the cheapest allowed setting'
+                     + (' without Jev.' if ARMS[arm].get('advisor') == 'jev' else '.'))
+    return lines
+
+
 def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *, client_version=None, shape='single',
               gap=0, run_budget=None, expected=None, jev_key=None, trial_factory=None, clock=time.monotonic,
               sleep=time.sleep, subscription_arms=(), oauth_token=None, compact='none', autocompact=None, **limits):
@@ -1252,21 +1286,8 @@ def main():
                   '(hidden prompt with --live) and asks for 1h cache writes; their dollars are reported API-key '
                   'equivalent (1h writes at the 5m rate), as-sent alongside, and do not count toward the run budget. '
                   'A usage or rate limit (HTTP 429) excludes the trial and stops the run.')
-        for arm in (a for a in arms if ARMS[a]['kind'] == 'modelpilot' and ARMS[a].get('advisor') != 'jev'):
-            print(f'ModelPilot exploration arm {arm}: low concise with no advisor; each trial\'s draw from its task, arm '
-                  'and trial number decides whether it switches to Opus 5.5 at the turn\'s effort and at which main-loop '
-                  'request (configs/modelpilot-policy.json, exploration). Measurement only; no TypeSafe key needed.')
-        for arm in (a for a in arms if ARMS[a]['kind'] == 'modelpilot' and ARMS[a].get('advisor') == 'jev'):
-            print(f'ModelPilot arm {arm}: active policy (benchmark arm only). Jev (compat checkout, advice only) predicts '
-                  'the model and effort at each turn start and on stuck evidence; ModelPilot jumps straight there when '
-                  'the expected total cost says it pays, else stays (configs/modelpilot-policy.json). Stuck with nothing '
-                  f'stronger, the task stops; any request is refused once wire spend reaches ${args.budget * sessions:.2f} '
-                  'per trial or cost is unknown. TypeSafe advice is billed separately and unpriced, so its dollars are a '
-                  'lower bound; --live asks for a TypeSafe key.')
-            floor = (ARMS[arm].get('policy_overrides') or {}).get('quality_floor') or {}
-            if floor.get('enabled'):
-                print(f'  Quality floor: only settings no worse than {floor["baseline"]} on the measured tuning tasks, '
-                      'or above the current one; a start below it moves to the cheapest allowed setting without Jev.')
+        for arm in (a for a in arms if ARMS[a]['kind'] == 'modelpilot'):
+            print('\n'.join(modelpilot_plan(arm, args.budget * sessions)))
         return
     cli, version = resolve_client(args.claude or shutil.which('claude') or 'claude')
     if client_problem(version):
