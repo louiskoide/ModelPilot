@@ -84,6 +84,24 @@ class BenchTaskTests(unittest.TestCase):
         self.assertTrue(result['valid'], result)
         self.assertEqual(result['base_failing_tests'], ['test_many (tests.test_pkg.T)'])
 
+    def test_a_source_only_follow_up_can_complete_the_fix_when_the_task_names_both(self):
+        fix = self.reference
+        self.commit('pkg/__init__.py', FIXED + '\n# tidied in a follow-up\n')
+        follow_up = self.head()
+        task = dict(self.task, reference=follow_up)
+        self.assertEqual(bench_tasks.chain_problem(task, self.repo), 'base_is_not_reference_parent')  # the default rule
+        task['fix_commits'] = [fix, follow_up]
+        self.assertIsNone(bench_tasks.chain_problem(task, self.repo))
+        self.assertTrue(validate(task, self.repo, sys.executable, self.root/'scratch', repeats=1)['valid'])
+        self.assertEqual(bench_tasks.chain_problem(dict(task, fix_commits=[follow_up]), self.repo),
+                         'base_is_not_reference_parent')  # the chain must start at the base's child
+        self.assertEqual(bench_tasks.chain_problem(dict(task, fix_commits=[fix]), self.repo),
+                         'reference_is_not_the_last_fix_commit')
+        self.commit('tests/test_pkg.py', NEW_TEST + '\n    def test_more(self):\n        self.assertEqual(last([3]), 3)\n')
+        retested = self.head()
+        self.assertEqual(bench_tasks.chain_problem(dict(task, reference=retested, fix_commits=[fix, follow_up, retested]),
+                                                   self.repo), 'follow_up_changes_tests')
+
     def test_workspace_has_the_base_tree_and_no_history(self):
         work = workspace(self.task, self.repo, self.root/'work')
         self.assertEqual((work/'pkg'/'__init__.py').read_text(), BUGGY)

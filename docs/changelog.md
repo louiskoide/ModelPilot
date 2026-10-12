@@ -13,6 +13,26 @@ $0, user request (item E of the night's list), built unattended; not run. Detail
 - **Proposed run** (the user's go; API key): `runs/governor-live-20261012.sh --live` (not committed), about $0.10–0.30 and 7 minutes.
 - **Tests:** 736 of 737 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/governor-live-regression-py312.log`), run under `nice` beside the live mid-task compaction run. The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-governor-live`).
 
+## October 12, 2026 (night): an optional seventh sqlglot task, Postgres CREATE TRIGGER, and the validation rule it needs (offline)
+
+$0, built unattended on its own branch (`sqlglot-trigger-task`, on top of stage 2) because adopting it is the user's call. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 2", optional seventh task.
+
+- **The task** (`sqlglot-postgres-create-trigger`): stage 2's strongest candidate, a structured CREATE TRIGGER in the core parser, 266 source lines over 5 files. Its fix commit fails its own tests (a `_pasre_wrapped` typo breaks every WHEN), and the maintainer's next commit, the same day and source only, fixed it. So the reference is that follow-up.
+- **The rule** (`bench_tasks.chain_problem`): a task may name `fix_commits`, the fix and its follow-ups, oldest first, each the parent of the next, from the base's child to the reference; no follow-up may change a test file. Tasks without the field are validated as before.
+- **Tree, not text:** at base the Postgres statements round-trip as raw Commands, so the instruction names the tree and the 5-test edge suite checks it (reference 5/5, base 1/5).
+- **Checked:** valid (`runs/bench-validate-20261012-013354.json`); 74 tuning tasks, the final split and its lock unchanged. New: `test_a_source_only_follow_up_can_complete_the_fix_when_the_task_names_both`.
+- **Tests:** 735 of 736 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/sqlglot-trigger-task-regression-py312.log`). The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-sqlglot-trigger`).
+
+## October 12, 2026 (night): harder tasks, sqlglot stage 2: 6 tasks built (offline)
+
+$0, user request (item D of the night's list), built unattended while the mid-task compaction run went on; nothing screened. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 2".
+
+- **6 tasks** from the larger behavioural 2026 commits stage 1 left (61–82 source lines over 2–7 files), all valid (`runs/bench-validate-20261012-001546.json`; `sqlglot-sqlite-generated-columns` again after its `instruction_source` was corrected, `runs/bench-validate-20261012-013515.json`), each with a 4–5-test edge suite the reference passes in full (`bench/edge_tests/README.md`). They join `bench/splits.json` under `tuning` (73 tuning tasks); the final split and its lock are unchanged.
+  - `sqlglot-snowflake-filter-within-group`, `sqlglot-dax-dialect` (a new dialect), `sqlglot-from-first-multi-insert`, `sqlglot-array-append-nulls`, `sqlglot-snowflake-corr-nan`, `sqlglot-sqlite-generated-columns`.
+- **Left out:** 22 of the 28 remaining candidates, as refactors, long arbitrary templates or no harder than stage 1. The strongest, Postgres CREATE TRIGGER (269 lines), fails its own tests at its commit (a `_pasre_wrapped` typo that the next commit fixed), so it needs a reference one commit later, which `validate` refuses: the user's call.
+- **Proposed** (the user's go): the stage 1 screen on these six, `runs/sqlglot-stage2-screen-20261012.sh` (not committed): subscription, $0 API, about $3.70 as sent, about 25 minutes.
+- **Tests:** 734 of 735 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/sqlglot-stage2-regression-py312.log`), run under `nice` beside the live mid-task compaction run. The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-sqlglot-2`).
+
 ## October 11, 2026 (evening): Jev no longer advises ModelPilot; stuck tasks go to Opus 5.5 (offline)
 
 $0, user decisions after item 8's fail: Jev's advisor role is dropped (Jev stays as the comparison arm), and a stuck task moves straight to Opus 5.5. A turn-start or in-run predictor of ModelPilot's own is parked: the tuning tasks are too easy to separate Sonnet from Opus (Opus 74/74, low concise 95.5%), so it waits for tasks where they differ. Details: `docs/m6-modelpilot-policy.md`, "No advisor".
