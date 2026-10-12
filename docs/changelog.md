@@ -2,6 +2,15 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 12, 2026 (morning): the governor's live fallback passes
+
+$0.0013 on the API key (the user's run, `runs/m4-cascade-20261012-091200`, code `f91be69`); nothing else changed. Details: `docs/governor.md`, "Fallback execution"; evidence rows in `docs/evidence.md`.
+
+- **Passed:** `cascade_check --live --execute-fallback`. The supported Sonnet 5.5 draft was accepted on its verified span ($0.00067). The unsupported draft escalated ($0.000214); the governor admitted one Opus 5.5 fallback against a $0.02 estimate, ran and settled it ($0.000428), re-verified its answer (also no token) and deferred to human review. Cost complete, nothing applied.
+- **First attempt failed:** `runs/m4-cascade-20261012-084109`, a connection timeout 8 s into the first draft, before any reply. Known cost $0, marked unknown; not retried automatically. The user reran it.
+- **Not covered:** the fallback's accept path (offline only) and real work: edits are never sent to a fallback.
+- **Tests:** 742 of 743 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/governor-fallback-regression-py312.log`). The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink.
+
 ## October 12, 2026 (morning): plan item 12 live: turn-end delivery and an observed rebuild pass; idle rebuilds wait 330 s; the governor compares current models only
 
 $0.0334 on the API key (the user's run, `runs/governed-rebuild-20261012-072505`, code `b10ec39`); the code changes are offline. Details: `docs/governor.md`, "Turn-end delivery and an observed rebuild"; evidence row in `docs/evidence.md`.
