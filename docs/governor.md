@@ -95,7 +95,7 @@ Two things did not go as planned. The follow-up came 305.6 s after the previous 
 4. It re-reviews the fallback's answer against the same host evidence. A verified answer is accepted. A correction during the call gives `reject_stale`. Anything else is `would_defer` with `next_step: human_review`.
 5. There is never a second fallback, and edits are not sent because they cannot be verified.
 
-`cascade_check --live --execute-fallback` wires this for the escalated draft. It has not been run live.
+`cascade_check --live --execute-fallback` wires this for the escalated draft, on Sonnet 5.5 drafts with an Opus 5.5 fallback. **Live (October 12, `runs/m4-cascade-20261012-091200`, the user's run): passed, $0.0013.** The supported draft was accepted on its verified span. The unsupported one escalated; the governor admitted, ran and settled one Opus 5.5 fallback, whose answer (also no token) was re-verified and deferred to human review, never accepted. Only the defer path ran live: a fallback that finds a verified answer is tested offline only. A first attempt (`m4-cascade-20261012-084109`) lost its connection before any reply and was not retried automatically.
 
 ## Live evidence
 
@@ -148,7 +148,7 @@ Known interaction: a refused call inside `Worker.dispatch` also sets that worker
 
 ## Not done
 
-- **Broader live evidence.** The declared channel has two passing live sessions, synthetic Read-only tasks on Sonnet 4.6/low (a tool hook delivered) and Sonnet 5.5/low (the blocked `Stop` delivered). Live observation of writes and failures, Opus, and `cascade_check --execute-fallback` (now Sonnet 5.5 drafts with an Opus 5.5 fallback) have not been run.
+- **Broader live evidence.** The declared channel has two passing live sessions, synthetic Read-only tasks on Sonnet 4.6/low (a tool hook delivered) and Sonnet 5.5/low (the blocked `Stop` delivered). Live observation of writes and failures and an Opus session have not been run. The fallback has one synthetic live pass (October 12, above), on the defer path.
 - **Turn-end delivery and observed rebuilds beyond one session.** Each has one live pass (October 12, above). Claude Code 2.1.284 puts a blocked stop's reason into the next request twice: as a system reminder that begins `Stop hook blocking error from command: <hook command line>` and as `Stop hook feedback:`. Both carry the declared marker, and the model also sees the hook's command line (local paths, no credentials). One live Sonnet 5.5 session accepted a correction framed this way. Rebuild observation relies on the proxy; a hooks-only setup would confirm only compaction. 2.1.284's hook payloads carry no model and only the client's own `effort.level` (on `PreToolUse`, `PostToolUse` and `Stop`), so the wire is used instead.
 - **Test-suite observations.** Only file hashes and failure text are observed. `suite`/`failures` need an explicit test adapter, as M3 has, rather than parsing arbitrary output.
 - **Enforcement.** Active mode is deliberately unavailable until the integrated arm has measured evidence (work items 3–4, `docs/changelog.md`). The proxy never blocks, and hooks never change the model, effort or context.
