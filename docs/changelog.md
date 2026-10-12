@@ -2,6 +2,28 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 12, 2026 (morning): plan item 12 live: turn-end delivery and an observed rebuild pass; idle rebuilds wait 330 s; the governor compares current models only
+
+$0.0334 on the API key (the user's run, `runs/governed-rebuild-20261012-072505`, code `b10ec39`); the code changes are offline. Details: `docs/governor.md`, "Turn-end delivery and an observed rebuild"; evidence row in `docs/evidence.md`.
+
+- **Passed:** the correction, issued during the turn's last model call, reached the model once through the blocked `Stop` and was obeyed. The rebuild was planned on idle (compaction, then medium), both observed, and acknowledged `observed`. 6 requests, all 200 and settled; governor = proxy; tokens equal the client's (its cost, $0.0352, uses its own Sonnet 5.5 rates).
+- **Not as planned:** the follow-up came 305.6 s after the previous request ended and read the whole 5m entry (4,041 read, 117 written), so the compaction ($0.0148) ran on a warm context that the follow-up had read for $0.0007. Every replication rewrote at 330 s, so `m5.IDLE_BOUNDARY_SECONDS` = 330 now sets the idle trigger (`RebaseQueue`, `Governor.plan_rebase`, the `UserPromptSubmit` hook), and the live scenario idles 335 s. The medium request read the tools and system written at low (2,713) and rewrote the rest, as the September 28 probe found.
+- **Current models only:** the proxy's dry-run forecast compares only `SWITCH_TARGETS` (Sonnet 5.5, Opus 5.5); superseded models keep their rates so old runs reprice. `cascade_check` drafts on Sonnet 5.5 and falls back to Opus 5.5 (the October 11 stuck-task rule), priced from `bench.rates()`.
+- **Proposed** (the user's go): the governor's live fallback, `runs/cascade-fallback-20261012.sh` (not committed): `cascade_check --live --execute-fallback`, API key, three requests at 192 output tokens, under $0.01, seconds.
+- **Not done:** a cost check before a rebuild. Whether compaction pays depends on context size and pause, which plan item 6's `--compact warm` run measures.
+- **Tests:** 739 of 740 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/governor-e-regression-py312.log`). New: `test_idle_waits_past_a_5m_entry_seen_warm`, `test_forecast_compares_only_current_session_models`. The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink.
+
+## October 12, 2026 (night): plan item 12, the governor's live test of turn-end delivery and an observed rebuild, built (offline)
+
+$0, user request (item E of the night's list), built unattended; not run. Details: `docs/governor.md`, "Turn-end delivery and an observed rebuild".
+
+- **`governed_session --scenario turn-end-rebuild`**: one isolated Sonnet 5.5 session of four invocations through the governed proxy, dry-run. A correction issued during the turn's last model call (only the blocked `Stop` can deliver it); after 305 s idle, the next prompt's hook plans the queued rebuild (medium effort, compaction); `/compact`; then the planned effort, which the proxy should see and acknowledge as `observed`.
+- **Timing.** The coordinator corrects once the proxy admits a request after the first `PostToolUse` hook began. The hook journals its event before it delivers, so that event alone would race.
+- **Status:** `passed`, `failed`, or `inconclusive` when the model called a tool after the correction (a tool hook delivered it). Token counts must match the client's cumulative totals; cost is reported only, since the pinned client may price Sonnet 5.5 reads at the rate before October 7. A failed invocation ends the session before the idle wait.
+- **Offline** (real client, scripted fixture, the idle gap simulated): passes, with the client's cumulative totals equal to the wire's over all four invocations, compaction included. New: `test_a_turn_end_correction_then_a_rebuild_plan_acknowledged_by_observation` and `RebuildStatusTests` in `tests/test_governed_session.py`.
+- **Proposed run** (the user's go; API key): `runs/governor-live-20261012.sh --live` (not committed), about $0.10–0.30 and 7 minutes.
+- **Tests:** 736 of 737 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/governor-live-regression-py312.log`), run under `nice` beside the live mid-task compaction run. The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-governor-live`).
+
 ## October 12, 2026 (night): an optional seventh sqlglot task, Postgres CREATE TRIGGER, and the validation rule it needs (offline)
 
 $0, built unattended on its own branch (`sqlglot-trigger-task`, on top of stage 2) because adopting it is the user's call. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 2", optional seventh task.
