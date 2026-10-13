@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Updated October 11, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
+Updated October 13, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
 
 ## Objective
 
@@ -77,7 +77,7 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 Built offline first; live runs need the user's approval. 1–4 done October 6; 4 found no pre-run miss signal.
 
 5. Dropped for the quality floor (user decision, October 8).
-6. Long sessions, mid-task compaction (`split` shape): built offline; runs await approval.
+6. Mid-task compaction: no loss shown (Oct 13), not on Haiku. Long sessions await approval.
 7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
 8. Done Oct 11: fail.
 9. Caveman: parked (user decision); its $0 pass found at most 1%, all lossy.
@@ -85,4 +85,4 @@ Built offline first; live runs need the user's approval. 1–4 done October 6; 4
 11. 4b held (user decision; its trial-count rule gives n=1).
 12. Governor: live checks passed (Oct 12); idle rebuilds wait 330 s (warm at 306 s).
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
-14. Haiku 5.5: helper roles only (summaries, simple steps), unbuilt.
+14. Haiku 5.5: helper roles only (simple steps), unbuilt.

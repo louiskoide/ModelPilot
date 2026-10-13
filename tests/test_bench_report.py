@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest import mock
 from modelpilot import bench_report
-from modelpilot.bench_report import cache_attribution, summarize
+from modelpilot.bench_report import cache_attribution, ineligible_reason, load_run, summarize, transport_check
 from modelpilot.cache_probe import cost
 
 RATES = {'claude-sonnet-5': dict(input=2, output=10, read=.2, write_5m=2.5, write_1h=4),
@@ -341,6 +341,38 @@ class IneligibleTrialTests(unittest.TestCase):
         self.assertEqual([(t['task'], t['reason']) for t in result['excluded_ineligible_trials']],
                          [('x', 'transport_error'), ('y', 'transport_error')])
         self.assertEqual(result['arms'][0]['trials'], 2)
+
+    def test_a_lost_request_the_client_resent_without_streaming_excludes_the_trial(self):
+        # bench-20261011-234003, ISMAGS, Sonnet-summary trial 0: a cut stream, the same request again without
+        # streaming, and a session that went on to succeed.
+        rows = [{'kind': 'messages', 'status': 'ok', 'stream': True, 'started_unix': 1},
+                {'kind': 'messages', 'status': 'transport_error', 'error_type': 'IncompleteRead', 'stream': True,
+                 'started_unix': 2},
+                {'kind': 'messages', 'status': 'ok', 'stream': False, 'started_unix': 3},
+                {'kind': 'count_tokens', 'status': 'ok', 'stream': False, 'started_unix': 4},
+                {'kind': 'messages', 'status': 'ok', 'stream': True, 'started_unix': 5}]
+        check = transport_check(rows)
+        self.assertEqual(check, {'lost_requests': 1, 'sent_after_loss': 2, 'non_streaming_after_loss': 1})
+        self.assertEqual(transport_check([rows[0], rows[4]]), {'lost_requests': 0, 'sent_after_loss': 0,
+                                                               'non_streaming_after_loss': 0})
+        record = {'sessions': [{'stop': 'success'}] * 3, 'transport_check': check}
+        self.assertEqual(ineligible_reason(record), 'connection_retried')
+        self.assertEqual(ineligible_reason(dict(record, sessions=[{'stop': 'transport_error'}])), 'transport_error')
+        self.assertIsNone(ineligible_reason(dict(record, transport_check=transport_check([rows[0]]))))
+
+    def test_records_without_the_check_get_it_from_their_proxy_log(self):
+        with tempfile.TemporaryDirectory() as temp:
+            run = Path(temp)/'bench-1'
+            trial = run/'t'/'sonnet-5.5'/'0'
+            trial.mkdir(parents=True)
+            (run/'manifest.json').write_text(json.dumps({'arms': {'sonnet-5.5': {}}}))
+            (trial/'trial.json').write_text(json.dumps({'task': 't', 'arm': 'sonnet-5.5', 'passed': True,
+                                                        'sessions': [{'stop': 'success'}]}))
+            (trial/'observations.jsonl').write_text(json.dumps({'kind': 'messages', 'status': 'connection_closed',
+                                                                 'started_unix': 1}) + '\n')
+            _, [record] = load_run(run, {})
+        self.assertEqual(record['transport_check']['lost_requests'], 1)
+        self.assertEqual(ineligible_reason(record), 'connection_retried')
 
 
 class WriteSourceTests(unittest.TestCase):

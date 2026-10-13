@@ -2,6 +2,17 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 13, 2026: plan item 6, mid-task compaction: no loss shown; Haiku stays out of compaction; a hidden client retry excluded
+
+The user's runs, subscription: 15 runs, 119 trials, $26.99 as sent, $0 API (the October 11 run and top-ups through today). Analysis and code $0. Details: `docs/m6-benchmark-plan.md`, "Mid-task compaction", "Result (October 13)"; evidence rows in `docs/evidence.md`.
+
+- **Result:** strict passes, 3 trials per task and arm on 11 tasks: control 26/33, Sonnet's summary 28/33, Haiku's 24/33. No paired interval excludes 0, so no loss is claimed. Haiku against Sonnet's summary is the closest call: −12 points [−24, 0], from MySQL, DuckDB and parse. Both compaction arms cost more than the control (+$0.077 and +$0.026 a task); Haiku's summary costs $0.004 against $0.049.
+- **What follows:** mid-task compaction showed no quality loss, but 11 tasks rule out only large losses. Haiku isn't used for compaction (the point estimate leans against it). The cold-cache case wasn't tested.
+- **User decision:** trials that lost their connection are left out, as item 8 did (PR #58's rule, adopted), and topped up into new run directories (`runs/midtask-compaction-topup-20261012.sh`, not committed).
+- **A hidden retry:** after a stream cut mid-reply (`IncompleteRead`), the pinned client sends the request again without streaming, despite `CLAUDE_CODE_MAX_RETRIES=0`, and the session succeeds, so no stop reason shows it (`bench-20261011-234003`, ISMAGS, `-compact` trial 0). `bench` records `transport_check`; `bench_report` derives it for older records and excludes such a trial (`connection_retried`). It adds that one trial here.
+- **Reproducible:** `midtask_compaction.pooled` pools each arm across a run and its reruns (not `arm@run`) and pairs per task with `bench_report.summarize`; `midtask_compaction` now writes it under `paired`.
+- **Tests:** all 746 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/midtask-compaction-result-regression-py312.log`). New: `test_a_lost_request_the_client_resent_without_streaming_excludes_the_trial`, `test_records_without_the_check_get_it_from_their_proxy_log`, `test_arms_pool_across_runs_and_lost_trials_stay_out`.
+
 ## October 12, 2026 (morning): the governor's live fallback passes
 
 $0.0013 on the API key (the user's run, `runs/m4-cascade-20261012-091200`, code `f91be69`); nothing else changed. Details: `docs/governor.md`, "Fallback execution"; evidence rows in `docs/evidence.md`.

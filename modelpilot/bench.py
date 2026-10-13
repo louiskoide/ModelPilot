@@ -783,6 +783,7 @@ class Trial:
             path=bench_report.setting_path(rows),
             cost_components=bench_report.cost_components(bench_report.priced_rows(self.record, rows, self.rates), self.rates),
             write_sources=bench_report.write_sources(bench_report.priced_rows(self.record, rows, self.rates), self.rates))
+        self.record['transport_check'] = bench_report.transport_check(rows)
         if self.arm['kind'] == 'fixed' and self.arm.get('effort'):
             self.record['effort_check'] = effort_check(rows, self.arm['effort'])
         if self.appended:
