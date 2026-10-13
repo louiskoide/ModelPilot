@@ -15,7 +15,8 @@ these runs as they read single ones. A plan turn that edits the checkout is reco
 A trial whose compaction went to the wrong model, or a control that compacted, is excluded (compaction_check).
 
 report() breaks each trial down by turn: what the plan, the compaction and the fix turn cost, the summary's output
-tokens and what the fix turn wrote back to the cache. Pass rates and paired costs per task come from bench_report.
+tokens and what the fix turn wrote back to the cache. pooled() pairs pass rates and costs per task (bench_report) over
+a run and its reruns, after regrade has re-graded each.
 
 Tuning tasks only; fixed arms only. Without --live nothing is sent.
 """
@@ -110,8 +111,28 @@ def load_run(run_dir, rates):
             continue
         log = path.parent/'observations.jsonl'
         rows = [json.loads(l) for l in log.read_text().splitlines() if l.strip()] if log.exists() else []
+        record.setdefault('transport_check', bench_report.transport_check(rows))  # as bench_report.load_run
         out.append((record, breakdown(record, rows, rates)))
     return out
+
+
+def pooled(run_dirs, rates, resamples=10000):
+    """The pre-registered comparison over several split runs (a run and the reruns that topped it up): each arm's
+    trials pooled across the runs, not labeled per run as bench_report.load_runs does, then paired per task with
+    bench_report.summarize, strict passes after the latest re-grade. The seed is the first run's. Secondary: the same
+    without trials whose plan turn edited."""
+    seed, arms, records = None, [], []
+    for run in run_dirs:
+        manifest, run_records = bench_report.load_run(run, rates)
+        if manifest.get('shape') != 'split':
+            raise ValueError(f'{run}: not a split-shape run')
+        seed = manifest.get('seed', 0) if seed is None else seed
+        arms += [a for a in manifest['arms'] if a not in arms]
+        records += run_records
+    no_edits = [r for r in records if not (r.get('plan_turn_edits') or {}).get('edited')]
+    return {'seed': seed, 'trials': len(records),
+            'primary': bench_report.summarize(records, arms, seed=seed, resamples=resamples),
+            'without_plan_turn_edits': bench_report.summarize(no_edits, arms, seed=seed, resamples=resamples)}
 
 
 def main():
@@ -122,10 +143,15 @@ def main():
     rates = bench.rates()
     items = [i for run in args.runs for i in load_run(run, rates)]
     result = {'runs': [str(r) for r in args.runs], 'arms': report(items), 'trials': [b for _, b in items],
-              'pass_rates': 'paired per task: python3 -m modelpilot.bench_report (with the latest re-grade)'}
+              'paired': pooled(args.runs, rates)}
     if args.out:
         args.out.write_text(json.dumps(result, indent=1) + '\n')
-    print(json.dumps(result['arms'], indent=1))
+    primary = result['paired']['primary']
+    print(json.dumps({'arms': result['arms'],
+                      'pass_rate_differences': [{'arms': p['arms'], **p['differences']['pass_rate']}
+                                                for p in primary['paired']],
+                      'excluded': [(t['task'], t['arm'], t['reason']) for t in primary['excluded_ineligible_trials']]},
+                     indent=1))
 
 
 if __name__ == '__main__':

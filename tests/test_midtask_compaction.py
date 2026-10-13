@@ -76,6 +76,41 @@ class CheckTests(unittest.TestCase):
         self.assertIsNone(bench_report.ineligible_reason({'compaction_check': {'applied': True}}))
 
 
+class PooledTests(unittest.TestCase):
+    """A run and the rerun that topped it up: each arm's trials count once, across both runs."""
+    def run_dir(self, root, name, arms, trials):
+        run = Path(root)/name
+        run.mkdir()
+        (run/'manifest.json').write_text(json.dumps({'shape': 'split', 'seed': 12, 'arms': {a: {} for a in arms}}))
+        for task, arm, trial, passed, extra in trials:
+            path = run/task/arm/str(trial)
+            path.mkdir(parents=True)
+            (path/'trial.json').write_text(json.dumps(dict(
+                {'task': task, 'arm': arm, 'trial': trial, 'shape': 'split', 'complete': True, 'passed': passed,
+                 'wall_seconds': 1, 'accounting': {'cost_usd': .1}, 'sessions': [{'stop': 'success'}]}, **extra)))
+        return run
+
+    def test_arms_pool_across_runs_and_lost_trials_stay_out(self):
+        tasks = [f't{i}' for i in range(10)]
+        lost = {'sessions': [{'stop': 'success'}, {'stop': 'transport_error'}]}
+        with tempfile.TemporaryDirectory() as temp:
+            first = self.run_dir(temp, 'bench-1', [CONTROL, SESSION],
+                                 [(t, CONTROL, 0, True, {}) for t in tasks] + [('t0', SESSION, 0, False, lost)])
+            rerun = self.run_dir(temp, 'bench-2', [SESSION], [(t, SESSION, 0, t != 't9', {}) for t in tasks])
+            with self.assertRaisesRegex(ValueError, 'not a split-shape run'):
+                bad = self.run_dir(temp, 'bench-3', [CONTROL], [])
+                (bad/'manifest.json').write_text(json.dumps({'arms': {CONTROL: {}}}))
+                midtask_compaction.pooled([bad], {}, resamples=10)
+            result = midtask_compaction.pooled([first, rerun], {}, resamples=10)
+        primary = result['primary']
+        self.assertEqual((result['seed'], result['trials']), (12, 21))
+        self.assertEqual([(a['arm'], a['trials'], a['passes']) for a in primary['arms']],
+                         [(CONTROL, 10, 10), (SESSION, 10, 9)])  # one arm each, not arm@run
+        self.assertEqual([(t['task'], t['reason']) for t in primary['excluded_ineligible_trials']],
+                         [('t0', 'transport_error')])
+        self.assertEqual(primary['paired'][0]['tasks'], 10)
+
+
 class ProxyRewriteTests(unittest.TestCase):
     """Plain HTTP through the proxy to the owned fixture: $0."""
     def setUp(self):

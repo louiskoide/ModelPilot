@@ -560,9 +560,22 @@ def pair_summary(a, b, cells_a, cells_b, rng, resamples, scopes=('complete', 'co
             'differences': differences}
 
 
+def transport_check(rows):
+    """A trial's Messages requests that lost their connection, and what the client sent after the first loss. The arms
+    allow no retries, yet the pinned client (2.1.284) answers a stream cut mid-reply (IncompleteRead) by sending the
+    request again without streaming, and the session goes on to succeed (bench-20261011-234003, ISMAGS, Sonnet-summary
+    trial 0): a retry, with its cost and cache effects, that no stop reason shows."""
+    messages = [r for r in rows if r.get('kind') == 'messages']
+    lost = [r for r in messages if r.get('status') in ('transport_error', 'connection_closed')]
+    first = min((r.get('started_unix', 0) for r in lost), default=None)
+    after = [] if first is None else [r for r in messages if r.get('started_unix', 0) > first and r not in lost]
+    return {'lost_requests': len(lost), 'sent_after_loss': len(after),
+            'non_streaming_after_loss': sum(r.get('stream') is False for r in after)}
+
+
 def ineligible_reason(record):
     """Why a trial is excluded from comparisons, or None: its router or adapter says so, a session ended on a lost
-    connection, or a fixed arm's requested effort, appended system prompt, cache lifetime or compaction model didn't
+    connection or went on after one, or a fixed arm's requested effort, appended system prompt, cache lifetime or compaction model didn't
     reach the wire."""
     routing = record.get('routing') or {}
     if routing.get('benchmark_eligible') is False:
@@ -571,6 +584,9 @@ def ineligible_reason(record):
     # graded. bench marks it complete, so until now every report counted it as a failure; item 8's scorer dropped it.
     if any(s.get('stop') == 'transport_error' for s in record.get('sessions') or ()):
         return 'transport_error'
+    # A lost request whose session went on: the client retried it (transport_check), against the no-retry rule.
+    if (record.get('transport_check') or {}).get('lost_requests'):
+        return 'connection_retried'
     if (record.get('effort_check') or {}).get('applied') is False:
         return 'effort_not_applied'
     if (record.get('prompt_check') or {}).get('applied') is False:
@@ -657,7 +673,9 @@ def load_run(run_dir, rates, price_at=None):
         record.setdefault('complete', record.get('phase', 'graded') == 'graded')
         log = path.parent/'observations.jsonl'
         if log.exists():
-            rows = priced_rows(record, [json.loads(line) for line in log.read_text().splitlines() if line.strip()], rates)
+            rows = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
+            record.setdefault('transport_check', transport_check(rows))  # records written before October 13 lack it
+            rows = priced_rows(record, rows, rates)
             if price_at is not None:
                 rows = repriced(rows, rates)
             record.update(cache=cache_attribution(rows, rates), path=setting_path(rows),
