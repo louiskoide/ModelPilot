@@ -866,6 +866,20 @@ The M tasks: `mi-subfactorial` (low concise 1/3, Sonnet medium 0/2, Opus 2/2), `
 - For an Opus user it doesn't: low concise misses where Opus passes on 4 of 37 valid tasks (Y_O), and nothing here predicts which.
 - sqlglot stage 1 is too easy to separate settings: 1 miss in 56 counted trials (low concise on duckdb, 1 of 3).
 
+### Miss detector: requirements checklist (October 14, built offline, $0; not run)
+
+The miss detector's next candidate after its first two signals failed (October 13: the misses are implied requirements never implemented, so neither the agents' tests nor the task's suite shows them). Overnight queue item 4, branch `codex/miss-checklist`, `modelpilot/miss_checklist.py`. Dev split only (`miss_detector.split_runs('dev')`); nothing reads the holdout.
+
+- **Step 1, `list`:** one request per dev task, given only the instruction and the repository's name (never the hidden tests, reference fix, edge suite or any diff): list 3 to 10 checks a reviewer can verify by reading the change, stated and, above all, implied (inputs and edge cases, behaviour to keep, public names, types, errors and messages). The reply's JSON block becomes `checklists/<task>.json`.
+- **Step 2, `judge`:** one request per counted dev trial: the instruction, the task's checklist and the trial's saved `agent.diff`, never its grade. Per check, `met`, `not_met` or `unclear`, with the deciding diff lines; a check the reply leaves out counts as `missing`. A diff over 100 KB is recorded as not judged rather than cut.
+- **Both steps** as `spec_tests`: without `--live` only prompts and a plan (every request's most possible cost); with `--live` each request sent once, no retry, no fallback, none past `--limit-usd`, errors and unusable replies recorded. Models: Haiku 5.5 or Sonnet 5.5, effort low.
+- **`score` ($0):** rules `not_met>=k` and `not_met_or_unclear>=k` for k = 1, 2, 3: misses and passes flagged, overall, per task and with each task left out, since 37 of the 40 dev misses are on 3 tasks. Unjudged trials are counted apart.
+- **`plan` ($0):** both steps' expected and most possible cost for each model over the dev split's saved diffs, and the break-even below. Needs the dev runs.
+
+**Cost estimate without the dev runs** (`runs/codex-miss-checklist/estimate.json`, $0): 453 counted dev trials spread evenly over the 29 tasks, each diff taken as its task's upstream reference diff (median 4.7 KB, largest 31.9 KB; `runs/codex-miss-checklist/reference-diff-sizes.json`) at 1× and 3×, prompts at 3 bytes a token, 1,500 output tokens per answer, thinking included. Expected totals: **Haiku 5.5 low $0.57–0.82** (list $0.02), **Sonnet 5.5 low $11.37–16.49** (list $0.47), $0.0013–0.0018 and $0.025–0.036 a trial. Bounded above at $10–14 and $41–57 if every request used all 6,000 output tokens at the dearest tier. `plan` gives the figure from the saved diffs.
+
+**Break-even against item 7.** A miss noticed late was repaired 28 of 28 times at $0.056 each. If every flag costs one such fix attempt, the check pays only when an unnoticed miss would do more damage than (check cost + flags × $0.056) / misses caught, per trial, at the dev miss rate 40/453. Haiku: about $0.10 at perfect recall and 5% false flags, $0.20 at half the misses and 10%, $0.37–0.39 at half and 25%. Sonnet: $0.37, $0.74 and $0.91 (diffs ×1), up to $1.17 (×3). For comparison, the forced Opus review at the finish cost $0.069 a task and rescued none, and a redo costs about $0.25. Whether the checklist catches misses at all is unknown until `list` and `judge` run (the user's call; Haiku's run is under $1).
+
 ### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
 
 User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku passes, the tests are too easy"), so harder tasks come before item 8's labels, from sqlglot (MIT; surveyed October 4, above), in stages. Stage 1 builds 8 tasks and screens them with one low concise and one Opus 5.5 trial each; a full batch follows only if the repository produces misses. sqlglot joins the tuning split; the final split and its lock are unchanged.
