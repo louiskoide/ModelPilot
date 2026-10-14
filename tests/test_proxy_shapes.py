@@ -476,6 +476,26 @@ class ShapeTests(unittest.TestCase):
         for odd in ({'web_search_requests': -1}, {'code_execution_requests': 1}, {'web_search_requests': '2'}, [1]):
             self.assertIsNone(priced_usage({'model': MODEL}, MODEL, dict(USAGE, server_tool_use=odd), RATES), odd)
 
+    def test_a_reply_served_by_a_fallback_model_is_left_unknown(self):
+        """M1's "server-side fallback accounting" (October 14 cloud batch): a request sent with server-side fallbacks
+        can be answered by another model (the reply's model names it; usage.iterations lists a fallback_message). The
+        proxy can't tell which model's rates billed which part, so the cost is unknown, never priced at the asked
+        model's rates or the answering model's alone. Claude Code 2.1.284 sends no fallbacks; this pins the rule."""
+        usage = dict(USAGE, iterations=[{'type': 'message', 'model': MODEL}, {'type': 'fallback_message', 'model': 'claude-opus-4-8'}])
+        start = message_start(usage)
+        start['message']['model'] = 'claude-opus-4-8'
+        replies = ((False, json.dumps({'type': 'message', 'model': 'claude-opus-4-8', 'content': [], 'usage': usage}).encode()),
+                   (True, sse(start, *message_end(usage))))
+        for stream_mode, body in replies:
+            with self.subTest(stream=stream_mode):
+                self.reply({'headers': [('Content-Type', 'application/json')], 'pieces': [body]})
+                self.send(json.dumps({'model': MODEL, 'max_tokens': 8, 'stream': stream_mode, 'messages': [],
+                                      'fallbacks': 'default'}).encode())
+                row = self.rows()[-1]
+                self.assertEqual((row['status'], row['model'], row['cost_usd'], row['usage_problem']),
+                                 ('ok', MODEL, None, 'unpriced_usage'))
+                self.assertEqual(accounting([row], {})['cost_usd'], None)
+
     def test_an_upstream_that_closes_without_replying_is_answered_with_a_502(self):
         """Fixed October 14 (an expectedFailure until then): http.client.RemoteDisconnected (an upstream that closes
         before its status line) subclasses ConnectionResetError, so do_POST's branch meant for a client that went away
