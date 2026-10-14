@@ -1,0 +1,20 @@
+{
+  "model": "claude-haiku-4-5-20251001",
+  "requests": {
+    "count_tokens": 1,
+    "control": 1,
+    "rejected": 10
+  },
+  "prompt_tokens_each": 2000,
+  "cost_usd": {
+    "count_tokens": 0.0,
+    "control": 0.002005,
+    "rejected_if_not_billed": 0.0,
+    "rejected_if_billed_at_input_rate": 0.02,
+    "worst_case_total": 0.022005
+  },
+  "auth": "API key only (a subscription shows no per-request billing)",
+  "wall_time": "about 1 minute to send; read usage about 1 hour later",
+  "readout": "input tokens for claude-haiku-4-5-20251001 on this key in the window: about 2000 (1x) means rejected 400s are free; about 22000 (11x) means billed",
+  "decision": "whether bench_report may count rejected requests as $0 (today a sensitivity figure only, cost_if_rejected_free_usd) and so whether Jev trials with a rejection get a headline cost"
+}

@@ -1,0 +1,432 @@
+..................................................................----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 42818)
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/socketserver.py", line 692, in process_request_thread
+    self.finish_request(request, client_address)
+  File "/usr/lib/python3.12/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+  File "/usr/lib/python3.12/socketserver.py", line 761, in __init__
+    self.handle()
+  File "/usr/lib/python3.12/http/server.py", line 438, in handle
+    self.handle_one_request()
+  File "/usr/lib/python3.12/http/server.py", line 404, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/socket.py", line 707, in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+........A sonnet-5 0 PASS 0.8
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.8
+..A sonnet-5 0 PASS 0.4
+C sonnet-5 0 PASS 0.4
+B sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.8
+A sonnet-5 0 PASS 0.8
+A sonnet-5 0 PASS 0.8
+...................................................sssss..............................................................................................................effort/0/a/system cold error 
+........ttl/1h/0/claude-sonnet-5-5/past_5m touch_0_1h ok write
+ttl/1h/0/claude-sonnet-5-5/past_5m touch_1_1h ok write
+..effort/0/claude-sonnet-5/system cold error hit
+..........................................................................EE.................................................................................................ssss....................................bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/1 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/3 REPAIRED 0.1
+..bench-x/parse-decimal-grouping/arm/3 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/1 REPAIRED 0.1
+.bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.3
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.3
+bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+...............................................................................................................................E..................................................................................................control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched error 
+..control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched rejected 
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+control/haiku/tool_continuation/0 seed ok write
+control/haiku/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+effort_down/sonnet/tool_continuation/0 seed ok write
+effort_down/sonnet/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+effort_up/opus/tool_continuation/0 seed ok write
+effort_up/opus/tool_continuation/0 switched ok write
+to_haiku/sonnet/tool_continuation/0 seed ok write
+to_haiku/sonnet/tool_continuation/0 switched ok write
+to_haiku/opus/tool_continuation/0 seed ok write
+to_haiku/opus/tool_continuation/0 switched ok write
+from_haiku/tool_continuation/0 seed ok write
+from_haiku/tool_continuation/0 switched ok write
+effort_up/haiku/tool_continuation/0 seed ok write
+effort_up/haiku/tool_continuation/0 switched ok write
+control/sonnet/new_turn/0 seed ok write
+control/sonnet/new_turn/0 switched ok write
+control/opus/new_turn/0 seed ok write
+control/opus/new_turn/0 switched ok write
+control/haiku/new_turn/0 seed ok write
+control/haiku/new_turn/0 switched ok write
+effort_up/sonnet/new_turn/0 seed ok write
+effort_up/sonnet/new_turn/0 switched ok write
+effort_down/sonnet/new_turn/0 seed ok write
+effort_down/sonnet/new_turn/0 switched ok write
+model_up/new_turn/0 seed ok write
+model_up/new_turn/0 switched ok write
+model_down/new_turn/0 seed ok write
+model_down/new_turn/0 switched ok write
+effort_up/opus/new_turn/0 seed ok write
+effort_up/opus/new_turn/0 switched ok write
+to_haiku/sonnet/new_turn/0 seed ok write
+to_haiku/sonnet/new_turn/0 switched ok write
+to_haiku/opus/new_turn/0 seed ok write
+to_haiku/opus/new_turn/0 switched ok write
+from_haiku/new_turn/0 seed ok write
+from_haiku/new_turn/0 switched ok write
+effort_up/haiku/new_turn/0 seed ok write
+effort_up/haiku/new_turn/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+control/haiku/tool_continuation/0 seed ok write
+control/haiku/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+effort_down/sonnet/tool_continuation/0 seed ok write
+effort_down/sonnet/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+effort_up/opus/tool_continuation/0 seed ok write
+effort_up/opus/tool_continuation/0 switched ok write
+to_haiku/sonnet/tool_continuation/0 seed ok write
+to_haiku/sonnet/tool_continuation/0 switched ok write
+to_haiku/opus/tool_continuation/0 seed ok write
+to_haiku/opus/tool_continuation/0 switched ok write
+from_haiku/tool_continuation/0 seed ok write
+from_haiku/tool_continuation/0 switched ok write
+effort_up/haiku/tool_continuation/0 seed ok write
+effort_up/haiku/tool_continuation/0 switched ok write
+control/sonnet/new_turn/0 seed ok write
+control/sonnet/new_turn/0 switched ok write
+control/opus/new_turn/0 seed ok write
+control/opus/new_turn/0 switched ok write
+control/haiku/new_turn/0 seed ok write
+control/haiku/new_turn/0 switched ok write
+effort_up/sonnet/new_turn/0 seed ok write
+effort_up/sonnet/new_turn/0 switched ok write
+effort_down/sonnet/new_turn/0 seed ok write
+effort_down/sonnet/new_turn/0 switched ok write
+model_up/new_turn/0 seed ok write
+model_up/new_turn/0 switched ok write
+model_down/new_turn/0 seed ok write
+model_down/new_turn/0 switched ok write
+effort_up/opus/new_turn/0 seed ok write
+effort_up/opus/new_turn/0 switched ok write
+to_haiku/sonnet/new_turn/0 seed ok write
+to_haiku/sonnet/new_turn/0 switched ok write
+to_haiku/opus/new_turn/0 seed ok write
+to_haiku/opus/new_turn/0 switched ok write
+from_haiku/new_turn/0 seed ok write
+from_haiku/new_turn/0 switched ok write
+effort_up/haiku/new_turn/0 seed ok write
+effort_up/haiku/new_turn/0 switched ok write
+.model_up/new_turn/0 seed ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+.control/sonnet/tool_continuation/0 seed error 
+.model_down/tool_continuation/0 seed ok write
+.model_up/tool_continuation/0 seed ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched rejected 
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+.model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed unpriced write
+.haiku/move_control/tool_continuation/0 seed ok write
+haiku/move_control/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/0 seed ok write
+haiku/native_medium/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 seed ok write
+haiku/move_pm/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 seed ok write
+haiku/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 seed ok write
+haiku/move_pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 seed ok write
+haiku/move_control/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 seed ok write
+haiku/native_medium/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 seed ok write
+haiku/move_pm/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 seed ok write
+haiku/native_xhigh/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 seed ok write
+haiku/move_pm_xhigh/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 step3 ok partial_hit_and_write
+...haiku/move_control/tool_continuation/0 seed ok write
+haiku/move_control/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 seed ok write
+haiku/move_top/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 seed ok write
+haiku/move_pm/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step3 ok partial_hit_and_write
+..Plan (transitions, 2 repeat(s)): 96 requests at most; admission estimates total $11.03 (a conservative upper bound, not a forecast); $8 budget; client shape 2.1.284 (Claude Code); results: /tmp/tmpqw0gyy07/run
+Dry-run only. Add --live to send paid requests.
+..effort/control/tool_continuation/0 seed ok write
+effort/control/tool_continuation/0 step1 ok partial_hit_and_write
+effort/control/tool_continuation/0 step2 ok partial_hit_and_write
+effort/control/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 seed ok write
+effort/native_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 seed ok write
+effort/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 seed ok write
+effort/top_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 seed ok write
+effort/pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step2 rejected 
+effort/pm_high/tool_continuation/0 seed ok write
+effort/pm_high/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step2 rejected 
+effort/pm_xhigh/tool_continuation/0 seed ok write
+effort/pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step2 rejected 
+effort/pm_xhigh_after/tool_continuation/0 seed ok write
+effort/pm_xhigh_after/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 seed ok write
+effort/pm_xhigh_at_start/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step3 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 seed ok write
+effort/opus_pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step2 rejected 
+..effort/control/tool_continuation/0 seed ok write
+effort/control/tool_continuation/0 step1 ok partial_hit_and_write
+effort/control/tool_continuation/0 step2 ok partial_hit_and_write
+effort/control/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 seed ok write
+effort/native_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 seed ok write
+effort/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 seed ok write
+effort/top_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 seed ok write
+effort/pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 seed ok write
+effort/pm_high/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 seed ok write
+effort/pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 seed ok write
+effort/pm_xhigh_after/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 seed ok write
+effort/pm_xhigh_at_start/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step3 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 seed ok write
+effort/opus_pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step3 ok partial_hit_and_write
+......return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/model_near/tool_continuation/0 return ok partial_hit_and_write
+.return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_near/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 return ok partial_hit_and_write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 rejected 
+...Plan (returns, 2 repeat(s)): 44 requests at most; admission estimates total $8.87 (a conservative upper bound, not a forecast); $8 budget; client shape 2.1.284 (Claude Code); results: /tmp/tmp5efiaqme/run
+Dry-run only. Add --live to send paid requests.
+...return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_near/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 return ok partial_hit_and_write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/model_near/tool_continuation/0 return ok partial_hit_and_write
+.............................
+======================================================================
+ERROR: test_a_turn_end_correction_then_a_rebuild_plan_acknowledged_by_observation (test_governed_session.OfflineGovernedSessionTests.test_a_turn_end_correction_then_a_rebuild_plan_acknowledged_by_observation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/ModelPilot/tests/test_governed_session.py", line 117, in test_a_turn_end_correction_then_a_rebuild_plan_acknowledged_by_observation
+    report = run_rebuild_session(run, shutil.which('claude'), 'sk-ant-offline-fixture-not-a-key',
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ModelPilot/modelpilot/governed_session.py", line 388, in run_rebuild_session
+    report.update(summarize_rebuild(run, db, session, limit_usd, task, report, stdouts, record, expect, forbid,
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ModelPilot/modelpilot/governed_session.py", line 417, in summarize_rebuild
+    reconciled = reconcile_log(gov, run/'observations.jsonl') if rows else None
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ModelPilot/modelpilot/governor.py", line 539, in reconcile_log
+    status = gov.db.execute('SELECT status FROM gov_reservations WHERE session=? AND request_id=?',
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.DatabaseError: database disk image is malformed
+
+======================================================================
+ERROR: test_correction_during_the_last_model_call_is_delivered_by_blocking_the_stop (test_governed_session.OfflineGovernedSessionTests.test_correction_during_the_last_model_call_is_delivered_by_blocking_the_stop)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/ModelPilot/tests/test_governed_session.py", line 72, in test_correction_during_the_last_model_call_is_delivered_by_blocking_the_stop
+    report = run_session(run, shutil.which('claude'), 'sk-ant-offline-fixture-not-a-key',
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ModelPilot/modelpilot/governed_session.py", line 143, in run_session
+    report.update(summarize(run, db, session, limit_usd, task, stdout, correction_record, expect, forbid,
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ModelPilot/modelpilot/governed_session.py", line 164, in summarize
+    reconciled = reconcile_log(gov, log) if log.exists() else None
+                 ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ModelPilot/modelpilot/governor.py", line 539, in reconcile_log
+    status = gov.db.execute('SELECT status FROM gov_reservations WHERE session=? AND request_id=?',
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.DatabaseError: database disk image is malformed
+
+======================================================================
+ERROR: test_correction_resets_the_kept_setting_with_the_ladder (test_policy_session.RealClientPolicyTests.test_correction_resets_the_kept_setting_with_the_ladder)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/ModelPilot/tests/test_policy_session.py", line 100, in test_correction_resets_the_kept_setting_with_the_ladder
+    run, report, bodies, main = self.run_policy([FAIL]*3 + [read, read, {'text': 'DONE'}], tools='Bash,Read',
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ModelPilot/tests/test_policy_session.py", line 64, in run_policy
+    report = run_session(run, shutil.which('claude'), 'sk-ant-offline-fixture-not-a-key', self.url, RATES,
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ModelPilot/modelpilot/governed_session.py", line 143, in run_session
+    report.update(summarize(run, db, session, limit_usd, task, stdout, correction_record, expect, forbid,
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ModelPilot/modelpilot/governed_session.py", line 162, in summarize
+    gov = Governor(db, session, limit)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ModelPilot/modelpilot/governor.py", line 64, in __init__
+    self.state = State(path)
+                 ^^^^^^^^^^^
+  File "/home/user/ModelPilot/modelpilot/m2.py", line 53, in __init__
+    self.db.execute('PRAGMA journal_mode=WAL')
+sqlite3.DatabaseError: database disk image is malformed
+
+----------------------------------------------------------------------
+Ran 764 tests in 313.774s
+
+FAILED (errors=3, skipped=9)
+
+real	5m14.074s
+user	2m4.526s
+sys	0m36.878s

@@ -1,0 +1,147 @@
+{
+ "cachetools-cache-key": {
+  "diff_bytes": 6789,
+  "instruction_bytes": 578,
+  "stat_tail": " 3 files changed, 37 insertions(+), 18 deletions(-)"
+ },
+ "cachetools-cached-condition": {
+  "diff_bytes": 12938,
+  "instruction_bytes": 1430,
+  "stat_tail": " 4 files changed, 204 insertions(+), 18 deletions(-)"
+ },
+ "cachetools-setitem-evict": {
+  "diff_bytes": 2787,
+  "instruction_bytes": 651,
+  "stat_tail": " 2 files changed, 49 insertions(+), 5 deletions(-)"
+ },
+ "cachetools-tlru-cache": {
+  "diff_bytes": 16498,
+  "instruction_bytes": 1531,
+  "stat_tail": " 3 files changed, 469 insertions(+), 1 deletion(-)"
+ },
+ "cachetools-tlru-stale": {
+  "diff_bytes": 2504,
+  "instruction_bytes": 499,
+  "stat_tail": " 2 files changed, 37 insertions(+), 1 deletion(-)"
+ },
+ "cachetools-ttl-expire": {
+  "diff_bytes": 3840,
+  "instruction_bytes": 323,
+  "stat_tail": " 2 files changed, 20 insertions(+), 11 deletions(-)"
+ },
+ "mi-is-sorted-lt-only": {
+  "diff_bytes": 3783,
+  "instruction_bytes": 367,
+  "stat_tail": " 2 files changed, 24 insertions(+), 21 deletions(-)"
+ },
+ "mi-last-reversed-none": {
+  "diff_bytes": 1240,
+  "instruction_bytes": 320,
+  "stat_tail": " 2 files changed, 11 insertions(+), 1 deletion(-)"
+ },
+ "mi-numeric-range-consistent": {
+  "diff_bytes": 6261,
+  "instruction_bytes": 901,
+  "stat_tail": " 2 files changed, 89 insertions(+), 15 deletions(-)"
+ },
+ "mi-one-falsy-exception": {
+  "diff_bytes": 4371,
+  "instruction_bytes": 530,
+  "stat_tail": " 3 files changed, 59 insertions(+), 5 deletions(-)"
+ },
+ "mi-reshape-multidim": {
+  "diff_bytes": 5974,
+  "instruction_bytes": 1472,
+  "stat_tail": " 3 files changed, 117 insertions(+), 9 deletions(-)"
+ },
+ "mi-running-minmax-stable": {
+  "diff_bytes": 3532,
+  "instruction_bytes": 545,
+  "stat_tail": " 2 files changed, 52 insertions(+), 14 deletions(-)"
+ },
+ "mi-running-statistics": {
+  "diff_bytes": 25624,
+  "instruction_bytes": 1955,
+  "stat_tail": " 8 files changed, 499 insertions(+), 18 deletions(-)"
+ },
+ "mi-sample-strict-counts": {
+  "diff_bytes": 1678,
+  "instruction_bytes": 441,
+  "stat_tail": " 2 files changed, 16 insertions(+), 2 deletions(-)"
+ },
+ "nx-bipartite-butterflies": {
+  "diff_bytes": 14037,
+  "instruction_bytes": 1052,
+  "stat_tail": " 3 files changed, 300 insertions(+), 19 deletions(-)"
+ },
+ "nx-classes-weak-views": {
+  "diff_bytes": 13548,
+  "instruction_bytes": 1672,
+  "stat_tail": " 4 files changed, 198 insertions(+), 39 deletions(-)"
+ },
+ "nx-connectivity-digraph-cuts": {
+  "diff_bytes": 18562,
+  "instruction_bytes": 1652,
+  "stat_tail": " 4 files changed, 267 insertions(+), 19 deletions(-)"
+ },
+ "nx-dag-antichain-width": {
+  "diff_bytes": 3789,
+  "instruction_bytes": 640,
+  "stat_tail": " 3 files changed, 83 insertions(+)"
+ },
+ "nx-ismags-monomorphism": {
+  "diff_bytes": 31861,
+  "instruction_bytes": 1466,
+  "stat_tail": " 3 files changed, 259 insertions(+), 93 deletions(-)"
+ },
+ "nx-vf2-isolated-nodes": {
+  "diff_bytes": 5927,
+  "instruction_bytes": 935,
+  "stat_tail": " 3 files changed, 77 insertions(+), 19 deletions(-)"
+ },
+ "parse-decimal-grouping": {
+  "diff_bytes": 2606,
+  "instruction_bytes": 403,
+  "stat_tail": " 2 files changed, 21 insertions(+), 4 deletions(-)"
+ },
+ "parse-hyphen-field": {
+  "diff_bytes": 2311,
+  "instruction_bytes": 604,
+  "stat_tail": " 2 files changed, 24 insertions(+), 2 deletions(-)"
+ },
+ "parse-strftime-directives": {
+  "diff_bytes": 16666,
+  "instruction_bytes": 1834,
+  "stat_tail": " 3 files changed, 203 insertions(+), 62 deletions(-)"
+ },
+ "tomli-decode-error-attrs": {
+  "diff_bytes": 16250,
+  "instruction_bytes": 1126,
+  "stat_tail": " 3 files changed, 140 insertions(+), 50 deletions(-)"
+ },
+ "tomli-hex-escape": {
+  "diff_bytes": 2005,
+  "instruction_bytes": 472,
+  "stat_tail": " 4 files changed, 12 insertions(+), 5 deletions(-)"
+ },
+ "tomli-inline-table-newlines": {
+  "diff_bytes": 3568,
+  "instruction_bytes": 510,
+  "stat_tail": " 6 files changed, 53 insertions(+), 7 deletions(-)"
+ },
+ "tomli-loads-typeerror": {
+  "diff_bytes": 1535,
+  "instruction_bytes": 316,
+  "stat_tail": " 2 files changed, 15 insertions(+), 1 deletion(-)"
+ },
+ "tomli-optional-seconds": {
+  "diff_bytes": 4682,
+  "instruction_bytes": 462,
+  "stat_tail": " 6 files changed, 20 insertions(+), 24 deletions(-)"
+ },
+ "toolz-compose-annotations": {
+  "diff_bytes": 10759,
+  "instruction_bytes": 1622,
+  "stat_tail": " 2 files changed, 221 insertions(+), 1 deletion(-)"
+ }
+}

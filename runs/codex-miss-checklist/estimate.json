@@ -1,0 +1,130 @@
+{
+ "inputs": {
+  "trials": 453,
+  "misses": 40,
+  "tasks": 29,
+  "trials_per_task": "even (15-16)",
+  "diff_bytes": "reference diff x 1 and x 3",
+  "bytes_per_token": 3.0,
+  "expected_output_tokens": {
+   "list": 1500,
+   "judge": 1500
+  },
+  "fix_usd": 0.056,
+  "redo_usd": 0.25
+ },
+ "estimates": {
+  "haiku, diffs x1": {
+   "model": "claude-haiku-5-5",
+   "effort": "low",
+   "tasks": 29,
+   "trials": 453,
+   "expected_usd": {
+    "list": 0.0236,
+    "judge": 0.5449,
+    "total": 0.5685
+   },
+   "max_usd": {
+    "list": 0.4622,
+    "judge": 9.873,
+    "total": 10.3351
+   },
+   "expected_per_trial_usd": 0.00125,
+   "break_even_damage_usd": {
+    "recall 0.5, false flags 0.05": 0.142,
+    "recall 0.5, false flags 0.1": 0.2,
+    "recall 0.5, false flags 0.25": 0.373,
+    "recall 0.75, false flags 0.05": 0.113,
+    "recall 0.75, false flags 0.1": 0.152,
+    "recall 0.75, false flags 0.25": 0.268,
+    "recall 1.0, false flags 0.05": 0.099,
+    "recall 1.0, false flags 0.1": 0.128,
+    "recall 1.0, false flags 0.25": 0.215
+   }
+  },
+  "sonnet, diffs x1": {
+   "model": "claude-sonnet-5-5",
+   "effort": "low",
+   "tasks": 29,
+   "trials": 453,
+   "expected_usd": {
+    "list": 0.4713,
+    "judge": 10.8992,
+    "total": 11.3705
+   },
+   "max_usd": {
+    "list": 1.8488,
+    "judge": 39.4927,
+    "total": 41.3415
+   },
+   "expected_per_trial_usd": 0.0251,
+   "break_even_damage_usd": {
+    "recall 0.5, false flags 0.05": 0.682,
+    "recall 0.5, false flags 0.1": 0.74,
+    "recall 0.5, false flags 0.25": 0.914,
+    "recall 0.75, false flags 0.05": 0.474,
+    "recall 0.75, false flags 0.1": 0.512,
+    "recall 0.75, false flags 0.25": 0.628,
+    "recall 1.0, false flags 0.05": 0.369,
+    "recall 1.0, false flags 0.1": 0.398,
+    "recall 1.0, false flags 0.25": 0.485
+   }
+  },
+  "haiku, diffs x3": {
+   "model": "claude-haiku-5-5",
+   "effort": "low",
+   "tasks": 29,
+   "trials": 453,
+   "expected_usd": {
+    "list": 0.0236,
+    "judge": 0.8007,
+    "total": 0.8243
+   },
+   "max_usd": {
+    "list": 0.4622,
+    "judge": 13.7096,
+    "total": 14.1718
+   },
+   "expected_per_trial_usd": 0.00182,
+   "break_even_damage_usd": {
+    "recall 0.5, false flags 0.05": 0.155,
+    "recall 0.5, false flags 0.1": 0.213,
+    "recall 0.5, false flags 0.25": 0.386,
+    "recall 0.75, false flags 0.05": 0.122,
+    "recall 0.75, false flags 0.1": 0.161,
+    "recall 0.75, false flags 0.25": 0.276,
+    "recall 1.0, false flags 0.05": 0.106,
+    "recall 1.0, false flags 0.1": 0.134,
+    "recall 1.0, false flags 0.25": 0.221
+   }
+  },
+  "sonnet, diffs x3": {
+   "model": "claude-sonnet-5-5",
+   "effort": "low",
+   "tasks": 29,
+   "trials": 453,
+   "expected_usd": {
+    "list": 0.4713,
+    "judge": 16.0147,
+    "total": 16.486
+   },
+   "max_usd": {
+    "list": 1.8488,
+    "judge": 54.8392,
+    "total": 56.688
+   },
+   "expected_per_trial_usd": 0.03639,
+   "break_even_damage_usd": {
+    "recall 0.5, false flags 0.05": 0.938,
+    "recall 0.5, false flags 0.1": 0.996,
+    "recall 0.5, false flags 0.25": 1.169,
+    "recall 0.75, false flags 0.05": 0.644,
+    "recall 0.75, false flags 0.1": 0.683,
+    "recall 0.75, false flags 0.25": 0.798,
+    "recall 1.0, false flags 0.05": 0.497,
+    "recall 1.0, false flags 0.1": 0.526,
+    "recall 1.0, false flags 0.25": 0.613
+   }
+  }
+ }
+}
