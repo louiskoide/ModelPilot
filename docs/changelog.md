@@ -2,6 +2,14 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026: the overnight branches merged; 795 tests pass together
+
+$0, no model request. Merged with merge commits, in order: #63 (sqlglot stage 2 screen), #70 (ledger locks), #72 (Jev launcher path), #69 (proxy shapes), #68 (README), #67 (TypeSafe support), #71 (requirements checklist). #66, the overnight run's `runs/` handoff, was closed unmerged and its files copied to `runs/`.
+
+- **Conflicts:** only `docs/changelog.md`, since each overnight branch added its entry at the top. The six were chained, each merging the one before it with its entry stacked on top, so each merged cleanly in turn; #63 conflicted with none.
+- **Tests:** all 795 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 3 of them expected failures (#69's proxy bugs), no skips (`runs/post-merge-regression-py312.log`). The chain's tip, which differs from `main` only by #63's docs, also passed with `work/` symlinked into a worktree (`runs/codex-chain-regression-py312.log`), so `CLAUDE.md`'s note that the Jev launcher's checkout-path test fails there is removed.
+- **CI:** one flake. `test_jev_accounted_launch.ExplicitClientTests.test_explicit_binary_wins_over_path` timed out (10 s) once on Python 3.14 in #67's push run; the same commit passed in its pull-request run, and the job passed on re-run.
+
 ## October 14, 2026 (overnight run): miss detector, requirements checklist built offline, not run
 
 $0, offline, branch `codex/miss-checklist` (overnight queue item 4, run by Claude Code in a cloud container; report `runs/codex-overnight-20261013/REPORT.md`). The miss detector's documented next candidate. New `modelpilot/miss_checklist.py`; details: `docs/m6-benchmark-plan.md`, "Miss detector: requirements checklist".
