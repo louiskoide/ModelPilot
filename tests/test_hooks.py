@@ -170,6 +170,20 @@ class HookTests(unittest.TestCase):
         self.assertIsNone(self.context(output))
         self.assertEqual(len(self.gov.pending_changes()), 1)  # suggested, not applied
 
+    def test_an_idle_compaction_is_suggested_only_where_it_pays_unless_the_check_is_off(self):
+        self.gov.queue_change('compact', True, self.rev)
+        self.gov.observe_context('claude-sonnet-5-5', 4_000, {'output': 10, 'write': 2.5, 'read': .1})
+        self.gov.observe_context('claude-sonnet-5-5', 6_000, {'output': 10, 'write': 2.5, 'read': .1})
+        self.run_hook('Stop')
+        self.now[0] += 400
+        self.assertNotIn('systemMessage', self.run_hook('UserPromptSubmit'))
+        plan = self.gov.journal('plan_rebase')[-1]['payload']
+        self.assertEqual((plan['action'], plan['compaction_check']['verdict']), ('defer', 'does_not_pay'))
+        self.run_hook('Stop')
+        self.now[0] += 400
+        self.env['MODELPILOT_COMPACTION_CHECK'] = 'off'
+        self.assertIn('/compact', self.run_hook('UserPromptSubmit')['systemMessage'])
+
     def test_compaction_acknowledges_only_a_compact_only_plan(self):
         self.gov.queue_change('compact', True, self.rev)
         self.gov.queue_change('model', 'claude-opus-4-6', self.rev)

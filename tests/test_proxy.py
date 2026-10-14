@@ -10,7 +10,8 @@ from unittest import mock
 from modelpilot import fixtures
 from modelpilot.cache_probe import cost
 from modelpilot.governor import Governor, reconcile_log
-from modelpilot.proxy import ProxyServer, UsageObserver, forecast, logged_usage, measured_cost, request_effort, system_text
+from modelpilot.proxy import (COMPACTION_MARKER, ProxyServer, UsageObserver, forecast, logged_usage, measured_cost,
+                              rebuild_context, request_effort, system_text)
 from modelpilot.fixtures import CATALOG, fixture_server, response_for, USAGE
 
 RATES = {'claude-opus-4-6': dict(input=5, output=25, read=.5, write_5m=6.25, write_1h=10),
@@ -412,9 +413,9 @@ class GovernedProxyTests(unittest.TestCase):
         finally:
             gov.close()
 
-    def send(self, model, effort, tools):
+    def send(self, model, effort, tools, content='x'):
         request = {'model': model, 'stream': False, 'max_tokens': 32, 'output_config': {'effort': effort},
-                   'messages': [{'role': 'user', 'content': 'x'}]}
+                   'messages': [{'role': 'user', 'content': content}]}
         if tools:
             request['tools'] = [{'name': 'Read', 'input_schema': {'type': 'object'}}]
         conn = http.client.HTTPConnection('127.0.0.1', self.proxy.server_port, timeout=5)
@@ -439,6 +440,29 @@ class GovernedProxyTests(unittest.TestCase):
             self.assertTrue(all(r['governor_status'] == 'settled' for r in self.rows(3)))
         finally:
             gov.close()
+
+    def test_main_loop_requests_leave_the_compaction_checks_evidence(self):
+        gov = self.govern()
+        try:
+            self.send('claude-sonnet-4-6', 'high', tools=False)  # a side request
+            self.send('claude-sonnet-4-6', 'high', tools=True)
+            self.send('unpriced-model', 'high', tools=True)
+            self.send('claude-sonnet-4-6', 'high', tools=True, content=COMPACTION_MARKER + ' Summarize.')
+            self.assertEqual([e['payload'] for e in gov.journal('context')],
+                             [{'model': 'claude-sonnet-4-6', 'prefix_tokens': 14750, 'applied': False,
+                               'rates': {'output': 15, 'write': 3.75, 'read': .3}}])
+            rows = self.rows(4)
+            self.assertTrue(rows[-1]['compaction'])  # it carries the context being replaced
+            self.assertTrue(all(r['governor_status'] == 'settled' for r in rows))
+        finally:
+            gov.close()
+
+    def test_the_compaction_checks_write_rate_is_the_lifetime_the_request_asked_for(self):
+        row = {'model': 'claude-sonnet-4-6', 'cost_usd': .01, 'usage': dict(USAGE, cache_creation_input_tokens=250)}
+        self.assertEqual(rebuild_context(dict(row, cache_ttl=['1h']), RATES),
+                         ('claude-sonnet-4-6', 15_000, {'output': 15, 'write': 6, 'read': .3}))
+        self.assertEqual(rebuild_context(dict(row, cache_ttl=['5m']), RATES)[2]['write'], 3.75)
+        self.assertIsNone(rebuild_context(dict(row, cost_usd=None), RATES))  # unpriced usage is no evidence
 
     def test_governor_failure_never_blocks_traffic_and_log_reconciles(self):
         gov = self.govern()

@@ -11,6 +11,30 @@ from .m4 import nonnegative
 # somewhere in 305.6-330 s. A rebuild before 330 s could compact a context that is still warm.
 IDLE_BOUNDARY_SECONDS = 330
 
+# Tokens a compaction summary adds: Sonnet 5.5's averaged 3,925 output tokens in plan item 6, and the turn after one
+# began by writing them (runs/midtask-compaction-report-20261013.json).
+SUMMARY_TOKENS = 3925
+
+
+def compaction_check(prefix_tokens, base_tokens, rates, horizon_requests, summary_tokens=SUMMARY_TOKENS):
+    """Whether compacting at a rebuild pays within the horizon, on cost alone.
+
+    The compaction request sends the whole prefix, cached as the next request would have cached it without compaction
+    (October 12: it read the warm entry and wrote 58 tokens), so that part costs the same either way. Compaction adds
+    the summary's output and its write; it saves reading what it removed (the prefix less the base it keeps and the
+    summary) on each request of the horizon. Later idle expiries, which would rewrite what it removed, aren't counted,
+    so the check errs toward not compacting. rates: USD per million tokens, 'output', 'write' (at the session's cache
+    lifetime) and 'read'. Unknown evidence gives 'unknown', never a guess."""
+    if None in (prefix_tokens, base_tokens, horizon_requests, rates) or \
+            any(rates.get(k) is None for k in ('output', 'write', 'read')):
+        return {'verdict': 'unknown', 'reason': 'no_context_evidence'}
+    removed = max(0, prefix_tokens - base_tokens - summary_tokens)
+    cost = summary_tokens * (rates['output'] + rates['write']) / 1e6
+    saving = horizon_requests * removed * rates['read'] / 1e6
+    return {'verdict': 'pays' if saving > cost else 'does_not_pay', 'prefix_tokens': prefix_tokens,
+            'base_tokens': base_tokens, 'summary_tokens': summary_tokens, 'removed_tokens': removed,
+            'horizon_requests': horizon_requests, 'cost_usd': round(cost, 6), 'saving_usd': round(saving, 6)}
+
 
 class RebaseQueue:
     """Session-local queue; plans never drain it or mutate a conversation."""

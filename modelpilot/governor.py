@@ -13,7 +13,7 @@ import uuid
 from .cache_probe import priced_usage
 from .m2 import State
 from .m4 import cascade, nonnegative, sha
-from .m5 import IDLE_BOUNDARY_SECONDS
+from .m5 import IDLE_BOUNDARY_SECONDS, compaction_check
 
 KINDS = ('model', 'effort', 'prune', 'compact')
 # Settings the host can see the client use: model and effort on the wire, compaction from a hook. A prune
@@ -257,9 +257,34 @@ class Governor:
         return [{'kind': r['kind'], 'change_id': r['change_id'], 'value': json.loads(r['value']),
                  'revision': r['revision']} for r in rows]
 
+    def observe_context(self, model, prefix_tokens, rates):
+        """Evidence of one main-loop request's cached prefix and its model's rates (USD per million tokens: 'output',
+        'write' at the session's cache lifetime, 'read'), from the proxy. The compaction check reads it."""
+        nonnegative(prefix_tokens, 'prefix_tokens')
+        with self.db:
+            self._journal('context', {'model': model, 'prefix_tokens': prefix_tokens, 'rates': rates, 'applied': False})
+
+    def _compaction_check(self):
+        """compaction_check on this session's evidence: the newest prefix and its rates, the first prefix as the base
+        compaction keeps (tools, system and the first prompt, an overestimate), and as the horizon the session's own
+        main-loop requests per completed turn (proxy context notes per client_stop note from the Stop hook)."""
+        contexts = [json.loads(r['payload']) for r in self.db.execute(
+            "SELECT payload FROM gov_decisions WHERE session=? AND kind='context' ORDER BY seq", (self.session,))]
+        turns = self.db.execute("SELECT COUNT(*) FROM gov_decisions WHERE session=? AND kind='client_stop'",
+                                (self.session,)).fetchone()[0]
+        if not contexts or not turns:
+            return compaction_check(None, None, None, None)
+        latest = contexts[-1]
+        return dict(compaction_check(latest['prefix_tokens'], contexts[0]['prefix_tokens'], latest['rates'],
+                                     round(len(contexts) / turns, 2)), model=latest['model'])
+
     def plan_rebase(self, revision, *, idle_seconds=0, idle_threshold=IDLE_BOUNDARY_SECONDS, cache_expired=False,
-                    switch_justified=False, explicit_boundary=False, in_flight=0):
-        """Same boundaries as M5 RebaseQueue.plan; a ready plan is recorded for acknowledgment."""
+                    switch_justified=False, explicit_boundary=False, in_flight=0, check_compaction=True):
+        """Same boundaries as M5 RebaseQueue.plan; a ready plan is recorded for acknowledgment.
+
+        A queued compaction joins a plan the governor triggers only when compaction_check says it pays; otherwise it
+        stays queued for the next boundary (deferred_changes). An explicit boundary, the caller's own, isn't checked,
+        and check_compaction=False turns the check off."""
         nonnegative(idle_seconds, 'idle_seconds')
         nonnegative(idle_threshold, 'idle_threshold')
         if idle_threshold == 0 or type(in_flight) is not int or in_flight < 0:
@@ -271,6 +296,13 @@ class Governor:
             stale = [c['kind'] for c in pending if c['revision'] != revision]
             trigger = ('explicit_boundary' if explicit_boundary else 'cache_expired' if cache_expired
                        else 'justified_switch' if switch_justified else 'idle' if idle_seconds >= idle_threshold else None)
+            check, deferred = None, []
+            if (check_compaction and trigger not in (None, 'explicit_boundary') and not in_flight
+                    and any(c['kind'] == 'compact' for c in eligible)):
+                check = self._compaction_check()
+                if check['verdict'] != 'pays':
+                    deferred = ['compact']
+                    eligible = [c for c in eligible if c['kind'] != 'compact']
             ready = bool(eligible and trigger and not in_flight)
             plan_id = None
             if ready:
@@ -285,6 +317,8 @@ class Governor:
             result = {'plan_id': plan_id, 'applied': False, 'action': 'would_rebase' if ready else 'defer',
                       'trigger': trigger, 'changes': eligible, 'stale_changes': stale,
                       'rebuilds_planned': int(ready), 'in_flight': in_flight}
+            if check:
+                result.update(compaction_check=check, deferred_changes=deferred)
             self._journal('plan_rebase', result, revision=revision)
         return result
 

@@ -28,6 +28,9 @@ LEASE_SECONDS = 3600
 BINDING = ('MODELPILOT_DB', 'MODELPILOT_SESSION', 'MODELPILOT_LIMIT_USD', 'MODELPILOT_TASK', 'MODELPILOT_OWNER')
 # Set by the ModelPilot arm when its policy reviews the work at the agent's finish (consult.force 'agent_finish').
 REVIEW_AT_STOP = 'MODELPILOT_REVIEW_AT_STOP'
+# 'off': an idle rebuild plan keeps a queued compaction without its cost check (Governor.plan_rebase); for scenarios
+# that test delivery and observation on contexts too small for compaction to pay.
+COMPACTION_CHECK = 'MODELPILOT_COMPACTION_CHECK'
 
 
 def binding(env):
@@ -233,7 +236,8 @@ def handle(event, payload, env, clock=time.time):
         if event == 'UserPromptSubmit':
             last_stop = gov.last_note('client_stop')
             idle = max(0, clock() - last_stop['created']) if last_stop else 0
-            plan = gov.plan_rebase(gov.state.get(task)['revision'], idle_seconds=idle, in_flight=0)
+            plan = gov.plan_rebase(gov.state.get(task)['revision'], idle_seconds=idle, in_flight=0,
+                                   check_compaction=env.get(COMPACTION_CHECK) != 'off')
             if plan['action'] == 'would_rebase':
                 notices.append(rebase_notice(plan))
         if event == 'Stop':
