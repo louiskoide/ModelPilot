@@ -2,6 +2,16 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 13, 2026: the governor's idle rebuild compacts only where compaction pays (offline)
+
+$0, user request (option A, built while another session builds the miss detector), branch `rebuild-cost-check`. Closes October 12's "Not done: a cost check before a rebuild", now that plan item 6 has measured summaries. Details: `docs/governor.md`, "Compaction cost check".
+
+- **Rule** (`m5.compaction_check`, `Governor.plan_rebase`): a rebuild the governor triggers keeps a queued compaction only when the reads it saves over the next turn exceed the summary's output and write. Otherwise the compaction stays queued and the plan goes ahead without it (`deferred_changes`); unknown evidence defers too. An explicit boundary isn't checked.
+- **Evidence:** the proxy journals each settled main-loop request's prefix and rates (`observe_context`, `proxy.rebuild_context`); the base is the session's first prefix, the horizon its own requests per completed turn, the summary 3,925 tokens (item 6's Sonnet mean).
+- **Threshold:** on Sonnet 5.5 and Opus 5.5 alike, about 70,000 tokens removed over a 7-request turn. The October 12 live session (4,158 tokens) would not have compacted; its scenario now runs with the check off (`MODELPILOT_COMPACTION_CHECK=off`), since it tests delivery, not economics.
+- **Not covered:** 1h-lifetime sessions (the 330 s boundary assumes 5m), later idle expiries (not credited, so the check leans against compacting), no live run.
+- **Tests:** 752 of 753 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/rebuild-cost-check-regression-py312.log`), run under `nice` beside the miss detector's checks. The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-rebuild-cost`). New: `CompactionCheckTests` (2) in `tests/test_m5.py`; `test_an_idle_plan_keeps_compaction_only_where_it_pays`, `test_without_context_evidence_compaction_waits_unless_the_boundary_is_the_callers`; `test_main_loop_requests_leave_the_compaction_checks_evidence`, `test_the_compaction_checks_write_rate_is_the_lifetime_the_request_asked_for`; `test_an_idle_compaction_is_suggested_only_where_it_pays_unless_the_check_is_off`.
+
 ## October 13, 2026: plan item 6, mid-task compaction: no loss shown; Haiku stays out of compaction; a hidden client retry excluded
 
 The user's runs, subscription: 15 runs, 119 trials, $26.99 as sent, $0 API (the October 11 run and top-ups through today). Analysis and code $0. Details: `docs/m6-benchmark-plan.md`, "Mid-task compaction", "Result (October 13)"; evidence rows in `docs/evidence.md`.
