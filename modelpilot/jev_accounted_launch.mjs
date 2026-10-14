@@ -17,7 +17,7 @@
 //        node jev_accounted_launch.mjs --serve <jev-root> <modelpilot-proxy-url> [--stub-route <model-id>]
 //        node jev_accounted_launch.mjs --self-test <jev-root> <upstream-url>   (stub router, no Claude Code)
 import { spawn } from 'node:child_process';
-import { accessSync, constants } from 'node:fs';
+import { accessSync, constants, realpathSync } from 'node:fs';
 import http from 'node:http';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -32,6 +32,9 @@ if (!jevRoot || !/^http:\/\/127\.0\.0\.1:\d+$/.test(upstreamURL ?? '')) {
 }
 const { startProxy } = await import(pathToFileURL(resolve(jevRoot, 'src/proxy.mjs')));
 const { AUTO_MODEL } = await import(pathToFileURL(resolve(jevRoot, 'src/config.mjs')));
+// The checkout Claude Code is given with --add-dir: its real path, as the pinned launcher's ROOT (from
+// import.meta.url, which Node resolves through symlinks) gives it, even when jevRoot goes through one.
+const jevDir = realpathSync(jevRoot);
 
 // Same values as the pinned launcher's autoModelEnv().
 function autoModelEnv() {
@@ -88,7 +91,7 @@ if (serve) {
   process.on('SIGINT', stop);
   process.stdin.on('end', stop);
   process.stdin.resume();
-  process.stdout.write(JSON.stringify({ port, env, add_dir: resolve(jevRoot), router: stub ? 'stub' : 'typesafe' }) + '\n');
+  process.stdout.write(JSON.stringify({ port, env, add_dir: jevDir, router: stub ? 'stub' : 'typesafe' }) + '\n');
 } else if (selfTest) {
   // Plumbing check only: a stub replaces TypeSafe and no Claude Code runs.
   let offered = null;
@@ -144,7 +147,7 @@ async function launch() {
   const { port, close } = await startProxy({ upstreamURL });
   const env = { ...process.env, ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
     CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1', ...autoModelEnv() };
-  const child = spawn(claude, [...args, '--add-dir', resolve(jevRoot)], { stdio: 'inherit', env });
+  const child = spawn(claude, [...args, '--add-dir', jevDir], { stdio: 'inherit', env });
   child.on('error', (err) => { process.stderr.write(`[accounted] could not start Claude Code: ${err.message}\n`); close(); process.exit(1); });
   child.on('exit', (code, signal) => { close(); process.exit(signal ? 1 : (code ?? 0)); });
 }
