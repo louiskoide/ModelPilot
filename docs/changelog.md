@@ -2,6 +2,15 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026 (overnight run): plan item 13 support: TypeSafe's price not found first-hand; `bench_report` can price the router from an explicit rate; the rejected-400 check written
+
+$0, nothing sent, branch `codex/typesafe-cost` (overnight queue item 7, run by Claude Code in a cloud container; report `runs/codex-overnight-20261013/REPORT.md`). Details: `docs/jev-baseline-setup.md`, "Plan item 13".
+
+- **TypeSafe's price:** the container's network policy refused `typesafe.ai`, `docs.typesafe.ai` and `openrouter.ai`, so no first-party page was read. A web search (October 14) found only third-party listings, as snippets: OpenRouter's "Jev Router" at about $0.042 per million input tokens and $0 output; Requesty from $0.04 per million input. Neither is shown to be the scoring API's price. Router cost stays unpriced.
+- **`bench_report --router-rates FILE`:** an explicit, sourced price (`input_usd_per_mtok`, `output_usd_per_mtok`, `per_decision_usd`, `source`, `as_of`, all required) prices each Jev trial's recorded router usage and adds it to every dollar figure the report reads; scope `provider_plus_router_at_config_rate`, provider-only figures kept. A stub router, a failed router call, missing or malformed usage leave the trial unknown; a router never called adds $0. No default.
+- **Rejected 400s:** `runs/codex-typesafe-cost/rejected_400_billing_check.py` (not committed, not run): 10 requests Haiku 4.5 rejects for Claude Code's trailing system message plus one accepted control, on a key used for nothing else, then the key's usage an hour later: about 2,000 input tokens means free, about 22,000 billed. $0.002–0.022, API key only.
+- **Tests:** 767 offline tests on Python 3.12 with the pinned 2.1.284 client: 755 pass, 9 skip, and 3 error, this machine's baseline (`runs/codex-typesafe-cost-regression-py312.log`; the same 3 fail on clean `main` here, `runs/codex-baseline-with-compat-regression-py312.log`). New: `test_jev_router_cost_is_priced_only_from_an_explicit_rate`, `test_a_router_decision_that_cant_be_priced_leaves_the_trial_unknown`, `test_a_router_rate_file_must_be_explicit_and_sourced` (`tests/test_bench_report.py`); they also pass on Python 3.10.20.
+
 ## October 14, 2026 (overnight run): the README matches the measured state
 
 $0, docs only, branch `codex/readme-refresh` (overnight queue item 6, run by Claude Code in a cloud container; report `runs/codex-overnight-20261013/REPORT.md`). `README.md` dated from September 22: M6 a "smoke" test, the governor's live session pending.
