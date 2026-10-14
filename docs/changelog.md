@@ -2,6 +2,15 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026 (overnight run): the Jev launcher gives Claude Code the checkout's real path, so the checkout-path test passes in symlinked worktrees
+
+$0, offline, branch `codex/jev-launch-symlink-test` (overnight queue item 1, run by Claude Code in a cloud container; report `runs/codex-overnight-20261013/REPORT.md`). Closes the one failure the entries below list for every worktree run.
+
+- **Cause:** `test_serve_prints_the_client_environment_and_routes_until_stdin_closes` compares the launcher's `add_dir` with `str(JEV.resolve())`, and `jev_accounted_launch.mjs` printed `path.resolve(jevRoot)`, which keeps symlinks. Where `work/` is a symlink the two differ.
+- **Fixed in the launcher, not the test.** The pinned `bin/jev-claude.mjs` passes `--add-dir` its `ROOT`, from `import.meta.url`, which Node resolves through symlinks (checked: a script reached through a symlinked directory sees the real path). The accounted launcher now passes `realpathSync(jevRoot)` in `--serve` (`add_dir`) and in launch mode, as the stock one does. A checkout reached without a symlink gets the same path as before.
+- **Reproduced first:** `work/jev-router-compat` built with `jev_compat.prepare_compat` from a clone of the pinned commit (upstream tests 66/66), and the test run in a worktree whose `work/` links to the clone's. On `origin/main` it failed with the main machine's message (`('/home/user/ModelPilot-ws1/work/jev-router-compat', 'stub') != ('/home/user/ModelPilot/work/jev-router-compat', 'stub')`); with the fix it passes.
+- **Tests:** 762 of 765 offline tests pass on Python 3.12 with the pinned 2.1.284 client, in that symlinked worktree (`runs/codex-jev-launch-symlink-test-regression-py312.log`). The 3 errors are this machine's baseline, the same 3 as on clean `main` there (`runs/codex-baseline-with-compat-regression-py312.log`): real-client sessions whose ledger ends `database disk image is malformed` on Linux (see the report). New: `SymlinkedCheckoutTests` builds the symlink itself with stub Jev modules, so it needs only node; it fails on the old launcher.
+
 ## October 14, 2026 (overnight run): the ledger no longer drops its own SQLite locks; advised trials skip without the compat checkout
 
 $0, offline, branch `codex/baseline-failures` (overnight run, an extra item: the 9 tests that failed on a fresh Linux machine without the bundle; run by Claude Code in a cloud container; report `runs/codex-overnight-20261013/REPORT.md`). Details: `docs/m2.md`, "Opening the ledger keeps the process's locks".

@@ -154,3 +154,34 @@ class ExplicitClientTests(unittest.TestCase):
         for path in ('relative/claude', '/nonexistent/claude'):
             result = self.launch('--claude-bin', path)
             self.assertEqual(result.returncode, 2, result.stderr)
+
+
+@unittest.skipUnless(shutil.which('node'), 'needs node')
+class SymlinkedCheckoutTests(unittest.TestCase):
+    """A Jev root reached through a symlink (a worktree whose work/ is one): Claude Code gets the checkout's real
+    path in both modes, as the pinned launcher gives it (its ROOT comes from import.meta.url); stub Jev modules."""
+    def test_add_dir_is_the_real_path_when_the_root_goes_through_a_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            real = Path(tmp)/'main/work/jev'
+            (real/'src').mkdir(parents=True)
+            (real/'src/proxy.mjs').write_text('export async function startProxy(){return {port:1234,close(){}};}')
+            (real/'src/config.mjs').write_text('export const AUTO_MODEL="jev-router";')
+            (Path(tmp)/'worktree').mkdir()
+            (Path(tmp)/'worktree/work').symlink_to(real.parent, target_is_directory=True)
+            linked, expected = Path(tmp)/'worktree/work/jev', str(real.resolve())
+            self.assertNotEqual(os.path.abspath(linked), expected)
+            client = Path(tmp)/'client'
+            client.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+            client.chmod(0o700)
+            env = {'PATH': '/usr/bin:/bin', 'JEV_API_KEY': 'fake', 'HOME': tmp}
+            serve = subprocess.Popen([shutil.which('node'), str(LAUNCHER), '--serve', str(linked), 'http://127.0.0.1:1234',
+                                      '--stub-route', 'claude-sonnet-5'], env=env, stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            out, err = serve.communicate(b'', timeout=10)  # stdin closed: it prints, then stops
+            self.assertEqual(serve.returncode, 0, err)
+            self.assertEqual(json.loads(out.splitlines()[0])['add_dir'], expected)
+            launch = subprocess.run([shutil.which('node'), str(LAUNCHER), str(linked), 'http://127.0.0.1:1234',
+                                     '--claude-bin', str(client), '--', 'hello'], env=env, capture_output=True, text=True,
+                                    timeout=10)
+            self.assertEqual(launch.returncode, 0, launch.stderr)
+            self.assertEqual(launch.stdout.splitlines()[-2:], ['--add-dir', expected])
