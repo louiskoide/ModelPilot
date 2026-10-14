@@ -15,6 +15,7 @@ from modelpilot.proxy import system_text
 from tests import test_bench_tasks as synthetic
 from tests import test_bench
 from tests.test_bench_jev import ACCOUNT_CATALOG, POLICY_TIERS
+from tests.test_advisor import READY as JEV_READY
 
 BROKEN = 'def last(items):\n    return None\n'
 EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -201,6 +202,8 @@ class ToolTrialTests(unittest.TestCase):
         """The active arm with Jev's real bridge and code, its TypeSafe answer stubbed ($0, never eligible). The policy
         runs with calibration off unless a config is given: the stub's answer is what should drive its moves. tools=True
         gives an arm without delegation the R5 tools, for scripts whose host test runs drive the policy."""
+        if not JEV_READY:  # the bridge runs from work/jev-router-compat; without it the advisor fails and nothing moves
+            self.skipTest('needs node and the compat Jev checkout with its dependencies')
         if config is None:
             config = switch_policy.load()
             config['calibration']['enabled'] = False

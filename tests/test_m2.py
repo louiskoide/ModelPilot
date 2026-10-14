@@ -1,5 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from modelpilot.m2 import State, assess
@@ -91,3 +93,42 @@ class StateTests(unittest.TestCase):
     def test_wrong_owner_observation_does_not_pollute_detector(self):
         with self.assertRaises(ValueError): self.state.observe(self.task,1,'other',{'error':'bad'})
         self.assertEqual(self.state.recommend(self.task)['window_events'],0)
+
+
+# Another process tries for a write lock over SQLite's shared-lock bytes (PENDING_BYTE + 2, 510 bytes): held while any
+# connection here has the database open in WAL mode.
+LOCK_PROBE = """
+import fcntl, os, sys
+fd = os.open(sys.argv[1], os.O_RDWR)
+try:
+    fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB, 510, 0x40000000 + 2, os.SEEK_SET)
+except OSError:
+    print('held')
+else:
+    print('free')
+"""
+
+
+@unittest.skipIf(sys.platform == 'win32', 'POSIX advisory locks')
+class LedgerLockTests(unittest.TestCase):
+    def test_opening_the_ledger_again_keeps_this_processs_sqlite_locks(self):
+        """The proxy and coordinator open the ledger once per request while hook processes write it. Opening it must
+        not drop the locks of connections this process already has (October 14: an os.open/os.close of the file did,
+        so a hook could checkpoint under them and real-client sessions ended 'database disk image is malformed')."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp)/'ledger.sqlite3'
+            probe = lambda: subprocess.run([sys.executable, '-c', LOCK_PROBE, str(db)], capture_output=True, text=True,
+                                           check=True).stdout.strip()
+            first = State(db)
+            try:
+                if probe() != 'held':
+                    self.skipTest('this SQLite holds no lock on an idle WAL database')
+                second = State(db)
+                try:
+                    self.assertEqual(probe(), 'held')
+                finally:
+                    second.close()
+            finally:
+                first.close()
+            self.assertEqual(db.stat().st_mode & 0o777, 0o600)  # a new ledger is private
+
