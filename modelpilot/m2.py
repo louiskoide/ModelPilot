@@ -46,9 +46,13 @@ class State:
     def __init__(self, path):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
-        os.close(fd)
+        # Never open and close the file here: closing any descriptor to it drops every POSIX lock this process holds on
+        # it, the SQLite connections' included, and a ledger is opened once per request beside hook processes writing
+        # it (October 14: their sessions ended 'database disk image is malformed'). A new file is made private instead.
+        created = not path.exists()
         self.db = sqlite3.connect(path, timeout=10)
+        if created:
+            os.chmod(path, 0o600)
         self.db.row_factory = sqlite3.Row
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.executescript('''
