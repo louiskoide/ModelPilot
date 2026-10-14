@@ -2,6 +2,16 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 13, 2026 (evening): miss detector, first two signals: neither catches misses
+
+$0: recorded files and host-run tests only, no model request. New `modelpilot/miss_detector.py`. Started after the user chose to build a miss detector (an after-run check) in place of item 8's failed pre-run predictor.
+
+- **Splits, fixed first:** dev is every run on the 29 earlier tuning tasks (`bench-20260929-000001` to `bench-20261010-090944`, seed not 8); the holdout is item 8's labelling runs (seed 8, 38 other tasks). The sqlglot screen and the compaction runs are in neither (their tasks overlap item 8's). Trials count as item 8's did. `--split holdout` refuses without `--prereg`, a committed file whose SHA-256 it records. The holdout has not been read.
+- **Post-run facts (`facts`, `runs/miss-detector-dev-20261013-171447.json`):** 453 counted dev trials, 40 strict misses (tomli 21, parse 10, ISMAGS 6, three others one each). Diff size, tool calls, the agent's own Bash test runs (`delegation`'s parser), cost, stop and two model-text counts. No fact separates misses across tasks (AUC 0.43–0.66). Within a task and model, misses are cheaper, shorter runs (cost AUC 0.21, i.e. 0.79 inverted), which a host judging one run can't see without a per-task baseline.
+- **Executed checks (`checks`, `runs/miss-detector-checks-dev-20261013-171813/checks.json`, 2,342 s, 6 jobs, no errors):** per fix, the task's suite on the agent's tree (its tests included), then on its source with the base's tests, both under `line_trace.py` over the changed source lines. Misses flagged / passes flagged: suite fails 0/40 / 1/413; base tests fail 1/40 / 79/413; no agent test 4/40 / 55/413; changed lines not all run in a test 30/40 / 225/413, which flags by task, not by miss (tomli 21/21 and 3/3, ISMAGS 6/6 and 18/18, parse 0/10 and 1/12).
+- **Why:** every miss passed its own tests and the agents tested what they wrote (parse misses at 100% coverage). The misses are implied requirements never implemented (tomli's keyword construction, parse's unseparated numbers, ISMAGS's multigraph-in-graph case); running existing code can't show code that isn't there. Next candidate, not built: a requirements checklist read from the instruction (paid). Caveat for any dev result: 37 of the 40 misses are on 3 tasks.
+- **Tests:** all 753 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/miss-detector-regression-py312.log`). New: `tests/test_miss_detector.py` (7).
+
 ## October 13, 2026: plan item 6, mid-task compaction: no loss shown; Haiku stays out of compaction; a hidden client retry excluded
 
 The user's runs, subscription: 15 runs, 119 trials, $26.99 as sent, $0 API (the October 11 run and top-ups through today). Analysis and code $0. Details: `docs/m6-benchmark-plan.md`, "Mid-task compaction", "Result (October 13)"; evidence rows in `docs/evidence.md`.
