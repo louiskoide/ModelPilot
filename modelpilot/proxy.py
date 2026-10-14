@@ -275,17 +275,18 @@ def forecast(request, usage, rates, targets=SWITCH_TARGETS):
 
 
 def rebuild_context(row, rates):
-    """(model, prefix tokens, rates) of a settled main-loop row for Governor.observe_context, or None for a compaction
-    request (it carries the context being replaced) or a row without priced usage. The write rate is the lifetime the
-    request's breakpoints asked for, since the rewrite after a rebuild asks for it again."""
+    """(model, prefix tokens, rates, lifetime) of a settled main-loop row for Governor.observe_context, or None for a
+    compaction request (it carries the context being replaced) or a row without priced usage. The lifetime and write
+    rate are those the request's breakpoints asked for (the longer if they differ): the idle boundary waits out that
+    lifetime, and the rewrite after a rebuild asks for it again."""
     usage, rate = row.get('usage') or {}, rates.get(row.get('model'))
     if row.get('compaction') or row.get('cost_usd') is None or rate is None or \
             any(k not in usage for k in ('cache_read_input_tokens', 'cache_creation_input_tokens')):
         return None
     rate = tier(rate, prompt_tokens(usage))
-    write = rate['write_1h'] if '1h' in (row.get('cache_ttl') or ()) else rate['write_5m']
+    ttl = '1h' if '1h' in (row.get('cache_ttl') or ()) else '5m'
     return (row['model'], usage['cache_read_input_tokens'] + usage['cache_creation_input_tokens'],
-            {'output': rate['output'], 'write': write, 'read': rate['read']})
+            {'output': rate['output'], 'write': rate[f'write_{ttl}'], 'read': rate['read']}, ttl)
 
 
 def filter_catalog(data, allowed):

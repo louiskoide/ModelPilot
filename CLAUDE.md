@@ -17,8 +17,8 @@ Switching model OR effort wrote a new cache prefix in tested M0 conditions. Retu
 - M0 cache harness and M1 pass-through proxy: verified, including an 8-hour soak. Missing: one-hour TTL, other request shapes, broad proxy compatibility.
 - M2 ledger, M3 workers, M4 verifier, M5 controls: bounded harnesses, small live checks; not integrated.
 - M6 benchmark: fixed, Jev and ModelPilot arms run live on 29 tuning tasks; the final split is locked, not yet run.
-- ModelPilot arm: starts at low concise; Haiku 5.5 not a session model (Oct 10); no advisor (Oct 11; stuck: Opus 5.5); delegation off. Quality floor (October 8): no worse than the user's own model; arms `modelpilot-for-sonnet`/`-for-opus`.
-- Governor: dry-run surface wired into the proxy and hooks; live: a hook correction, turn-end delivery, an observed rebuild, a fallback (Oct 12). Missing: active mode.
+- ModelPilot arm: starts at low concise; Haiku 5.5 not a session model (Oct 10); no advisor (Oct 11; stuck: Opus 5.5); delegation off. Quality floor (Oct 8): no worse than the user's own model; arms `modelpilot-for-sonnet`/`-for-opus`.
+- Governor: dry-run, wired into the proxy and hooks; live: a hook correction, turn-end delivery, an observed rebuild, a fallback (Oct 12). Missing: active mode.
 
 The project is a tested set of components and bounded harnesses, not an operational end-to-end governor. Never present the toy benchmark as proof of production quality or savings.
 
@@ -74,15 +74,15 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 
 ## Plan, in order
 
-Built offline first; live runs need the user's approval. 1–4 done October 6; 4 found no pre-run miss signal.
+Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 found no pre-run miss signal.
 
-5. Dropped for the quality floor (user decision, October 8).
+5. Dropped for the quality floor (user decision, Oct 8).
 6. Mid-task compaction: no loss shown (Oct 13), not on Haiku. Long sessions await approval.
 7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
 8. Done Oct 11: fail.
 9. Caveman: parked (user decision); its $0 pass found at most 1%, all lossy.
 10. Dropped (8 failed); Jev's advisor role too (Oct 11).
 11. 4b held (user decision; its trial-count rule gives n=1).
-12. Governor: live checks passed (Oct 12); idle rebuilds wait 330 s; compact if it pays (Oct 13).
+12. Governor: live checks passed (Oct 12); idle plans wait out the cache TTL, a prompt late; compact if it pays (Oct 13).
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
 14. Haiku 5.5: helper roles only (simple steps), unbuilt.

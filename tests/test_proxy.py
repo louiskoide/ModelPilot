@@ -449,7 +449,7 @@ class GovernedProxyTests(unittest.TestCase):
             self.send('unpriced-model', 'high', tools=True)
             self.send('claude-sonnet-4-6', 'high', tools=True, content=COMPACTION_MARKER + ' Summarize.')
             self.assertEqual([e['payload'] for e in gov.journal('context')],
-                             [{'model': 'claude-sonnet-4-6', 'prefix_tokens': 14750, 'applied': False,
+                             [{'model': 'claude-sonnet-4-6', 'prefix_tokens': 14750, 'applied': False, 'ttl': '5m',
                                'rates': {'output': 15, 'write': 3.75, 'read': .3}}])
             rows = self.rows(4)
             self.assertTrue(rows[-1]['compaction'])  # it carries the context being replaced
@@ -460,8 +460,10 @@ class GovernedProxyTests(unittest.TestCase):
     def test_the_compaction_checks_write_rate_is_the_lifetime_the_request_asked_for(self):
         row = {'model': 'claude-sonnet-4-6', 'cost_usd': .01, 'usage': dict(USAGE, cache_creation_input_tokens=250)}
         self.assertEqual(rebuild_context(dict(row, cache_ttl=['1h']), RATES),
-                         ('claude-sonnet-4-6', 15_000, {'output': 15, 'write': 6, 'read': .3}))
-        self.assertEqual(rebuild_context(dict(row, cache_ttl=['5m']), RATES)[2]['write'], 3.75)
+                         ('claude-sonnet-4-6', 15_000, {'output': 15, 'write': 6, 'read': .3}, '1h'))
+        self.assertEqual(rebuild_context(dict(row, cache_ttl=['5m']), RATES)[2:],
+                         ({'output': 15, 'write': 3.75, 'read': .3}, '5m'))
+        self.assertEqual(rebuild_context(dict(row, cache_ttl=['1h', '5m']), RATES)[3], '1h')  # the longer one
         self.assertIsNone(rebuild_context(dict(row, cost_usd=None), RATES))  # unpriced usage is no evidence
 
     def test_governor_failure_never_blocks_traffic_and_log_reconciles(self):

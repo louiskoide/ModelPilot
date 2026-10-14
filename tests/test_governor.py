@@ -247,11 +247,27 @@ class GovernorTests(unittest.TestCase):
         self.gov.acknowledge_rebase(plan['plan_id'])
         self.assertEqual(self.gov.journal('acknowledge_rebase')[-1]['payload']['applied_by'], 'caller')
 
-    def session_turn(self, prefixes):
+    def session_turn(self, prefixes, ttl='5m'):
         """One completed turn: the proxy's context note per main-loop request, then the Stop hook's client_stop."""
+        rates = {'output': 10, 'write': {'5m': 2.5, '1h': 4}[ttl], 'read': .1}
         for prefix in prefixes:
-            self.gov.observe_context('claude-sonnet-5-5', prefix, {'output': 10, 'write': 2.5, 'read': .1})
+            self.gov.observe_context('claude-sonnet-5-5', prefix, rates, ttl)
         self.gov.note('client_stop', {})
+
+    def test_an_idle_plan_waits_past_the_sessions_cache_lifetime(self):
+        self.gov.queue_change('effort', 'medium', self.rev)
+        plan = self.gov.plan_rebase(self.rev, idle_seconds=400)
+        self.assertEqual((plan['action'], plan['cache_ttl'], plan['idle_threshold']), ('defer', None, 3630))  # unknown
+        self.session_turn([20_000], ttl='1h')  # a subscription session: the client writes 1h
+        self.assertEqual([self.gov.plan_rebase(self.rev, idle_seconds=s)['action'] for s in (400, 3_000, 3_630)],
+                         ['defer', 'defer', 'would_rebase'])
+        self.assertEqual(self.gov.plan_rebase(self.rev, idle_seconds=400, idle_threshold=330)['action'], 'would_rebase')
+        self.session_turn([21_000])  # the newest main-loop request asked for 5m
+        plan = self.gov.plan_rebase(self.rev, idle_seconds=400)
+        self.assertEqual((plan['action'], plan['cache_ttl'], plan['idle_threshold']), ('would_rebase', '5m', 330))
+        with self.assertRaises(ValueError):
+            self.gov.observe_context('claude-sonnet-5-5', 1, {}, '24h')
+
 
     def test_an_idle_plan_keeps_compaction_only_where_it_pays(self):
         self.gov.queue_change('compact', True, self.rev)
@@ -271,9 +287,9 @@ class GovernorTests(unittest.TestCase):
 
     def test_without_context_evidence_compaction_waits_unless_the_boundary_is_the_callers(self):
         self.gov.queue_change('compact', True, self.rev)
-        plan = self.gov.plan_rebase(self.rev, idle_seconds=330)
+        plan = self.gov.plan_rebase(self.rev, idle_seconds=3_630)  # an unknown lifetime waits for the hour
         self.assertEqual((plan['action'], plan['compaction_check']['verdict']), ('defer', 'unknown'))
-        self.gov.observe_context('claude-sonnet-5-5', 90_000, {'output': 10, 'write': 2.5, 'read': .1})
+        self.gov.observe_context('claude-sonnet-5-5', 90_000, {'output': 10, 'write': 2.5, 'read': .1}, '5m')
         self.assertEqual(self.gov.plan_rebase(self.rev, cache_expired=True)['compaction_check']['verdict'],
                          'unknown')  # no completed turn yet, so no horizon
         self.assertEqual(self.gov.plan_rebase(self.rev, idle_seconds=330, check_compaction=False)['action'],
