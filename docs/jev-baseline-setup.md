@@ -188,6 +188,8 @@ The tests were written and committed failing first (`42ecd88`), then the code be
   4. It refuses to start without a TypeSafe key, rather than running unrouted.
 
   Its `--self-test` sends one placeholder request through Jev's real proxy and ModelPilot's proxy to a loopback fixture. It covers chunked upload, catalog discovery (the router is offered only the fixture's catalog model, so a fall-back to Jev's static list fails) and pricing.
+
+  Since October 14 it gives Claude Code the checkout's real path as `--add-dir` (`--serve` prints it as `add_dir`), as the pinned launcher does: that one's `ROOT` comes from `import.meta.url`, which Node resolves through symlinks. Before, it passed `path.resolve(jevRoot)`, which keeps them, so in a worktree whose `work/` is a symlink the client got the worktree's path and the checkout-path test failed.
 - **Route check.** `python3 -m modelpilot.jev_route_check --variant compat --accounting wire --live` adds `reconcile()`. A pass needs all of:
   - every Messages row is HTTP 200 and priced
   - every tool-bearing row uses the selected model; Claude Code helper calls without tools are listed separately
