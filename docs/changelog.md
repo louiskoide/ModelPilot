@@ -2,6 +2,16 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026: miss detector, cross-run test check built, not run
+
+$0, offline, branch `codex/miss-crosscheck` (overnight queue item 2, built the day after on the user's request; the dev runs weren't on the machine). New `modelpilot/miss_crosscheck.py`; details: `docs/m6-benchmark-plan.md`, "Miss detector: cross-run test checks".
+
+- **What it answers:** whether tests that *other* agents wrote while solving the same task flag a trial's miss, where its own tests (October 13) and Opus's spec-written tests (item 5, none of tomli or ISMAGS) didn't.
+- **How:** each counted dev trial's added or changed test functions, kept only if they pass on its own tree (never filtered by the reference fix or hidden tests; a reference-filtered reading is kept apart as an upper bound), run against every other trial's tree of the task, one pytest run per trial, peers capped by a seeded sample. Failures naming something the base's source lacks are API-shape noise; any other failure flags. Readings by peer source (same arm, Opus 5.5, any) and count (one seeded peer, all sampled), overall, per task and leave-one-task-out (37 of the 40 dev misses are on 3 tasks), priced at a second run's recorded cost against the $0.25 redo and the +$0.069 forced review.
+- **Found while building:** pytest aborts the whole run when a node id sits in a file that fails to import, which a peer's file importing its own new API does; the check passes files with `-k` instead.
+- **To run** (the machine with the dev runs, $0): `python3 -m modelpilot.miss_crosscheck estimate --out runs/miss-crosscheck-plan-<ts>.json`, then `run --out runs/miss-crosscheck-<ts> --jobs 6`, then `score`. About 1,360 pytest runs over the 453 dev trials; `estimate` gives the hours. A rule flagging at least half the misses at a tolerable false-flag rate gets a holdout pre-registration drafted, not run.
+- **Tests:** all 804 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 9 skipped and the 3 proxy expected failures (`runs/codex-miss-crosscheck-regression-py312.log`). New: `tests/test_miss_crosscheck.py` (10: a synthetic task where a peer's test flags the miss, an invented-API test is noise and a test failing on its own tree is never used; also passes on Python 3.10.20).
+
 ## October 14, 2026 (overnight run): miss detector, requirements checklist built offline, not run
 
 $0, offline, branch `codex/miss-checklist` (overnight queue item 4, run by Claude Code in a cloud container; report `runs/codex-overnight-20261013/REPORT.md`). The miss detector's documented next candidate. New `modelpilot/miss_checklist.py`; details: `docs/m6-benchmark-plan.md`, "Miss detector: requirements checklist".
