@@ -2,6 +2,17 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026 (cloud batch): the Jev launcher test's CI timeout was node's cold start
+
+$0, branch `claude/jev-launch-flake` (cloud batch item 4). `test_jev_accounted_launch.ExplicitClientTests.test_explicit_binary_wins_over_path` timed out (10 s) once on Python 3.14 in #67's push run.
+
+- **Cause: the runner's first node start, not the launcher.** In CI no earlier test runs node (those that do need `work/` and skip), so this test is the job's first node process. Per-test times from the job logs:
+  - **The test itself:** 10.1 s in the failing job (the whole timeout), 2.03 s in its passing re-run, 0.29 s in the 3.10 job.
+  - **Every later launch in the same jobs:** 0.08–0.11 s, including the next test, which starts node twice.
+- **Not reproduced here:** 0 failures in 50 runs and in 50 more under 8 busy loops on 4 CPUs. One launch takes 0.061 s median and 0.084 s at most (0.134 and 0.207 s under load). Its parts: node start-up 0.024 s, node with the stub Jev modules 0.027 s, the child 0.001 s. Node's cold start with the page cache dropped is 0.085 s against 0.032 s warm. `runs/cloud-jev-launch-flake-timing-idle.json`, `-load8.json`.
+- **Fix:** `setUpModule` starts node once, untimed (at most 120 s), before any timed launch. The tests keep their 10 s timeouts and their meaning, which now measure the launcher alone. The launcher is unchanged: its launch path waits on nothing but the child's exit.
+- **Tests:** all 811 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 3 expected failures (the proxy shapes, fixed on `claude/proxy-shape-fixes`), no skips (`runs/cloud-jev-launch-flake-regression-py312.log`); `tests/test_jev_accounted_launch.py` also passes on Python 3.10.20. A flake fix can't start from a failing test: the cold start didn't reproduce here.
+
 ## October 14, 2026: the Haiku explorer doesn't pay (plan item 14, step 1 result); step 2 not built
 
 $0, the user's run on the main machine of `python3 -m modelpilot.explorer_replay` (branch `codex/haiku-explorer`): `runs/explorer-replay-20261014-111951.json`. Details: `docs/m6-modelpilot-policy.md`, "Helper role: a read/search explorer, step 1", Result.
