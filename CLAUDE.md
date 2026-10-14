@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Updated October 13, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
+Updated October 14, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
 
 ## Objective
 
@@ -63,7 +63,7 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 
 - Latest test count and log: the newest `docs/changelog.md` entry; record counts there.
 - Put the pinned client 2.1.284 (`work/claude-client/node_modules/.bin`) first on PATH: 2.1.289 retries refused requests.
-- Real-client, bench and Jev tests need `work/` and node; CI (3.10, 3.14) skips them. With `work/` symlinked into a worktree, the Jev launcher's checkout-path test fails.
+- Real-client, bench and Jev tests need `work/` and node; CI (3.10, 3.14) skips them.
 - Paid, all behind `--live` (inspect each plan first): `cache_probe`, `claude_check`, `worker_check`, `cascade_check`, `evaluate`, `jev_check`, `jev_route_check`, `governed_session`, `bench`, `thinking_probe`. Limits are stopping thresholds, not billing caps.
 
 ## Code map (`modelpilot/`; detail in `docs/code-map.md`)
