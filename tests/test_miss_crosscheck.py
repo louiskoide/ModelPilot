@@ -152,6 +152,15 @@ class CrossCheckTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             mx.crosscheck(self.trials, {'synthetic': self.task}, self.root/'out', PYTHON, lambda task: self.repo)
 
+    def test_the_estimate_counts_the_runs_and_times_one_peer_phase_per_task(self):
+        plan = mx.estimate(self.trials, {'synthetic': self.task}, PYTHON, lambda task: self.repo, self.root/'est', jobs=2)
+        self.assertEqual((plan['trials'], plan['misses'], plan['tasks'], plan['pytest_runs']), (4, 1, 1, 12))
+        self.assertEqual(plan['peers_per_trial'], {'synthetic': 3})
+        timed = plan['timing_per_task']['synthetic']
+        self.assertEqual((timed['trials'], timed['error']), (4, None))
+        self.assertGreater(timed['sample_tests_kept'], 0)  # the largest diff (the invented-API one) carries a test
+        self.assertGreater(plan['estimated_seconds'], 0)
+
     def test_the_peer_sample_is_seeded_and_capped(self):
         peers = [{'key': f'p{i}'} for i in range(10)]
         one = mx.sample_peers({'key': 'a'}, peers, 4, seed=0)

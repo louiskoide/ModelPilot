@@ -447,14 +447,16 @@ def dev_trials(rates):
 
 def estimate(trials, tasks, python, repo_of, scratch, max_peers=16, jobs=6):
     """The run's size before running it: trials, peers, and pytest runs (one per trial as a peer, one on the reference
-    for the upper bound, one per trial against its peers), timed by one peer phase per task."""
+    for the upper bound, one per trial against its peers), timed by one peer phase per task on its largest diff (the
+    likeliest to carry tests, so the estimate leans long)."""
     by_task = {}
     for t in trials:
         by_task.setdefault(t['task'], []).append(t)
     timing = {}
+    size = lambda t: Path(t['diff']).stat().st_size if Path(t['diff']).exists() else 0
     for task_id, group in sorted(by_task.items()):
         started = time.monotonic()
-        result = peer_tests(group[0], tasks[task_id], repo_of(tasks[task_id]), python, Path(scratch)/task_id)
+        result = peer_tests(max(group, key=size), tasks[task_id], repo_of(tasks[task_id]), python, Path(scratch)/task_id)
         shutil.rmtree(Path(scratch)/task_id, ignore_errors=True)
         timing[task_id] = {'seconds': round(time.monotonic() - started, 1), 'trials': len(group),
                            'sample_tests_kept': sum(len(v) for v in (result.get('kept') or {}).values()),
@@ -464,7 +466,7 @@ def estimate(trials, tasks, python, repo_of, scratch, max_peers=16, jobs=6):
     return {'trials': len(trials), 'misses': sum(not t['strict_pass'] for t in trials), 'tasks': len(by_task),
             'max_peers': max_peers, 'peers_per_trial': {t: min(max_peers, len(g) - 1) for t, g in sorted(by_task.items())},
             'pytest_runs': 3 * len(trials), 'timing_per_task': timing, 'jobs': jobs,
-            'estimated_hours': round(serial / max(1, jobs) / 3600, 2)}
+            'estimated_seconds': round(serial / max(1, jobs), 1), 'estimated_hours': round(serial / max(1, jobs) / 3600, 2)}
 
 
 def main():
