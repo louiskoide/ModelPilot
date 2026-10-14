@@ -2,6 +2,16 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026 (overnight run): miss detector, requirements checklist built offline, not run
+
+$0, offline, branch `codex/miss-checklist` (overnight queue item 4, run by Claude Code in a cloud container; report `runs/codex-overnight-20261013/REPORT.md`). The miss detector's documented next candidate. New `modelpilot/miss_checklist.py`; details: `docs/m6-benchmark-plan.md`, "Miss detector: requirements checklist".
+
+- **Steps:** `list` (per dev task, checks read from the instruction alone), `judge` (per counted dev trial, each check against the saved diff, never the grade), both paid behind `--live` and built as `spec_tests` (prompts and a plan otherwise; no retry or fallback; `--limit-usd` stop); `score` ($0: `not_met>=k` and `not_met_or_unclear>=k`, overall, per task, each task left out); `plan` ($0: cost per model from the saved diffs, with the break-even). Dev split only.
+- **Not run, and the scorer not run either:** the dev runs weren't on the machine (no bundle).
+- **Cost estimate without them** (`runs/codex-miss-checklist/estimate.json`; each trial's diff taken as its task's upstream reference diff, median 4.7 KB, at 1× and 3×): **Haiku 5.5 low $0.57–0.82** for all 453 counted dev trials, **Sonnet 5.5 low $11.37–16.49**.
+- **Break-even against item 7's $0.056 late fix**, if every flag costs one fix attempt: the check pays only if an unnoticed miss does more damage than about $0.10–0.39 (Haiku) or $0.37–1.17 (Sonnet), from perfect recall with 5% false flags to half the misses with 25%. Whether it catches any is unknown until it runs.
+- **Tests:** 773 offline tests on Python 3.12 with the pinned 2.1.284 client: 761 pass, 9 skip, and 3 error, this machine's baseline (`runs/codex-miss-checklist-regression-py312.log`; the same 3 fail on clean `main` here, `runs/codex-baseline-with-compat-regression-py312.log`). New: `tests/test_miss_checklist.py` (9; also passes on Python 3.10.20).
+
 ## October 14, 2026 (overnight run): plan item 13 support: TypeSafe's price not found first-hand; `bench_report` can price the router from an explicit rate; the rejected-400 check written
 
 $0, nothing sent, branch `codex/typesafe-cost` (overnight queue item 7, run by Claude Code in a cloud container; report `runs/codex-overnight-20261013/REPORT.md`). Details: `docs/jev-baseline-setup.md`, "Plan item 13".
