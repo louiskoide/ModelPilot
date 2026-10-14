@@ -2,6 +2,14 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026 (overnight run): the ledger no longer drops its own SQLite locks; advised trials skip without the compat checkout
+
+$0, offline, branch `codex/baseline-failures` (overnight run, an extra item: the 9 tests that failed on a fresh Linux machine without the bundle; run by Claude Code in a cloud container; report `runs/codex-overnight-20261013/REPORT.md`). Details: `docs/m2.md`, "Opening the ledger keeps the process's locks".
+
+- **Ledger locks (a real bug).** `m2.State` created the file with `os.open`/`os.close` before connecting, every time it was opened. Closing any descriptor to a file drops all of the process's POSIX locks on it, the SQLite connections' included, and the proxy and coordinator open a `Governor` per request beside hook processes writing the same WAL database. On Linux, three real-client sessions (`test_governed_session` ×2, `test_policy_session` ×1) ended `database disk image is malformed`. Shown directly: with one `State` open another process can't take SQLite's shared-lock bytes; after a second `State` it can. Now SQLite creates a new ledger and `chmod` makes it `0600`; an existing one is never opened outside SQLite. The Mac runs never showed it; the race is there too.
+- **Advised trials skip without `work/jev-router-compat`.** Seven `ToolTrialTests` run Jev's real bridge from the compat checkout; without it the advisor failed, the policy stayed at its start and six failed instead of skipping. Same condition as `tests/test_advisor.py`.
+- **Tests:** all 765 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 9 skipped (`runs/codex-baseline-failures-regression-py312.log`); on clean `main` the same machine had 3 errors, and 9 failures before the compat checkout existed (`runs/codex-baseline-with-compat-regression-py312.log`, `runs/codex-baseline-regression-py312.log`). New: `LedgerLockTests` (`tests/test_m2.py`), which fails on the old code.
+
 ## October 13, 2026 (night): the governor's idle boundary follows the cache lifetime; dry-run plans come a prompt late; the compaction check corrected (offline)
 
 $0, offline, branch `governor-cache-lifetime`. User request: "do what's next for the governor". Picks up the first item the compaction check left uncovered, 1h-lifetime sessions. Details: `docs/governor.md`, "Cache lifetime" and "Compaction cost check".
