@@ -2,6 +2,15 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026 (overnight run): the proxy on request shapes it hadn't been tested on; three bugs found, none fixed
+
+$0, tests only, branch `codex/proxy-shapes` (overnight queue item 5, run by Claude Code in a cloud container; report `runs/codex-overnight-20261013/REPORT.md`). M1's open gaps: other request shapes, broad compatibility, cancellation. `proxy.py` is untouched (another session owns it). Details: `docs/m1-results.md`, "Request shapes against local upstreams".
+
+- **New `tests/test_proxy_shapes.py` (17):** a local upstream scripted per test. Byte-for-byte passthrough and a right-or-unknown cost hold for: signed and redacted thinking, `input_json_delta` tool streams cut at arbitrary bytes (LF and CRLF, SSE comments), image and document blocks (a 1h breakpoint priced at the 1h rate, no content in the log), the 32 MiB body limit, `count_tokens` (free even when refused), 429 and 529 with their retry headers (sent once, never retried), an `error` event mid-stream, streams cut short upstream, gzip replies (forwarded, unknown cost) and gzip requests (refused, never forwarded), keep-alive clients and events over 1 MiB.
+- **Cancellation, against a local upstream:** a client that disconnects mid-stream or before the first byte makes the proxy close the upstream before its stream ends; the row is `connection_closed` with cost unknown. Real-client cancellation is still untested.
+- **Bugs (expected failures, each with its fix in the test):** (1) `cache_probe.priced_usage` ignores `usage.server_tool_use`, so a reply that ran server-side web search (Claude Code's WebSearch; $10 per 1,000 searches) is priced from tokens alone, not left unknown; (2) an upstream that closes without replying gets the client no 502 and is logged as the client's disconnect (`RemoteDisconnected` is a `ConnectionResetError`); accounting is unaffected; (3) a header sent twice is forwarded once (`clean_headers` builds a dict).
+- **Tests:** 781 offline tests on Python 3.12 with the pinned 2.1.284 client: 766 pass, 9 skip, the 3 new expected failures fail as intended, and 3 error, this machine's baseline (`runs/codex-proxy-shapes-regression-py312.log`; the same 3 fail on clean `main` here, `runs/codex-baseline-with-compat-regression-py312.log`). The new file also passes on Python 3.10.20.
+
 ## October 13, 2026 (night): the governor's idle boundary follows the cache lifetime; dry-run plans come a prompt late; the compaction check corrected (offline)
 
 $0, offline, branch `governor-cache-lifetime`. User request: "do what's next for the governor". Picks up the first item the compaction check left uncovered, 1h-lifetime sessions. Details: `docs/governor.md`, "Cache lifetime" and "Compaction cost check".
