@@ -2,6 +2,17 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 13, 2026 (evening): sqlglot stage 2 screened: go, on one Opus failure; CREATE TRIGGER adopted
+
+The user's run, subscription: `bench-20261013-180040`, 12 trials, $3.36 as sent, $0 API; re-grade and write-up $0. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 2", "The screen, run October 13"; evidence row in `docs/evidence.md`.
+
+- **Result:** strict, low concise 6/6, Opus 5.5 5/6. Opus failed `sqlglot-dax-dialect` on an existing Spark test: its dialect kept CLUSTER/DISTRIBUTE/SORT BY, and it edited the test rather than the code. The spec check finds the instruction fair: it points to PRQL, whose generator has the one line needed.
+- **Verdict under the readout committed before the run** (`9246205` at 17:49; the run started at 18:00): **go**. It isn't the pattern the stuck rule needs, since low concise passed all 6.
+- **Re-grade:** the script's re-grade timed out on 4 of 12 grades (4 jobs at once, 120 s limit). Re-graded one at a time, all 12 verdicts reproduce. Reading a timeout as no verdict was decided after the results were in; the readout hadn't foreseen it.
+- **CREATE TRIGGER adopted.** PR #53 was merged on October 12, before stage 2's own PR, and the user confirmed keeping it today. The October 12 (night) entry's "stays out" is superseded. It joins the labelling run, since batches are labelled whole.
+- **Proposed (the user's go):** item 8's labelling design on the 7 tasks, 49 trials, about $12.25 as sent and 80 minutes.
+- **Tests:** none run; no code changed.
+
 ## October 13, 2026 (evening): the sqlglot stage 2 screen's readout, fixed before it ran
 
 $0, docs only, user request: written while the screen (`runs/sqlglot-stage2-screen-20261013.sh`, not committed) waited for another session's run to finish, before any of its trials existed. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 2", "The screen's readout".
