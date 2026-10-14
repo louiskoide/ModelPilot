@@ -2,6 +2,14 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 13, 2026 (evening): the sqlglot stage 2 screen's readout, fixed before it ran
+
+$0, docs only, user request: written while the screen (`runs/sqlglot-stage2-screen-20261013.sh`, not committed) waited for another session's run to finish, before any of its trials existed. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 2", "The screen's readout".
+
+- **Go** on any counted strict failure in either arm, once its spec is checked (a failure the instruction doesn't support is a defective spec, fixed and rerun): then propose item 8's labelling design on the 6 tasks, about $10.50 as sent. **No-go** only when all 12 trials count and pass: no stage 3 from the same filters. Otherwise **incomplete**: rerun the missing trials first.
+- **Its limit:** 6 passes out of 6 still allow a per-trial miss rate up to 39%, and at stage 1's rate (1 in 56) the screen shows a miss only 19% of the time, so a no-go is a cost call (0.75 expected misses for $10.50), not evidence that stage 2 is easy.
+- **Tests:** none run; no code changed.
+
 ## October 13, 2026: plan item 6, mid-task compaction: no loss shown; Haiku stays out of compaction; a hidden client retry excluded
 
 The user's runs, subscription: 15 runs, 119 trials, $26.99 as sent, $0 API (the October 11 run and top-ups through today). Analysis and code $0. Details: `docs/m6-benchmark-plan.md`, "Mid-task compaction", "Result (October 13)"; evidence rows in `docs/evidence.md`.
