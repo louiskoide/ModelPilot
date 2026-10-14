@@ -83,6 +83,6 @@ Built offline first; live runs need the user's approval. 1–4 done October 6; 4
 9. Caveman: parked (user decision); its $0 pass found at most 1%, all lossy.
 10. Dropped (8 failed); Jev's advisor role too (Oct 11).
 11. 4b held (user decision; its trial-count rule gives n=1).
-12. Governor: live checks passed (Oct 12); idle rebuilds wait 330 s (warm at 306 s).
+12. Governor: live checks passed (Oct 12); idle rebuilds wait 330 s; compact if it pays (Oct 13).
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
 14. Haiku 5.5: helper roles only (simple steps), unbuilt.

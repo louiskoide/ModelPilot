@@ -1,7 +1,9 @@
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import unittest
-from modelpilot.m5 import IDLE_BOUNDARY_SECONDS, Budget, RebaseQueue, demo, learn
+from modelpilot.m5 import IDLE_BOUNDARY_SECONDS, Budget, RebaseQueue, compaction_check, demo, learn
+
+SONNET_5_5 = {'output': 10, 'write': 2.5, 'read': .1}  # from October 7, 5m writes
 
 
 class RebaseTests(unittest.TestCase):
@@ -39,6 +41,26 @@ class RebaseTests(unittest.TestCase):
         q.queue('compact', True, 1)
         self.assertEqual(q.plan(1, idle_seconds=305.6)['action'], 'defer')
         self.assertEqual(q.plan(1, idle_seconds=330)['action'], 'would_rebase')
+
+
+
+class CompactionCheckTests(unittest.TestCase):
+    def test_compaction_pays_only_where_the_reads_it_saves_beat_its_summary(self):
+        # Summary: 3,925 tokens output and written, $0.0491. Over 7 requests, at $0.10 reads, it must remove 70,089.
+        large = compaction_check(150_000, 8_000, SONNET_5_5, 7)
+        self.assertEqual((large['verdict'], large['removed_tokens']), ('pays', 138_075))
+        self.assertAlmostEqual(large['cost_usd'], .049063)
+        self.assertAlmostEqual(large['saving_usd'], .096653)
+        self.assertEqual(compaction_check(82_100, 8_000, SONNET_5_5, 7)['verdict'], 'pays')
+        self.assertEqual(compaction_check(81_900, 8_000, SONNET_5_5, 7)['verdict'], 'does_not_pay')
+        # The live governed session's context (October 12): its compaction removed nothing worth reading.
+        small = compaction_check(4_158, 2_713, SONNET_5_5, 2)
+        self.assertEqual((small['verdict'], small['removed_tokens'], small['saving_usd']), ('does_not_pay', 0, 0))
+
+    def test_unknown_evidence_is_never_a_guess(self):
+        for args in ((None, 8_000, SONNET_5_5, 7), (90_000, None, SONNET_5_5, 7), (90_000, 8_000, None, 7),
+                     (90_000, 8_000, SONNET_5_5, None), (90_000, 8_000, {'output': 10, 'write': 2.5}, 7)):
+            self.assertEqual(compaction_check(*args), {'verdict': 'unknown', 'reason': 'no_context_evidence'})
 
 
 class BudgetTests(unittest.TestCase):
