@@ -11,6 +11,13 @@ $0, offline, branch `codex/miss-crosscheck` (overnight queue item 2, built the d
 - **Found while building:** pytest aborts the whole run when a node id sits in a file that fails to import, which a peer's file importing its own new API does; the check passes files with `-k` instead.
 - **To run** (the machine with the dev runs, $0): `python3 -m modelpilot.miss_crosscheck estimate --out runs/miss-crosscheck-plan-<ts>.json`, then `run --out runs/miss-crosscheck-<ts> --jobs 6`, then `score`. About 1,360 pytest runs over the 453 dev trials; `estimate` gives the hours. A rule flagging at least half the misses at a tolerable false-flag rate gets a holdout pre-registration drafted, not run.
 - **Tests:** all 804 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 9 skipped and the 3 proxy expected failures (`runs/codex-miss-crosscheck-regression-py312.log`). New: `tests/test_miss_crosscheck.py` (9: a synthetic task where a peer's test flags the miss, an invented-API test is noise and a test failing on its own tree is never used; also passes on Python 3.10.20).
+## October 14, 2026: the overnight branches merged; 795 tests pass together
+
+$0, no model request. Merged with merge commits, in order: #63 (sqlglot stage 2 screen), #70 (ledger locks), #72 (Jev launcher path), #69 (proxy shapes), #68 (README), #67 (TypeSafe support), #71 (requirements checklist). #66, the overnight run's `runs/` handoff, was closed unmerged and its files copied to `runs/`.
+
+- **Conflicts:** only `docs/changelog.md`, since each overnight branch added its entry at the top. The six were chained, each merging the one before it with its entry stacked on top, so each merged cleanly in turn; #63 conflicted with none.
+- **Tests:** all 795 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 3 of them expected failures (#69's proxy bugs), no skips (`runs/post-merge-regression-py312.log`). The chain's tip, which differs from `main` only by #63's docs, also passed with `work/` symlinked into a worktree (`runs/codex-chain-regression-py312.log`), so `CLAUDE.md`'s note that the Jev launcher's checkout-path test fails there is removed.
+- **CI:** one flake. `test_jev_accounted_launch.ExplicitClientTests.test_explicit_binary_wins_over_path` timed out (10 s) once on Python 3.14 in #67's push run; the same commit passed in its pull-request run, and the job passed on re-run.
 
 ## October 14, 2026 (overnight run): miss detector, requirements checklist built offline, not run
 
