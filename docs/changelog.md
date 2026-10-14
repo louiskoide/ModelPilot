@@ -11,6 +11,25 @@ $0, offline, branch `governor-cache-lifetime`. User request: "do what's next for
 - **Compaction check corrected.** `/compact` is one more request. The next turn's first request reads the base again and writes the summary, so the turn saves reads on horizon − 1 requests, not on horizon. Over a 7-request turn compaction now pays above a prefix of about 95,000 tokens on 5m (the first version said 82,000) and 105,000 on 1h, where the summary is written at the hour's rate. The client marks `/compact` 5m on a 1h session too. That only matters if compaction comes first after an expiry (then it pays from about 30,000), and no wired flow does that, so the check doesn't credit it.
 - **Tests:** 763 of 764 offline tests pass on Python 3.12 with the pinned 2.1.284 client (`runs/governor-cache-lifetime-regression-py312.log`), run under `nice` beside the user's sqlglot bench run. The one failure is the Jev launcher's checkout-path test, which fails only in a worktree whose `work/` is a symlink (worktree `../ModelPilot-cache-lifetime`). New: `test_the_idle_boundary_follows_the_cache_lifetime` and `test_a_1h_session_writes_the_summary_at_the_hours_rate` (`tests/test_m5.py`), `test_an_idle_plan_waits_past_the_sessions_cache_lifetime` (`tests/test_governor.py`), `test_a_rebuild_waits_out_a_1h_entry_and_an_unknown_one` (`tests/test_hooks.py`). The compaction check's thresholds in `CompactionCheckTests` were recomputed.
 
+## October 13, 2026 (evening): sqlglot stage 2 screened: go, on one Opus failure; CREATE TRIGGER adopted
+
+The user's run, subscription: `bench-20261013-180040`, 12 trials, $3.36 as sent, $0 API; re-grade and write-up $0. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 2", "The screen, run October 13"; evidence row in `docs/evidence.md`.
+
+- **Result:** strict, low concise 6/6, Opus 5.5 5/6. Opus failed `sqlglot-dax-dialect` on an existing Spark test: its dialect kept CLUSTER/DISTRIBUTE/SORT BY, and it edited the test rather than the code. The spec check finds the instruction fair: it points to PRQL, whose generator has the one line needed.
+- **Verdict under the readout committed before the run** (`9246205` at 17:49; the run started at 18:00): **go**. It isn't the pattern the stuck rule needs, since low concise passed all 6.
+- **Re-grade:** the script's re-grade timed out on 4 of 12 grades (4 jobs at once, 120 s limit). Re-graded one at a time, all 12 verdicts reproduce. Reading a timeout as no verdict was decided after the results were in; the readout hadn't foreseen it.
+- **CREATE TRIGGER adopted.** PR #53 was merged on October 12, before stage 2's own PR, and the user confirmed keeping it today. The October 12 (night) entry's "stays out" is superseded. It joins the labelling run, since batches are labelled whole.
+- **Proposed (the user's go):** item 8's labelling design on the 7 tasks, 49 trials, about $12.25 as sent and 80 minutes.
+- **Tests:** none run; no code changed.
+
+## October 13, 2026 (evening): the sqlglot stage 2 screen's readout, fixed before it ran
+
+$0, docs only, user request: written while the screen (`runs/sqlglot-stage2-screen-20261013.sh`, not committed) waited for another session's run to finish, before any of its trials existed. Details: `docs/m6-benchmark-plan.md`, "Harder tasks: sqlglot, stage 2", "The screen's readout".
+
+- **Go** on any counted strict failure in either arm, once its spec is checked (a failure the instruction doesn't support is a defective spec, fixed and rerun): then propose item 8's labelling design on the 6 tasks, about $10.50 as sent. **No-go** only when all 12 trials count and pass: no stage 3 from the same filters. Otherwise **incomplete**: rerun the missing trials first.
+- **Its limit:** 6 passes out of 6 still allow a per-trial miss rate up to 39%, and at stage 1's rate (1 in 56) the screen shows a miss only 19% of the time, so a no-go is a cost call (0.75 expected misses for $10.50), not evidence that stage 2 is easy.
+- **Tests:** none run; no code changed.
+
 ## October 13, 2026 (evening): miss detector, first two signals: neither catches misses
 
 $0: recorded files and host-run tests only, no model request. New `modelpilot/miss_detector.py`. Started after the user chose to build a miss detector (an after-run check) in place of item 8's failed pre-run predictor.
