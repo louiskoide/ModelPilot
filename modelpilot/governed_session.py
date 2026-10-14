@@ -237,7 +237,8 @@ def live_scenario():
 
 
 # Plan item 12: live evidence for turn-end delivery and an observed rebuild, in one session of four invocations.
-REBUILD_IDLE_SECONDS = IDLE_BOUNDARY_SECONDS + 5  # past the UserPromptSubmit hook's idle boundary and a 5m entry's life
+# An API-key session writes 5m entries, so this passes the UserPromptSubmit hook's idle boundary and a 5m entry's life.
+REBUILD_IDLE_SECONDS = IDLE_BOUNDARY_SECONDS + 5
 REBUILD_STEPS = ('task', 'follow_up', 'compact', 'rebuilt')
 
 

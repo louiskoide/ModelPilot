@@ -10,27 +10,40 @@ from .m4 import nonnegative
 # replication, and read again 305.6 s after its last use in the live governed session (October 12): expiry lies
 # somewhere in 305.6-330 s. A rebuild before 330 s could compact a context that is still warm.
 IDLE_BOUNDARY_SECONDS = 330
+# By the lifetime the session's writes ask for. A 1h entry was read after 10 minutes (6/6); whether it lasts the hour
+# is unmeasured (the hour-long probe stopped twice), so its boundary is the nominal hour plus 5m's 30 s margin. An entry
+# that dies sooner only delays a rebuild; a rebuild on a warm entry pays for the context again.
+IDLE_BOUNDARIES = {'5m': IDLE_BOUNDARY_SECONDS, '1h': 3630}
 
 # Tokens a compaction summary adds: Sonnet 5.5's averaged 3,925 output tokens in plan item 6, and the turn after one
 # began by writing them (runs/midtask-compaction-report-20261013.json).
 SUMMARY_TOKENS = 3925
 
 
+def idle_boundary(ttl):
+    """Idle seconds past which an entry written with this lifetime ('5m', '1h') has expired. An unknown lifetime waits
+    for the longest, so an idle rebuild never lands on a warm entry."""
+    return IDLE_BOUNDARIES.get(ttl, max(IDLE_BOUNDARIES.values()))
+
+
 def compaction_check(prefix_tokens, base_tokens, rates, horizon_requests, summary_tokens=SUMMARY_TOKENS):
     """Whether compacting at a rebuild pays within the horizon, on cost alone.
 
-    The compaction request sends the whole prefix, cached as the next request would have cached it without compaction
-    (October 12: it read the warm entry and wrote 58 tokens), so that part costs the same either way. Compaction adds
-    the summary's output and its write; it saves reading what it removed (the prefix less the base it keeps and the
-    summary) on each request of the horizon. Later idle expiries, which would rewrite what it removed, aren't counted,
-    so the check errs toward not compacting. rates: USD per million tokens, 'output', 'write' (at the session's cache
+    The plan reaches the user with the prompt that found the boundary (the UserPromptSubmit hook), which the client
+    sends anyway, so the compaction request follows that turn and reads its entry warm, at either lifetime (October 12:
+    it read the warm entry and wrote 58 tokens). It reads the prefix as the next turn's first request would have, and adds the
+    summary's output. The next turn still sends every request: the first reads the base compaction keeps and writes
+    the summary (at the session's lifetime), and each later one saves reading what compaction removed (the prefix less
+    the base and the summary). So compaction pays when (horizon - 1) reads of what it removed beat the summary's output
+    and write plus one read of the base. Later idle expiries, which would rewrite what it removed, aren't counted, so
+    the check errs toward not compacting. rates: USD per million tokens, 'output', 'write' (at the session's cache
     lifetime) and 'read'. Unknown evidence gives 'unknown', never a guess."""
     if None in (prefix_tokens, base_tokens, horizon_requests, rates) or \
             any(rates.get(k) is None for k in ('output', 'write', 'read')):
         return {'verdict': 'unknown', 'reason': 'no_context_evidence'}
     removed = max(0, prefix_tokens - base_tokens - summary_tokens)
-    cost = summary_tokens * (rates['output'] + rates['write']) / 1e6
-    saving = horizon_requests * removed * rates['read'] / 1e6
+    cost = (summary_tokens * (rates['output'] + rates['write']) + base_tokens * rates['read']) / 1e6
+    saving = max(0, horizon_requests - 1) * removed * rates['read'] / 1e6
     return {'verdict': 'pays' if saving > cost else 'does_not_pay', 'prefix_tokens': prefix_tokens,
             'base_tokens': base_tokens, 'summary_tokens': summary_tokens, 'removed_tokens': removed,
             'horizon_requests': horizon_requests, 'cost_usd': round(cost, 6), 'saving_usd': round(saving, 6)}
