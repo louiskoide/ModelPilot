@@ -2,6 +2,15 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026 (cloud batch): real-client cancellation, chunked uploads and idle streams through the proxy; no bug found
+
+$0, offline, branch `claude/proxy-client-gaps` (cloud batch item 3, stacked on `claude/proxy-shape-fixes`). New `tests/test_proxy_client_gaps.py`; details: `docs/m1-results.md`, "Real-client cancellation, chunked uploads and idle streams".
+
+- **Cancellation, pinned 2.1.284 client in `-p` mode:** for SIGINT, SIGTERM and SIGKILL mid-stream, the proxy closed the upstream before its stream ended and logged one `connection_closed` row of unknown cost, counted once. No signal made the client send another request. SIGINT exits **0** with a result of `error_during_execution`; SIGTERM 143 and SIGKILL −9 leave no result.
+- **Chunked uploads:** forwarded byte for byte with a `Content-Length`; over 32 MiB (in 1 MiB chunks), ambiguous or malformed framing refused with 400 before anything is forwarded.
+- **Idle past the timeout** (lowered to 1 s in the test): the client gets the 200 and `message_start`, then the reply ends; the row is a `transport_error` of unknown cost. The client then **re-sent the request without streaming, despite `CLAUDE_CODE_MAX_RETRIES=0`**, and the session succeeded: the hidden retry `transport_check` found in `bench-20261011-234003`, now reproduced offline and logged as its own row.
+- **Tests:** all 822 offline tests pass on Python 3.12 with the pinned 2.1.284 client, no skips (`runs/cloud-proxy-client-gaps-regression-py312.log`). New: `tests/test_proxy_client_gaps.py` (8: three signals, three chunked-upload cases, two idle-stream cases; the real-client ones skip without node or the pinned client; also passes on Python 3.10.20). `proxy.py` unchanged: no bug found.
+
 ## October 14, 2026 (cloud batch): the proxy's three shape bugs fixed
 
 $0, offline, branch `claude/proxy-shape-fixes` (cloud batch item 2). Details: `docs/m1-results.md`, "The three shape bugs fixed".

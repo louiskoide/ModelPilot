@@ -82,3 +82,25 @@ Cloud batch item 2, branch `claude/proxy-shape-fixes`. The three `expectedFailur
 
 Tests: 20 in `tests/test_proxy_shapes.py` (17 before; 3 new: the reset, the catalog close, the unmetered counters). Each new or fixed test fails on the old code.
 
+## Real-client cancellation, chunked uploads and idle streams — October 14, 2026 (cloud batch, tests only, $0)
+
+Cloud batch item 3, branch `claude/proxy-client-gaps` (stacked on the shape fixes): `tests/test_proxy_client_gaps.py`, 8 tests. The real-client tests run the pinned 2.1.284 in `-p` mode through the proxy to a loopback upstream, with a fake key, an empty HOME and config, no tools, `CLAUDE_CODE_MAX_RETRIES=0`. They skip without node or that client first on PATH. No proxy bug was found, so `proxy.py` is unchanged here.
+
+- **Real-client cancellation** (SIGINT, SIGTERM, SIGKILL, each sent about 0.3 s into a stream of pings 50 ms apart): for every signal the proxy closed the upstream before its stream ended. The row is `connection_closed` with HTTP 200 and cost unknown, after well under the stream's 10 s. There is one row per request that reached the upstream, `bench.accounting` counts it once as unpriced (total unknown), and `transport_check` counts it lost. None of the three signals made the client send a second request. What the client did:
+  - **SIGINT:** exit 0 with a `result` event of subtype `error_during_execution`. A harness must not read a 0 exit as success; `bench` reads the result's subtype.
+  - **SIGTERM:** exit 143 with no `result` event.
+  - **SIGKILL:** exit −9 with no `result` event.
+
+  These are pinned in the tests, so a client change shows.
+- **Chunked request bodies** (raw sockets: 7-byte, 4 KiB and single chunks, chunk extensions, a trailer). The upstream gets the exact bytes with a `Content-Length`, and the row is priced. Refused with 400 before anything reaches the upstream, and nothing logged:
+  - 33 chunks of 1 MiB: the proxy stops at the chunk that would pass 32 MiB, without reading the rest;
+  - chunked framing with a `Content-Length` too;
+  - `gzip, chunked`, or the `Transfer-Encoding` header sent twice;
+  - a size that isn't hex, a short chunk, or no last chunk.
+- **A stream idle past the inactivity timeout.** The upstream sends `message_start`, then nothing for 3 s; the proxy's upstream timeout (`ProxyServer.connection`'s 120 s) is lowered to 1 s in the test only.
+  - **The proxy** gives up after about a second. The client already has the HTTP 200 and `message_start`, then the reply ends with no `message_stop`. The row is `transport_error`/`TimeoutError` with cost unknown.
+  - **The pinned client** sent the request again *without streaming*, even with `CLAUDE_CODE_MAX_RETRIES=0`, and the session succeeded (exit 0, `success`). This reproduces offline the hidden retry `bench_report.transport_check` found in `bench-20261011-234003`.
+  - **In the log** the retry is its own row, priced, and the cut request stays unknown. `transport_check` reports 1 lost and 1 sent after, so `bench_report` would exclude such a trial (`connection_retried`).
+
+Still untested: a real client cancelled during a tool call or between requests, subscription OAuth, and a live provider's own idle behaviour.
+
