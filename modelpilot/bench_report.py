@@ -7,11 +7,13 @@ unchanged by caching, so nothing else differs. Measured cost is always reported 
 
 A request the API rejected with an error is unpriced, so the trial's headline cost stays
 unknown; a separately labeled sensitivity figure counts such rejections as free. Jev arms
-report provider cost only (router cost unpriced): their dollars are a lower bound. Trials run
+report provider cost only (router cost unpriced): their dollars are a lower bound, unless
+--router-rates gives TypeSafe's price explicitly (no default: unpriced stays unknown, never $0). Trials run
 on a Claude subscription instead of an API key are priced as an API key would have been
 billed for the same tokens (api_key_equivalent); their as-sent price is kept alongside.
 
     python3 -m modelpilot.bench_report runs/bench-<ts> [runs/bench-<ts2> ...] [--out FILE] [--price-at DATE]
+                                      [--router-rates FILE]
 
 rebuilds the summary from a run's trial records (for example after a crash). Given several
 runs, it pairs their arms by task; an arm in more than one run is labeled arm@<run>. Evidence
@@ -339,8 +341,66 @@ def difference(estimate, drawn, tasks):
     return out
 
 
+ROUTER_PRICED = 'provider_plus_router_at_config_rate'
+RATE_KEYS = ('input_usd_per_mtok', 'output_usd_per_mtok', 'per_decision_usd')
+
+
+def load_router_rate(path):
+    """An explicit TypeSafe price for Jev's routing decisions (--router-rates): dollars per million router input and
+    output tokens and per decision, with where they came from (source) and when (as_of). There is no default file:
+    without one, Jev arms stay provider-only and their router cost unpriced, never $0."""
+    rate = json.loads(Path(path).read_text())
+    if not isinstance(rate, dict):
+        raise ValueError('a router rate is a JSON object')
+    for key in RATE_KEYS:
+        value = rate.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+            raise ValueError(f'router rate needs {key}: a number of dollars, 0 or more')
+    for key in ('source', 'as_of'):
+        if not isinstance(rate.get(key), str) or not rate[key].strip():
+            raise ValueError(f'router rate needs {key}: where the price was published and when it was read')
+    return rate
+
+
+def router_cost(routing, rate):
+    """One Jev trial's TypeSafe dollars at an explicit rate, or None when any decision can't be priced: a stub router (an
+    offline test, never TypeSafe), a router call that failed (whether it was billed is unknown), a decision without
+    usage, or usage without whole token counts. A trial whose router was never called (unrouted_sentinel) costs 0."""
+    if routing.get('router') == 'stub' or any(m != 'unrouted_sentinel' for m in routing.get('fail_open') or ()):
+        return None
+    usage, decisions = routing.get('router_usage') or [], routing.get('decisions') or 0
+    if len(usage) < decisions:
+        return None
+    total = decisions * rate['per_decision_usd']
+    for u in usage:
+        tokens = (u.get('input_tokens'), u.get('output_tokens')) if isinstance(u, dict) else (None, None)
+        if not all(isinstance(t, int) and not isinstance(t, bool) and t >= 0 for t in tokens):
+            return None
+        total += (tokens[0] * rate['input_usd_per_mtok'] + tokens[1] * rate['output_usd_per_mtok']) / 1e6
+    return total
+
+
+def with_router_cost(record, rate):
+    """A Jev trial (provider-only scope) with its router priced at the rate: the router's dollars added to every dollar
+    figure the report reads, provider-only figures kept beside them, and the scope relabelled. An unknown router cost
+    makes the trial's cost unknown. Any other trial comes back unchanged."""
+    accounting = record.get('accounting') or {}
+    if accounting.get('cost_scope') != 'provider_only_router_unpriced':
+        return record
+    router = router_cost(record.get('routing') or {}, rate)
+    add = lambda value: None if value is None or router is None else value + router
+    cache = record.get('cache') or {}
+    return dict(record, router_cost_usd=router,
+                accounting=dict(accounting, cost_usd=add(accounting.get('cost_usd')), cost_scope=ROUTER_PRICED,
+                                provider_cost_usd=accounting.get('cost_usd'), router_cost_usd=router),
+                cache=dict(cache, cold_equivalent_cost_usd=add(cache.get('cold_equivalent_cost_usd')),
+                           cold_equivalent_if_rejected_free_usd=add(cache.get('cold_equivalent_if_rejected_free_usd')),
+                           provider_cold_equivalent_cost_usd=cache.get('cold_equivalent_cost_usd')))
+
+
 def cost_scope(records):
-    """'complete', 'provider_only_router_unpriced' (Jev), 'api_key_equivalent' (subscription), 'mixed', or None."""
+    """'complete', 'provider_only_router_unpriced' (Jev), ROUTER_PRICED (Jev with --router-rates), 'api_key_equivalent'
+    (subscription), 'mixed', or None."""
     scopes = {(r.get('accounting') or {}).get('cost_scope', 'complete') for r in records}
     return scopes.pop() if len(scopes) == 1 else 'mixed' if scopes else None
 
@@ -549,11 +609,13 @@ def pair_summary(a, b, cells_a, cells_b, rng, resamples, scopes=('complete', 'co
         point = compute(tasks, dollars)
         drawn = bootstrap(tasks, lambda sample: compute(sample, dollars), rng, resamples)
         differences.update({n: difference(point[n], drawn[n], len(tasks)) for n in point})
-    lower = [arm for arm, scope in zip((a, b), scopes) if scope not in ('complete', 'api_key_equivalent', None)]
+    lower = [arm for arm, scope in zip((a, b), scopes) if scope not in ('complete', 'api_key_equivalent', None, ROUTER_PRICED)]
     equivalent = [arm for arm, scope in zip((a, b), scopes) if scope == 'api_key_equivalent']
+    router_priced = [arm for arm, scope in zip((a, b), scopes) if scope == ROUTER_PRICED]
     basis = ([f"lower bound for {', '.join(lower)}: router cost unpriced"] if lower else []) + (
         [f"API-key equivalent for {', '.join(equivalent)}: subscription trials, 1h cache writes priced at the 5m rate"]
-        if equivalent else [])
+        if equivalent else []) + (
+        [f"router at the --router-rates price for {', '.join(router_priced)} (see router_rate)"] if router_priced else [])
     return {'arms': [a, b], 'tasks': len(shared), 'dollar_tasks': len(priced),
             'excluded_unpriced_tasks': len(shared) - len(priced),
             'dollar_basis': '; '.join(basis) or 'complete',
@@ -598,13 +660,16 @@ def ineligible_reason(record):
     return None
 
 
-def summarize(records, arms, seed=0, resamples=10000):
+def summarize(records, arms, seed=0, resamples=10000, router_rate=None):
     """Per-arm results and paired differences with task-level bootstrap 95% intervals.
 
     Only complete trials are analysed; incomplete ones (stopped or crashed) are counted.
     Arms are paired on the tasks both ran. An interval covering 0, or fewer than MIN_TASKS
-    paired tasks, shows no difference.
+    paired tasks, shows no difference. router_rate (load_router_rate) prices Jev's routing
+    decisions; without it Jev arms stay provider-only.
     """
+    if router_rate is not None:
+        records = [with_router_cost(r, router_rate) for r in records]
     excluded = [r for r in records if ineligible_reason(r)]
     records = [r for r in records if not ineligible_reason(r)]
     rng = random.Random(seed)
@@ -623,6 +688,8 @@ def summarize(records, arms, seed=0, resamples=10000):
             'bootstrap': {'seed': seed, 'resamples': resamples, 'unit': 'task', 'interval': '95% percentile'},
             'cost_basis': 'cold-equivalent (inherited cache reads repriced as writes); measured cost alongside',
             'claims': 'No winner or savings claim when an interval covers 0, or from the tuning split.'}
+    if router_rate is not None:
+        out['router_rate'] = {k: router_rate[k] for k in RATE_KEYS + ('source', 'as_of')}
     if policy_arms:
         out['modelpilot'] = [modelpilot_breakdown(a, complete[a], {b: by_arm[b] for b in arms if b != a}) for a in policy_arms]
     if len(policy_arms) > 1:
@@ -704,11 +771,12 @@ def load_runs(run_dirs, rates, price_at=None):
     return loaded[0][1].get('seed', 0), arms, records, runs
 
 
-def summary_of(run_dirs, rates, resamples=10000, price_at=None):
-    """price_at: an ISO date or timestamp (naive means UTC) to price every request at that day's prices."""
+def summary_of(run_dirs, rates, resamples=10000, price_at=None, router_rate=None):
+    """price_at: an ISO date or timestamp (naive means UTC) to price every request at that day's prices. router_rate:
+    TypeSafe's price for Jev's decisions (load_router_rate); without it router cost stays unpriced."""
     when = None if price_at is None else _timestamp(price_at)
     seed, arms, records, runs = load_runs(run_dirs, rates, when)
-    summary = summarize(records, arms, seed=seed, resamples=resamples)
+    summary = summarize(records, arms, seed=seed, resamples=resamples, router_rate=router_rate)
     summary.update(trials=len(records), priced_at=price_at or 'as recorded: each request at the prices of its day', rebuilt_from=str(run_dirs[0]) if len(run_dirs) == 1 else [r['run'] for r in runs],
                    pass_rule='hidden grader and, where the task has one, its whole edge suite (October 4); '
                              'hidden_passes alongside',
@@ -724,10 +792,10 @@ def _timestamp(text):
     return (moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)).timestamp()
 
 
-def write_summary(run_dirs, rates, out, resamples=10000, price_at=None):
+def write_summary(run_dirs, rates, out, resamples=10000, price_at=None, router_rate=None):
     """Rebuild one run's summary, or pair several runs' arms (see load_runs). Never overwrites."""
     run_dirs = [run_dirs] if isinstance(run_dirs, (str, Path)) else list(run_dirs)
-    summary = summary_of(run_dirs, rates, resamples, price_at)
+    summary = summary_of(run_dirs, rates, resamples, price_at, router_rate)
     with Path(out).open('x') as f:  # never overwrite evidence
         json.dump(summary, f, indent=2)
         f.write('\n')
@@ -742,12 +810,16 @@ def main():
     parser.add_argument('--resamples', type=int, default=10000)
     parser.add_argument('--price-at', help='Price every request at this ISO date\'s prices (naive means UTC), so runs '
                                            'from either side of a price change compare; default: as recorded')
+    parser.add_argument('--router-rates', type=Path,
+                        help='JSON with TypeSafe\'s price (input_usd_per_mtok, output_usd_per_mtok, per_decision_usd, '
+                             'source, as_of) to price Jev\'s routing decisions; default: router cost unpriced')
     args = parser.parse_args()
+    router_rate = load_router_rate(args.router_rates) if args.router_rates else None
     if args.out:
-        write_summary(args.runs, rates(), args.out, args.resamples, args.price_at)
+        write_summary(args.runs, rates(), args.out, args.resamples, args.price_at, router_rate)
         print('summary:', args.out)
         return
-    print(json.dumps(summary_of(args.runs, rates(), args.resamples, args.price_at), indent=2))
+    print(json.dumps(summary_of(args.runs, rates(), args.resamples, args.price_at, router_rate), indent=2))
 
 
 if __name__ == '__main__':

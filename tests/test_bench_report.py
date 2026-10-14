@@ -210,6 +210,59 @@ class SummaryTests(unittest.TestCase):
         fixed = summarize([record('t0', 'a'), record('t0', 'b')], ['a', 'b'], seed=0, resamples=20)['paired'][0]
         self.assertEqual(fixed['dollar_basis'], 'complete')
 
+    RATE = {'input_usd_per_mtok': 0.5, 'output_usd_per_mtok': 2.0, 'per_decision_usd': 0.001,
+            'source': 'test figures', 'as_of': '2026-10-14'}
+
+    def test_jev_router_cost_is_priced_only_from_an_explicit_rate(self):
+        unrouted = {'routed': False, 'router': None, 'decisions': 0, 'extra_decisions': 0, 'fail_open': ['unrouted_sentinel'],
+                    'served_models': ['claude-opus-5'], 'router_usage': []}
+        jev = lambda task, cost, routing: record(task, 'jev', cost_usd=cost, scope='provider_only_router_unpriced', routing=routing)
+        records = [jev('t0', .2, routed('claude-sonnet-5')), jev('t1', .3, unrouted),
+                   jev('t2', .4, routed('claude-sonnet-5', decisions=2)),  # two decisions, one with usage
+                   record('t0', 'opus'), record('t1', 'opus'), record('t2', 'opus')]
+        one = (893 * .5 + 100 * 2) / 1e6 + .001  # a decision's usage at the rate, plus its fee
+        default = summarize(records, ['jev', 'opus'], seed=0, resamples=50)
+        self.assertEqual(default['arms'][0]['cost_scope'], 'provider_only_router_unpriced')
+        self.assertAlmostEqual(default['arms'][0]['mean_cost_usd'], .3)
+        self.assertNotIn('router_rate', default)
+        priced = summarize(records, ['jev', 'opus'], seed=0, resamples=50, router_rate=self.RATE)
+        arm, opus = priced['arms']
+        self.assertEqual((arm['cost_scope'], opus['cost_scope']), (bench_report.ROUTER_PRICED, 'complete'))
+        self.assertAlmostEqual(arm['mean_cost_usd'], (.2 + one + .3) / 2)  # never-called router: $0; t2 unknown
+        self.assertEqual(arm['unknown_cost'], ['t2/0'])
+        self.assertAlmostEqual(opus['mean_cost_usd'], .1)
+        self.assertEqual(priced['router_rate'], self.RATE)
+        basis = priced['paired'][0]['dollar_basis']
+        self.assertIn('--router-rates', basis)
+        self.assertNotIn('lower bound', basis)
+        self.assertEqual(default['arms'][0]['routing'], arm['routing'])  # tokens and decisions as recorded
+
+    def test_a_router_decision_that_cant_be_priced_leaves_the_trial_unknown(self):
+        cost = lambda **routing: bench_report.router_cost(dict({'router': 'typesafe', 'decisions': 1, 'fail_open': [],
+                                                                'router_usage': [{'input_tokens': 10, 'output_tokens': 0}]},
+                                                               **routing), self.RATE)
+        self.assertAlmostEqual(cost(), 10 * .5 / 1e6 + .001)
+        self.assertIsNone(cost(router='stub'))  # an offline stub is never TypeSafe routing
+        self.assertIsNone(cost(fail_open=['routing failed']))  # a failed call may have been billed
+        self.assertIsNone(cost(decisions=2))
+        for usage in ({'input_tokens': '10', 'output_tokens': 0}, {'input_tokens': 10}, {'input_tokens': True, 'output_tokens': 0}, 'x'):
+            self.assertIsNone(cost(router_usage=[usage]), usage)
+        self.assertEqual(cost(decisions=0, router_usage=[], router=None, fail_open=['unrouted_sentinel']), 0)
+        fixed = record('t0', 'opus')
+        self.assertIs(bench_report.with_router_cost(fixed, self.RATE), fixed)
+
+    def test_a_router_rate_file_must_be_explicit_and_sourced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'rate.json'
+            path.write_text(json.dumps(self.RATE))
+            self.assertEqual(bench_report.load_router_rate(path), self.RATE)
+            for broken in ({k: v for k, v in self.RATE.items() if k != 'per_decision_usd'}, dict(self.RATE, input_usd_per_mtok=-1),
+                           dict(self.RATE, output_usd_per_mtok=True), dict(self.RATE, source=' '),
+                           {k: v for k, v in self.RATE.items() if k != 'as_of'}, [1]):
+                path.write_text(json.dumps(broken))
+                with self.assertRaises(ValueError, msg=broken):
+                    bench_report.load_router_rate(path)
+
     def test_incomplete_trials_are_counted_not_analysed(self):
         records = [record('t0', 'a'), record('t1', 'a', complete=False, cost_usd=5.0)]
         arm = summarize(records, ['a'], seed=0, resamples=50)['arms'][0]
