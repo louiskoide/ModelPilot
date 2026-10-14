@@ -2,6 +2,13 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026 (overnight run): the README matches the measured state
+
+$0, docs only, branch `codex/readme-refresh` (overnight queue item 6, run by Claude Code in a cloud container; report `runs/codex-overnight-20261013/REPORT.md`). `README.md` dated from September 22: M6 a "smoke" test, the governor's live session pending.
+
+- **Rewritten** from `CLAUDE.md`'s status and core finding: what ModelPilot is, then what is measured (cache behaviour, the proxy soak, the 29 tuning tasks, item 8 on its 38 tasks, where the money goes) and what isn't (the 1h lifetime, broad compatibility, M2–M5 as one system, active mode, the final split, any real-use saving or quality), a status table, how to run it offline, and links to `docs/evidence.md`, `docs/changelog.md` and `docs/code-map.md`. No savings or quality claim beyond the evidence; no secrets or local paths.
+- **Tests:** 764 offline tests on Python 3.12 with the pinned 2.1.284 client: 752 pass, 9 skip, and 3 error, this machine's baseline (`runs/codex-readme-refresh-regression-py312.log`; the same 3 fail on clean `main` here, `runs/codex-baseline-with-compat-regression-py312.log`).
+
 ## October 14, 2026 (overnight run): the proxy on request shapes it hadn't been tested on; three bugs found, none fixed
 
 $0, tests only, branch `codex/proxy-shapes` (overnight queue item 5, run by Claude Code in a cloud container; report `runs/codex-overnight-20261013/REPORT.md`). M1's open gaps: other request shapes, broad compatibility, cancellation. `proxy.py` is untouched (another session owns it). Details: `docs/m1-results.md`, "Request shapes against local upstreams".

@@ -1,57 +1,60 @@
 # ModelPilot
 
-Measure cache behavior before building a model-routing governor for Claude Code.
+ModelPilot is a cache-aware model and effort governor for Claude Code, and a benchmark that compares it with fixed settings and with the [Jev router](https://github.com/gargpratyush/jev-router). It is a tested set of components and bounded harnesses, not an operational end-to-end governor. Routing is off by default and the governor runs in dry-run. Only the ModelPilot benchmark arm acts on its decisions.
+
+## What is measured
+
+- **Cache behaviour.** In the tested conditions, switching model or effort wrote a new cache prefix. Returning to an earlier model and effort read its still-warm entry. So ModelPilot tracks cache state by exact model, effort and prefix and by recent use, and does not assume a switch destroys earlier entries. Prewarming is billable even with zero output tokens, and keeping entries warm raised cost for the tested sequences, so shadow warming is off by default.
+- **Pass-through proxy.** An eight-hour synthetic soak passed (11,496 requests, no verification failures), as did basic checks with the real client, where the proxy's and the client's totals matched.
+- **Benchmark, 29 tuning tasks** (small repository tasks; trials repeated per task):
+  - Sonnet 5.5 at low effort with a concise prompt was the cheapest setting at equal quality: $0.0689 a task, $0.0180 below Sonnet 5.5 at medium effort on 23 tuning tasks.
+  - Under strict grading Sonnet 5.5 passes three tasks less often than Opus 5.5. Every Sonnet and Opus failure reported success, and a redo costs about $0.25 a task.
+  - The ModelPilot arm never left its starting setting (low effort, concise). It cost a third of what Opus 5.5 did, with a strict pass rate of 0.915 against 0.981.
+  - A forced Opus review at the finish rescued none of 27 tasks, at $0.069 more a task.
+- **Predicting misses.** On 38 other tasks, no rule applied at a turn's start found the misses.
+- **Where the money goes.** Cache writes are about 45% of cost, mostly from context growth, not rebuilds. 80–90% of tool-result bytes are source code read or searched.
+
+Every result, failures included, is in [docs/evidence.md](docs/evidence.md) with its run directory. [docs/changelog.md](docs/changelog.md) has the dated history, costs and test counts.
+
+## What is not measured
+
+- Whether a one-hour cache entry lasts the hour.
+- Request shapes beyond those tested, and broad client compatibility through the proxy.
+- The task ledger, workers, verifier and budget controls (M2–M5) as one system: each is a bounded harness with small live checks, and they are not integrated.
+- The governor's active mode. In dry-run it is wired into the proxy and Claude Code's hooks. Its live checks so far: a correction delivered through a hook, turn-end delivery, an observed rebuild and a fallback.
+- The benchmark's final split. It is locked and has not been run.
+- Savings or quality in real use. The benchmark is a toy set of tasks, and nothing here is proof of production quality or savings.
 
 ## Status
 
-M0 is implemented as a direct Anthropic API experiment harness. The quick and five-minute TTL suites completed 213 requests with no errors; effort, model, prewarming and five-minute cache behavior are measured for the tested configuration. See [results](docs/m0-results.md). M1 dry-run proxy is implemented and the eight-hour synthetic soak passed with 11,496 verified requests and zero failures. Real Claude Code text and Read-tool checks passed with matching cost totals. Cancellation, broader client compatibility and one-hour TTL remain unverified. Routing is disabled. See [M1 results](docs/m1-results.md) and [run instructions](docs/m1.md).
+| Part | Verified | Missing |
+| --- | --- | --- |
+| M0 cache harness | Direct-API cache, effort, model, prewarming and five-minute lifetime measurements | One-hour lifetime; other request shapes |
+| M1 proxy | Streaming pass-through, usage and cost records, eight-hour soak, real-client checks | Broad compatibility, including cancellation with the real client; active routing |
+| M2–M5 | Ledger, workers, verifier and controls: bounded harnesses, small live checks | Integration |
+| M6 benchmark | Fixed, Jev and ModelPilot arms run live on 29 tuning tasks | The locked final split |
+| Governor | Dry-run, wired into the proxy and hooks; four live checks | Active mode |
 
-## Run locally
+The ModelPilot arm starts at Sonnet 5.5, low effort, with a concise prompt. Haiku 5.5 is not one of its session models, it has no advisor, and delegation is off. Its quality floor is no worse than the user's own model (arms `modelpilot-for-sonnet` and `modelpilot-for-opus`). Details: [docs/m6-modelpilot-policy.md](docs/m6-modelpilot-policy.md).
 
-Python 3.10 or newer; no third-party runtime dependencies required.
+## Run it
+
+Python 3.10 or newer, standard library only. On macOS, `pip install certifi` supplies TLS roots if Python lacks them; verification always stays on.
 
 ```sh
-python3 -m unittest discover -s tests -v
-python3 -m modelpilot.cache_probe --config configs/m0.json --out runs/plan
+python3 -m unittest discover -s tests
+python3 -m modelpilot.evaluate                                # writes a plan; sends nothing
+python3 -m modelpilot.governor --out runs/governor-demo.json  # offline walk-through
 ```
 
-The default is offline: it creates a plan without contacting the API. Output directories should be new for each run. Optional installation with `pip install -e .` exposes `modelpilot-cache-probe`.
+Everything is offline by default. Paid harnesses need `--live` and an API key in your environment (some fixed benchmark arms can use a Claude subscription token instead), never in a file you commit; inspect each plan before running it. Their limits are stopping thresholds, not billing caps. Run outputs go to the ignored `runs/` directory, which can hold source data from benchmark tasks.
 
-On macOS, if Python lacks certificate roots, install the optional certificate bundle with `python3 -m pip install certifi`. The probe supplements system trust with this bundle when available and always verifies TLS.
+Tests that drive the real Claude Code client, the benchmark or Jev need the pinned client and checkouts under the ignored `work/` directory, and skip without them. Setup: [docs/jev-baseline-setup.md](docs/jev-baseline-setup.md) and [docs/m6-benchmark-plan.md](docs/m6-benchmark-plan.md).
 
-For measured runs, set `ANTHROPIC_API_KEY` in your environment, verify the models and rates in the configuration, then add `--live`. Do not commit credentials. See [the M0 protocol](docs/m0.md) for commands, cost accounting, interpretation and limitations.
+## Where to look
 
-## Build order
-
-| Milestone | Deliverable | Status |
-| --- | --- | --- |
-| M0 | Effort/model cache tests, prewarming costs, TTL/refresh | Direct-API quick + 5m TTL measured |
-| M1 | Proxy, logging and cost model; dry-run decisions only | Synthetic + basic real-client checks passed; cancellation pending |
-| M2 | Stuck detector, reference outputs, shared task ledger | Local tests + basic live MCP checks passed |
-| M3 | Fork execution with persistent role-based workers | Bounded workers + six-task live check passed |
-| M4 | Cascade and economically justified shadow caches | Dry-run planner + bounded live draft checks passed; execution pending |
-| M5 | Rebase coalescing, budgets, offline threshold learning | Offline control prototype tested; integration and real calibration pending |
-| M6 | Fixed model/effort and jev-router comparisons: cost, pass rate, wall time | Fixed-baseline live smoke passed; governor and jev-router comparisons pending |
-| Governor | Durable integration of ledger, verifier, budget and rebase controls | Dry-run surface wired offline to the proxy, Claude Code hooks and gated fallbacks; live governed session pending |
-
-Persistent workers need versioned task corrections and stale-result rejection. Rebase triggers include explicit user/goal-boundary compaction. The selected jev-router baseline is gargpratyush/jev-router, pinned in `configs/jev-baseline.json`; see [setup requirements](docs/jev-baseline-setup.md).
-
-M2 commands, behavior and limits: [M2 guide](docs/m2.md). Offline tests cover the proxy, ledger, workers and M4 decisions.
-
-M2 live validation: [results](docs/m2-results.md). Automatic tool-output interception and mid-flight correction delivery remain unvalidated.
-
-M3 behavior and live check: [worker guide](docs/m3.md).
-
-M3 live evidence: [worker results](docs/m3-results.md).
-
-M4 dry-run decisions and two-request live check: [M4 guide](docs/m4.md).
-
-M5 controls, evidence and integration limits: [M5 guide](docs/m5.md).
-
-M6 paired baseline harness and remaining evaluation work: [M6 guide](docs/m6.md).
-
-M6 measured smoke comparison: [results](docs/m6-results.md).
-
-Durable dry-run governor surface, its proxy/hook/fallback wiring and its limits: [governor guide](docs/governor.md).
-
-Claude Code handoff: [CLAUDE.md](CLAUDE.md).
+- [docs/code-map.md](docs/code-map.md): what each module does.
+- [docs/evidence.md](docs/evidence.md): measured results and their run directories.
+- [docs/changelog.md](docs/changelog.md): what changed, when, at what cost.
+- [docs/governor.md](docs/governor.md): the governor and its limits.
+- [CLAUDE.md](CLAUDE.md): working context and rules for coding agents on this repository.
