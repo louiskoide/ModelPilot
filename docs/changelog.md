@@ -2,6 +2,15 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026: the Haiku explorer doesn't pay (plan item 14, step 1 result); step 2 not built
+
+$0, the user's run on the main machine of `python3 -m modelpilot.explorer_replay` (branch `codex/haiku-explorer`): `runs/explorer-replay-20261014-111951.json`. Details: `docs/m6-modelpilot-policy.md`, "Helper role: a read/search explorer, step 1", Result.
+
+- **119 dev trials replayed, 0 unaligned:** 61 Sonnet 5.5 medium ($0.098 a trial) and 58 low concise ($0.082).
+- **Low concise loses in every printed reading,** even the upper bound (optimistic costs, Bash reads, hindsight selection): $-0.0005 to $-0.0012 a trial. Read/Grep/Glob with optimistic costs: $-0.0010 to $-0.0081; with pessimistic costs: $-0.0104 to $-0.0185.
+- **Sonnet 5.5 medium saves at most 0.4% at a plausible summary** ($0.0004 a trial at k = 200, optimistic costs; break-even k = 200) and loses with pessimistic costs ($-0.0073 to $-0.0155). Upper bound: $0.0037 at k = 50.
+- **Decision rule met:** it doesn't pay at a plausible k, so the explorer arm (step 2) isn't built. Plan item 14's helper roles stay unbuilt; this one is closed on the evidence.
+
 ## October 14, 2026: the Haiku explorer's step 1 replay built, not run (plan item 14)
 
 $0, offline, branch `codex/haiku-explorer` (overnight queue item 3, built the day after on the user's request; the recorded runs weren't on the machine). New `modelpilot/explorer_replay.py`; details: `docs/m6-modelpilot-policy.md`, "Helper role: a read/search explorer, step 1".

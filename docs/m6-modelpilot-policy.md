@@ -218,6 +218,12 @@ User decisions, October 8: Haiku 5.5 may serve every ModelPilot arm once its pro
 
 The caveman pass (median 7.9 KB of tool results a trial) already suggests small savings, so the high bound may well not pay. Step 2 (an arm with `--agents`) is built only if this shows a saving. Command, on the machine with the dev runs: `python3 -m modelpilot.explorer_replay --out runs/explorer-replay-<ts>.json`.
 
+**Result (October 14, the user's run on the main machine, $0; `runs/explorer-replay-20261014-111951.json`): it doesn't pay, so step 2 isn't built.** All 119 counted dev trials matched (61 Sonnet 5.5 medium at $0.098 a trial, 58 low concise at $0.082), none unaligned. Net dollars a trial, saving positive:
+
+- **Low concise, the setting the ModelPilot arm runs: every printed reading loses.** Read/Grep/Glob with optimistic costs: $-0.0010 at k = 50 to $-0.0081 at k = 1,600. With pessimistic costs: $-0.0104 to $-0.0185. Even the upper bound loses, with optimistic costs, Bash reads included and only results longer than k replaced (a hindsight choice): $-0.0005 to $-0.0012.
+- **Sonnet 5.5 medium:** Read/Grep/Glob with optimistic costs saves $0.0011 at k = 50 and $0.0004 at k = 200 (0.4% of a trial; break-even k = 200), and loses from k = 400. With pessimistic costs it loses at every k ($-0.0073 to $-0.0155). The upper bound tops out at $0.0037 (k = 50, 3.8%).
+- **Why:** these agents read little (the caveman pass's median 7.9 KB of tool results a trial). The explorer's own requests and the agent tool's definition in every request's prefix cost about what shorter context saves, or more. The replay assumes the agent otherwise behaves the same; nothing here suggests a live arm would do better.
+
 ### No advisor: Jev dropped (October 11, offline)
 
 User decision, October 11, after item 8's pre-registered test failed (`runs/item8-prereg-score-20261011.json`): Jev no longer advises any ModelPilot arm. Nothing in its answers picked out the misses (AUC 0.49–0.54 over 67 tasks), its fitted weight was already 0.03 (maximum likelihood 0), and the gate had skipped it at every recorded decision since October 6. Jev stays as the comparison arm (`jev-*`).
