@@ -2,6 +2,16 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026: the Haiku explorer's step 1 replay built, not run (plan item 14)
+
+$0, offline, branch `codex/haiku-explorer` (overnight queue item 3, built the day after on the user's request; the recorded runs weren't on the machine). New `modelpilot/explorer_replay.py`; details: `docs/m6-modelpilot-policy.md`, "Helper role: a read/search explorer, step 1".
+
+- **What it answers:** whether a Haiku 5.5 explorer subagent returning k-token summaries of reads and searches would cost less than the context growth those results add, on the dev split's `sonnet-5.5-low-concise` and `sonnet-5.5` trials. Each trial's main-loop rows are matched one to one with its transcript's turns (a mismatch is reported, not guessed); each replaced result saves T − k on every later request, priced as that request paid (write where first carried, then read), 1h writes at 5m.
+- **Kept honest:** Reads of files the agent edits later aren't replaced (Edit needs them); the explorer's own Haiku requests, the delegation call and the agent tool's definition are costed under low and high bounds; `tools` (Read/Grep/Glob) and `tools_and_bash` (plus read-only Bash, where most source reading happens) scopes; `over_k` is labelled an oracle upper bound. Assumes the agent otherwise behaves the same.
+- **Expectation, not a result:** the caveman pass found a median 7.9 KB of tool results a trial, so savings are likely small. Step 2 (an arm with `--agents`) is built only if the replay pays.
+- **To run** (the machine with the dev runs, $0): `python3 -m modelpilot.explorer_replay --out runs/explorer-replay-<ts>.json`.
+- **Tests:** all 802 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 9 skipped and the 3 proxy expected failures (`runs/codex-haiku-explorer-regression-py312.log`). New: `tests/test_explorer_replay.py` (7, one trial worked by hand; also passes on Python 3.10.20).
+
 ## October 14, 2026 (overnight run): miss detector, requirements checklist built offline, not run
 
 $0, offline, branch `codex/miss-checklist` (overnight queue item 4, run by Claude Code in a cloud container; report `runs/codex-overnight-20261013/REPORT.md`). The miss detector's documented next candidate. New `modelpilot/miss_checklist.py`; details: `docs/m6-benchmark-plan.md`, "Miss detector: requirements checklist".
