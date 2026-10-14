@@ -247,6 +247,57 @@ class GovernorTests(unittest.TestCase):
         self.gov.acknowledge_rebase(plan['plan_id'])
         self.assertEqual(self.gov.journal('acknowledge_rebase')[-1]['payload']['applied_by'], 'caller')
 
+    def session_turn(self, prefixes, ttl='5m'):
+        """One completed turn: the proxy's context note per main-loop request, then the Stop hook's client_stop."""
+        rates = {'output': 10, 'write': {'5m': 2.5, '1h': 4}[ttl], 'read': .1}
+        for prefix in prefixes:
+            self.gov.observe_context('claude-sonnet-5-5', prefix, rates, ttl)
+        self.gov.note('client_stop', {})
+
+    def test_an_idle_plan_waits_past_the_sessions_cache_lifetime(self):
+        self.gov.queue_change('effort', 'medium', self.rev)
+        plan = self.gov.plan_rebase(self.rev, idle_seconds=400)
+        self.assertEqual((plan['action'], plan['cache_ttl'], plan['idle_threshold']), ('defer', None, 3630))  # unknown
+        self.session_turn([20_000], ttl='1h')  # a subscription session: the client writes 1h
+        self.assertEqual([self.gov.plan_rebase(self.rev, idle_seconds=s)['action'] for s in (400, 3_000, 3_630)],
+                         ['defer', 'defer', 'would_rebase'])
+        self.assertEqual(self.gov.plan_rebase(self.rev, idle_seconds=400, idle_threshold=330)['action'], 'would_rebase')
+        self.session_turn([21_000])  # the newest main-loop request asked for 5m
+        plan = self.gov.plan_rebase(self.rev, idle_seconds=400)
+        self.assertEqual((plan['action'], plan['cache_ttl'], plan['idle_threshold']), ('would_rebase', '5m', 330))
+        with self.assertRaises(ValueError):
+            self.gov.observe_context('claude-sonnet-5-5', 1, {}, '24h')
+
+
+    def test_an_idle_plan_keeps_compaction_only_where_it_pays(self):
+        self.gov.queue_change('compact', True, self.rev)
+        self.gov.queue_change('effort', 'medium', self.rev)
+        self.session_turn(range(8_000, 40_001, 5_000))  # 7 requests, the last prefix 38,000 tokens
+        plan = self.gov.plan_rebase(self.rev, idle_seconds=330)
+        self.assertEqual([c['kind'] for c in plan['changes']], ['effort'])
+        self.assertEqual((plan['deferred_changes'], plan['compaction_check']['verdict']), (['compact'], 'does_not_pay'))
+        self.assertEqual(plan['compaction_check']['base_tokens'], 8_000)
+        self.assertEqual(sorted(c['kind'] for c in self.gov.pending_changes()), ['compact', 'effort'])  # still queued
+        self.session_turn(range(60_000, 150_001, 15_000))  # 7 more requests, to 150,000 tokens
+        plan = self.gov.plan_rebase(self.rev, idle_seconds=330)
+        self.assertEqual([c['kind'] for c in plan['changes']], ['compact', 'effort'])
+        self.assertEqual(plan['deferred_changes'], [])
+        self.assertEqual({k: plan['compaction_check'][k] for k in ('verdict', 'horizon_requests', 'prefix_tokens')},
+                         {'verdict': 'pays', 'horizon_requests': 7, 'prefix_tokens': 150_000})
+
+    def test_without_context_evidence_compaction_waits_unless_the_boundary_is_the_callers(self):
+        self.gov.queue_change('compact', True, self.rev)
+        plan = self.gov.plan_rebase(self.rev, idle_seconds=3_630)  # an unknown lifetime waits for the hour
+        self.assertEqual((plan['action'], plan['compaction_check']['verdict']), ('defer', 'unknown'))
+        self.gov.observe_context('claude-sonnet-5-5', 90_000, {'output': 10, 'write': 2.5, 'read': .1}, '5m')
+        self.assertEqual(self.gov.plan_rebase(self.rev, cache_expired=True)['compaction_check']['verdict'],
+                         'unknown')  # no completed turn yet, so no horizon
+        self.assertEqual(self.gov.plan_rebase(self.rev, idle_seconds=330, check_compaction=False)['action'],
+                         'would_rebase')
+        explicit = self.gov.plan_rebase(self.rev, explicit_boundary=True)
+        self.assertEqual(explicit['action'], 'would_rebase')
+        self.assertNotIn('compaction_check', explicit)
+
     def test_journal_never_records_applied_actions(self):
         self.gov.admit('a', .1, self.task, self.rev)
         self.gov.settle('a', .1)

@@ -24,7 +24,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 import uuid
-from .cache_probe import priced_usage, tier, tls_context
+from .cache_probe import priced_usage, prompt_tokens, tier, tls_context
 from .governor import Governor
 
 HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
@@ -274,6 +274,21 @@ def forecast(request, usage, rates, targets=SWITCH_TARGETS):
             'scenarios': scenarios}
 
 
+def rebuild_context(row, rates):
+    """(model, prefix tokens, rates, lifetime) of a settled main-loop row for Governor.observe_context, or None for a
+    compaction request (it carries the context being replaced) or a row without priced usage. The lifetime and write
+    rate are those the request's breakpoints asked for (the longer if they differ): the idle boundary waits out that
+    lifetime, and the rewrite after a rebuild asks for it again."""
+    usage, rate = row.get('usage') or {}, rates.get(row.get('model'))
+    if row.get('compaction') or row.get('cost_usd') is None or rate is None or \
+            any(k not in usage for k in ('cache_read_input_tokens', 'cache_creation_input_tokens')):
+        return None
+    rate = tier(rate, prompt_tokens(usage))
+    ttl = '1h' if '1h' in (row.get('cache_ttl') or ()) else '5m'
+    return (row['model'], usage['cache_read_input_tokens'] + usage['cache_creation_input_tokens'],
+            {'output': rate['output'], 'write': rate[f'write_{ttl}'], 'read': rate['read']}, ttl)
+
+
 def filter_catalog(data, allowed):
     """Keep only the allowed models, in upstream order; (None, None) when the body is not a catalog."""
     try:
@@ -385,6 +400,9 @@ class ProxyServer(ThreadingHTTPServer):
                     for kind in ('model', 'effort'):
                         if row[kind] not in (None, 'unknown'):
                             gov.observe_setting(kind, row[kind])
+                    context = rebuild_context(row, self.rates)
+                    if context:
+                        gov.observe_context(*context)  # the compaction check's evidence
                 except Exception as e:
                     row['observe_error'] = type(e).__name__  # settlement stands; the plan waits for an explicit ack
         finally:

@@ -1,7 +1,10 @@
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import unittest
-from modelpilot.m5 import IDLE_BOUNDARY_SECONDS, Budget, RebaseQueue, demo, learn
+from modelpilot.m5 import IDLE_BOUNDARY_SECONDS, Budget, RebaseQueue, compaction_check, demo, idle_boundary, learn
+
+SONNET_5_5 = {'output': 10, 'write': 2.5, 'read': .1}  # from October 7, 5m writes
+SONNET_5_5_1H = {'output': 10, 'write': 4, 'read': .1}  # a 1h session (a subscription's default)
 
 
 class RebaseTests(unittest.TestCase):
@@ -39,6 +42,38 @@ class RebaseTests(unittest.TestCase):
         q.queue('compact', True, 1)
         self.assertEqual(q.plan(1, idle_seconds=305.6)['action'], 'defer')
         self.assertEqual(q.plan(1, idle_seconds=330)['action'], 'would_rebase')
+
+    def test_the_idle_boundary_follows_the_cache_lifetime(self):
+        self.assertEqual((idle_boundary('5m'), idle_boundary('1h')), (330, 3630))
+        self.assertEqual(idle_boundary(None), 3630)  # unknown: wait for the longest
+
+
+
+class CompactionCheckTests(unittest.TestCase):
+    def test_compaction_pays_only_where_the_reads_it_saves_beat_its_summary(self):
+        # Summary: 3,925 tokens output and written, plus one more read of the 8,000-token base, $0.0499. The compaction
+        # request is one more request, so a 7-request turn saves reads on 6: at $0.10 it must remove 83,104.
+        large = compaction_check(150_000, 8_000, SONNET_5_5, 7)
+        self.assertEqual((large['verdict'], large['removed_tokens']), ('pays', 138_075))
+        self.assertAlmostEqual(large['cost_usd'], .0498625, places=5)
+        self.assertAlmostEqual(large['saving_usd'], .082845)
+        self.assertEqual(compaction_check(95_100, 8_000, SONNET_5_5, 7)['verdict'], 'pays')
+        self.assertEqual(compaction_check(95_000, 8_000, SONNET_5_5, 7)['verdict'], 'does_not_pay')
+        self.assertEqual(compaction_check(500_000, 8_000, SONNET_5_5, 1)['verdict'], 'does_not_pay')  # no later request
+        # The live governed session's context (October 12): its compaction removed nothing worth reading.
+        small = compaction_check(4_158, 2_713, SONNET_5_5, 2)
+        self.assertEqual((small['verdict'], small['removed_tokens'], small['saving_usd']), ('does_not_pay', 0, 0))
+
+    def test_a_1h_session_writes_the_summary_at_the_hours_rate(self):
+        # The compaction request reads the entry the triggering prompt left warm, so only the summary's write differs:
+        # $0.0558 with the base's read, from 104,842 tokens over 7 requests.
+        self.assertEqual(compaction_check(104_900, 8_000, SONNET_5_5_1H, 7)['verdict'], 'pays')
+        self.assertEqual(compaction_check(104_800, 8_000, SONNET_5_5_1H, 7)['verdict'], 'does_not_pay')
+
+    def test_unknown_evidence_is_never_a_guess(self):
+        for args in ((None, 8_000, SONNET_5_5, 7), (90_000, None, SONNET_5_5, 7), (90_000, 8_000, None, 7),
+                     (90_000, 8_000, SONNET_5_5, None), (90_000, 8_000, {'output': 10, 'write': 2.5}, 7)):
+            self.assertEqual(compaction_check(*args), {'verdict': 'unknown', 'reason': 'no_context_evidence'})
 
 
 class BudgetTests(unittest.TestCase):

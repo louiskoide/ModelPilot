@@ -13,7 +13,7 @@ import uuid
 from .cache_probe import priced_usage
 from .m2 import State
 from .m4 import cascade, nonnegative, sha
-from .m5 import IDLE_BOUNDARY_SECONDS
+from .m5 import IDLE_BOUNDARIES, compaction_check, idle_boundary
 
 KINDS = ('model', 'effort', 'prune', 'compact')
 # Settings the host can see the client use: model and effort on the wire, compaction from a hook. A prune
@@ -257,20 +257,67 @@ class Governor:
         return [{'kind': r['kind'], 'change_id': r['change_id'], 'value': json.loads(r['value']),
                  'revision': r['revision']} for r in rows]
 
-    def plan_rebase(self, revision, *, idle_seconds=0, idle_threshold=IDLE_BOUNDARY_SECONDS, cache_expired=False,
-                    switch_justified=False, explicit_boundary=False, in_flight=0):
-        """Same boundaries as M5 RebaseQueue.plan; a ready plan is recorded for acknowledgment."""
+    def observe_context(self, model, prefix_tokens, rates, ttl):
+        """Evidence of one main-loop request's cached prefix, its model's rates (USD per million tokens: 'output',
+        'write' at the session's cache lifetime, 'read') and the lifetime its breakpoints asked for ('5m', '1h'), from
+        the proxy. The idle boundary and the compaction check read it."""
+        nonnegative(prefix_tokens, 'prefix_tokens')
+        if ttl not in IDLE_BOUNDARIES:
+            raise ValueError('Unknown cache lifetime')
+        with self.db:
+            self._journal('context', {'model': model, 'prefix_tokens': prefix_tokens, 'rates': rates, 'ttl': ttl,
+                                      'applied': False})
+
+    def cache_lifetime(self):
+        """The lifetime the session's newest main-loop request asked for (observe_context), or None without one."""
+        row = self.db.execute("SELECT payload FROM gov_decisions WHERE session=? AND kind='context' ORDER BY seq DESC "
+                              'LIMIT 1', (self.session,)).fetchone()
+        return json.loads(row['payload']).get('ttl') if row else None
+
+    def _compaction_check(self):
+        """compaction_check on this session's evidence: the newest prefix and its rates, the first prefix as the base
+        compaction keeps (tools, system and the first prompt, an overestimate), and as the horizon the session's own
+        main-loop requests per completed turn (proxy context notes per client_stop note from the Stop hook)."""
+        contexts = [json.loads(r['payload']) for r in self.db.execute(
+            "SELECT payload FROM gov_decisions WHERE session=? AND kind='context' ORDER BY seq", (self.session,))]
+        turns = self.db.execute("SELECT COUNT(*) FROM gov_decisions WHERE session=? AND kind='client_stop'",
+                                (self.session,)).fetchone()[0]
+        if not contexts or not turns:
+            return compaction_check(None, None, None, None)
+        latest = contexts[-1]
+        return dict(compaction_check(latest['prefix_tokens'], contexts[0]['prefix_tokens'], latest['rates'],
+                                     round(len(contexts) / turns, 2)), model=latest['model'])
+
+    def plan_rebase(self, revision, *, idle_seconds=0, idle_threshold=None, cache_expired=False,
+                    switch_justified=False, explicit_boundary=False, in_flight=0, check_compaction=True):
+        """Same boundaries as M5 RebaseQueue.plan; a ready plan is recorded for acknowledgment.
+
+        The idle threshold is by default the idle boundary of the session's cache lifetime (cache_lifetime; unknown
+        waits for the longest), so an idle plan never lands on a warm entry. A queued compaction joins a plan the
+        governor triggers only when compaction_check says it pays; otherwise it stays queued for the next boundary
+        (deferred_changes). An explicit boundary, the caller's own, isn't checked, and check_compaction=False turns the
+        check off."""
         nonnegative(idle_seconds, 'idle_seconds')
-        nonnegative(idle_threshold, 'idle_threshold')
+        if idle_threshold is not None:
+            nonnegative(idle_threshold, 'idle_threshold')
         if idle_threshold == 0 or type(in_flight) is not int or in_flight < 0:
             raise ValueError('Invalid rebase boundary')
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
+            ttl = self.cache_lifetime()
+            idle_threshold = idle_boundary(ttl) if idle_threshold is None else idle_threshold
             pending = self.pending_changes()
             eligible = [c for c in pending if c['revision'] == revision]
             stale = [c['kind'] for c in pending if c['revision'] != revision]
             trigger = ('explicit_boundary' if explicit_boundary else 'cache_expired' if cache_expired
                        else 'justified_switch' if switch_justified else 'idle' if idle_seconds >= idle_threshold else None)
+            check, deferred = None, []
+            if (check_compaction and trigger not in (None, 'explicit_boundary') and not in_flight
+                    and any(c['kind'] == 'compact' for c in eligible)):
+                check = self._compaction_check()
+                if check['verdict'] != 'pays':
+                    deferred = ['compact']
+                    eligible = [c for c in eligible if c['kind'] != 'compact']
             ready = bool(eligible and trigger and not in_flight)
             plan_id = None
             if ready:
@@ -284,7 +331,10 @@ class Governor:
                                     (plan_id, self.session, revision, trigger, json.dumps(eligible), self.clock()))
             result = {'plan_id': plan_id, 'applied': False, 'action': 'would_rebase' if ready else 'defer',
                       'trigger': trigger, 'changes': eligible, 'stale_changes': stale,
-                      'rebuilds_planned': int(ready), 'in_flight': in_flight}
+                      'rebuilds_planned': int(ready), 'in_flight': in_flight, 'cache_ttl': ttl,
+                      'idle_threshold': idle_threshold}
+            if check:
+                result.update(compaction_check=check, deferred_changes=deferred)
             self._journal('plan_rebase', result, revision=revision)
         return result
 

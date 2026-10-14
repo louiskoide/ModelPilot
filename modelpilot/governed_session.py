@@ -23,7 +23,7 @@ import threading
 import time
 import uuid
 from .governor import Governor, reconcile_log
-from .hooks import EVENTS, channel_declaration
+from .hooks import COMPACTION_CHECK, EVENTS, channel_declaration
 from .jev_route_check import TOKEN_FIELDS, check_anthropic_key, parse_events
 from .m5 import IDLE_BOUNDARY_SECONDS
 from .proxy import ProxyServer
@@ -237,7 +237,8 @@ def live_scenario():
 
 
 # Plan item 12: live evidence for turn-end delivery and an observed rebuild, in one session of four invocations.
-REBUILD_IDLE_SECONDS = IDLE_BOUNDARY_SECONDS + 5  # past the UserPromptSubmit hook's idle boundary and a 5m entry's life
+# An API-key session writes 5m entries, so this passes the UserPromptSubmit hook's idle boundary and a 5m entry's life.
+REBUILD_IDLE_SECONDS = IDLE_BOUNDARY_SECONDS + 5
 REBUILD_STEPS = ('task', 'follow_up', 'compact', 'rebuilt')
 
 
@@ -317,7 +318,9 @@ def run_rebuild_session(run, cli, key, upstream, rates, *, prompt, instruction, 
     settings = run/'settings.json'
     settings.write_text(json.dumps(hook_settings(), indent=2))
     binding = {'MODELPILOT_DB': str(db), 'MODELPILOT_SESSION': session, 'MODELPILOT_LIMIT_USD': str(limit_usd),
-               'MODELPILOT_TASK': task, 'MODELPILOT_OWNER': OWNER, 'MODELPILOT_HOOK_ERRORS': str(run/'hook-errors.jsonl')}
+               'MODELPILOT_TASK': task, 'MODELPILOT_OWNER': OWNER, 'MODELPILOT_HOOK_ERRORS': str(run/'hook-errors.jsonl'),
+               # The scenario tests delivery and observation; on its few thousand tokens compaction never pays.
+               COMPACTION_CHECK: 'off'}
     env = client_env(os.environ, key, dirs, cli, binding)
     env['ANTHROPIC_BASE_URL'] = f'http://127.0.0.1:{proxy.server_port}'
     client_session = str(uuid.uuid4())  # persisted only in this run's own config directory, so it can be resumed
@@ -327,7 +330,8 @@ def run_rebuild_session(run, cli, key, upstream, rates, *, prompt, instruction, 
     prompts = {'task': f'{channel_declaration(task, code)}\n\nTask instruction: {instruction}\n\n{prompt}',
                'follow_up': follow_up, 'compact': '/compact', 'rebuilt': final_prompt}
     report = {'status': 'running', 'scenario': 'turn-end-rebuild', 'mode': 'dry-run', 'model': model, 'effort': effort,
-              'target_effort': target_effort, 'task_revision_start': revision, 'invocations': [],
+              'target_effort': target_effort, 'compaction_check': binding[COMPACTION_CHECK],
+              'task_revision_start': revision, 'invocations': [],
               'limits': f'client stop threshold ${budget_usd:.2f} per invocation, max {max_turns} turns; governor limit '
                         f'${limit_usd} (dry-run, never enforced); not a billing cap'}
     stdouts = {}

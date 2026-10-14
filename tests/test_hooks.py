@@ -12,6 +12,7 @@ from modelpilot.hooks import REVIEW_AT_STOP, channel_declaration, handle
 
 FIXTURES = Path(__file__).parent/'fixtures'/'hooks-2.1.280'
 ROOT = Path(__file__).resolve().parents[1]
+SONNET_5M = {'output': 10, 'write': 2.5, 'read': .1}  # Sonnet 5.5, 5m writes
 
 
 def payload(name, cwd, **changes):
@@ -156,6 +157,7 @@ class HookTests(unittest.TestCase):
 
     def test_idle_gap_surfaces_a_rebase_plan_to_the_user_only(self):
         self.gov.queue_change('model', 'claude-opus-4-6', self.rev)
+        self.gov.observe_context('claude-sonnet-5-5', 4_000, SONNET_5M, '5m')  # the proxy saw an API-key session
         self.run_hook('Stop')
         self.now[0] += 100
         self.assertNotIn('systemMessage', self.run_hook('UserPromptSubmit'))
@@ -169,6 +171,33 @@ class HookTests(unittest.TestCase):
         self.assertIn('acknowledged once this session is seen running it', output['systemMessage'])
         self.assertIsNone(self.context(output))
         self.assertEqual(len(self.gov.pending_changes()), 1)  # suggested, not applied
+
+    def test_an_idle_compaction_is_suggested_only_where_it_pays_unless_the_check_is_off(self):
+        self.gov.queue_change('compact', True, self.rev)
+        self.gov.observe_context('claude-sonnet-5-5', 4_000, SONNET_5M, '5m')
+        self.gov.observe_context('claude-sonnet-5-5', 6_000, SONNET_5M, '5m')
+        self.run_hook('Stop')
+        self.now[0] += 400
+        self.assertNotIn('systemMessage', self.run_hook('UserPromptSubmit'))
+        plan = self.gov.journal('plan_rebase')[-1]['payload']
+        self.assertEqual((plan['action'], plan['compaction_check']['verdict']), ('defer', 'does_not_pay'))
+        self.run_hook('Stop')
+        self.now[0] += 400
+        self.env['MODELPILOT_COMPACTION_CHECK'] = 'off'
+        self.assertIn('/compact', self.run_hook('UserPromptSubmit')['systemMessage'])
+
+    def test_a_rebuild_waits_out_a_1h_entry_and_an_unknown_one(self):
+        self.gov.queue_change('model', 'claude-opus-4-6', self.rev)
+        self.run_hook('Stop')
+        self.now[0] += 400
+        self.assertNotIn('systemMessage', self.run_hook('UserPromptSubmit'))  # no proxy evidence: lifetime unknown
+        self.gov.observe_context('claude-sonnet-5-5', 4_000, dict(SONNET_5M, write=4), '1h')  # a subscription session
+        self.run_hook('Stop')
+        self.now[0] += 600
+        self.assertNotIn('systemMessage', self.run_hook('UserPromptSubmit'))  # a 1h entry is still read at 10 minutes
+        self.run_hook('Stop')
+        self.now[0] += 3_630
+        self.assertIn('/model claude-opus-4-6', self.run_hook('UserPromptSubmit')['systemMessage'])
 
     def test_compaction_acknowledges_only_a_compact_only_plan(self):
         self.gov.queue_change('compact', True, self.rev)
