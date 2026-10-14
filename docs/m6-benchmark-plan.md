@@ -894,6 +894,64 @@ Overnight queue item 2, built the next day (branch `codex/miss-crosscheck`, `mod
 
 Commands, on the machine with the dev runs: `python3 -m modelpilot.miss_crosscheck estimate --out runs/miss-crosscheck-plan-<ts>.json`, then `run --out runs/miss-crosscheck-<ts> --jobs 6`, then `score runs/miss-crosscheck-<ts>`.
 
+### Review of October 14's scorers (October 14, cloud batch, $0)
+
+Cloud batch item 1, branch `claude/oct14-review`, before the checklist's and the cross-check's results are written up. Reviewed: `miss_checklist.py`, `miss_crosscheck.py`, `explorer_replay.py` (for a decision-flipping bug only), the `m2.State` lock fix and `bench_report --router-rates`. Each bug below has a test that fails on the old code. No prompt of a paid step changed. The recorded runs aren't in the container, so each re-score is a main-machine step (end of this section).
+
+**Bugs found and fixed:**
+
+1. **Cross-check: in a tree with no pytest configuration of its own, every selected test reads `not_run`, so nothing is kept and nothing flags.** Without a configuration file at the tree's root, pytest 8 (8.4.2 here, the bench pin) takes the nearest `pyproject.toml` above the tree as rootdir, even one with no pytest section. ModelPilot's is above `runs/`, so JUnit then names each test `runs.miss-crosscheck-….scratch….tests.test_x` and `outcome_of`, reading `tests.test_x`, finds nothing. On the synthetic task with a `pyproject.toml` above the scratch, the old code kept no peer test and flagged no miss (`UnderAProjectTests`). Fix: `--rootdir=<tree>`. Phase 1 now records each trial's own-tree outcomes, and the summary has them per task, so a task that read only `not_run` would show. Only tasks whose repository has none of `pytest.ini`, `.pytest.ini`, `pyproject.toml` (of any content), `tox.ini` with `[pytest]` or `setup.cfg` with `[tool:pytest]` at the base's root are affected. parse has `.pytest.ini` (its task notes say so). The others weren't checked here (the task repositories aren't in the container). Every reading of an affected task could change: no peer test of its trials was ever used.
+2. **Checklist: a reply giving no known verdict for any check counted as judged, all `missing`.** That flagged it under every `not_met_or_unclear>=k` rule, miss or pass alike, and under no `not_met>=k` rule. Example: verdicts written `"Met"`, or under another key. `verdicts_for` now calls such a reply unusable, and `score` counts a recorded one as unjudged (`no_known_verdict`).
+3. **Checklist: `json_block` tried only the first fenced match.** After a fenced block quoting the diff, the regex took the text between that block's closing fence and the answer's block for the answer, which fails to parse, so the reply was unusable. Every fenced block is now tried, json-tagged ones first. `score --reparse` reads each sent trial's verdicts again from its saved reply.
+4. **Checklist: the `--limit-usd` stop skipped a request and went on.** The module docstring says none is sent once the next one's most possible cost would pass the limit. The code skipped that one and still sent later, smaller ones, so a stopped run's judged set leaned to small diffs. It now stops for good.
+5. **Checklist: what `cost_complete: false` means for `spent_usd`.** Two paths make it false:
+   - **A transport exception.** The row has no cost and the old stop added $0, so `spent_usd` was a lower bound only when every gap was an error. An HTTP error status (category `http`) comes with no usage. A timeout or lost connection may still have been billed.
+   - **A reply `priced_usage` can't price.** The answering model isn't the one asked, a non-standard service tier, `inference_geo` other than global/not_available, fast speed, cache writes without the TTL breakdown, or a missing usage field. The old stop counted it at its most possible cost, so `spent_usd` overstates that row and is no lower bound.
+
+   Now an error also counts at its most for the stop. Rows carry `http_status`. Totals add `known_usd` (priced replies only, a lower bound of the bill) and `unknown_cost` by kind (`http_error`, `transport_error`, `unpriced_reply`). `score`'s `cost` block recomputes these from the recorded rows and lists what `priced_usage` read for each unpriced reply.
+6. **Checklist: `score` could run only once per directory** (`score.json`, never overwritten), so a re-score had nowhere to go. `--out-file` writes a new file.
+7. **`bench_report --router-rates`: a Jev trial with no routing record priced its router at $0.** It's now unknown. Jev trials record `routing` with a decision count, and per-decision usage since October 3. A count without usage was already unknown. No recorded trial is known to lack the record.
+
+**Reviewed, no bug found:**
+- **Checklist:** the rules (k = 1, 2, 3; `missing` counts with unclear), per task and leave-one-task-out. `dev_trials` keeps the same trials as `miss_detector.collect`: `counted`, strict label `record['passed']` under `hidden_and_edge`. Unjudged misses are counted apart, now also by why (`unjudged_by_status`).
+- **Cross-check:**
+  - peers are the other counted dev trials of the same task, from any run and arm;
+  - the cap is a sample seeded by a string, stable across processes;
+  - a peer test is kept only if it passed on its author's tree, and an error on that tree keeps none of its tests;
+  - pytest's `-k` matches substrings, so it runs more than the selected tests, but `outcome_of` reads only the exact `(module[.Class], name)` key (new test: an unselected `test_a_more` runs and fails and isn't read);
+  - also checked: the noise patterns, the reference bound kept apart, the six readings, per task, leave-one-task-out and the price block.
+- **Cross-check, kept as they are and noted:**
+  - a trial whose sampled peers include none from a source drops out of that source's readings instead of counting as unflagged; the cap rarely binds at about 16 trials a task;
+  - with `--no-reference-bound` the bound reads all zero, still labelled an upper bound;
+  - `classify` treats any identifier anywhere in the base's source, comments included, as known, which leans to flagging;
+  - a positional `TypeError` from a peer's widened signature flags, which is also how tomli's keyword-construction miss would show.
+- **`explorer_replay`:** row-to-turn matching, the write-then-carried pricing, Reads of later-edited files kept, and the helper and overhead bounds. One bias goes the explorer's way: savings keep counting after a `/compact` drops the result. It can't flip "doesn't pay".
+- **`m2.State`:** SQLite now creates the file, which is made 0600 before the first write. The WAL and SHM files take the database's mode and are created after the chmod. Nothing else opens the ledger outside SQLite: the hooks' and the proxy's `os.open` calls are for their own logs.
+
+**Main-machine steps ($0):**
+
+```sh
+# Checklist (Haiku 5.5): why each trial is unjudged, the spend split, then verdicts re-read from the saved replies.
+python3 -m modelpilot.miss_checklist score runs/miss-checklist-20261014-085157 --out-file runs/miss-checklist-20261014-085157-rescore.json
+python3 -m modelpilot.miss_checklist score runs/miss-checklist-20261014-085157 --reparse --out-file runs/miss-checklist-20261014-085157-reparse.json
+# Cross-check: was any task hit by the rootdir bug? Changed tests but none kept is its signature.
+python3 - <<'PY'
+import json, collections
+peers = json.load(open('runs/miss-crosscheck-20261014-112627/peer_tests.json'))
+by_task = collections.defaultdict(lambda: [0, 0, 0])
+for key, v in peers.items():
+    row = by_task[key.split('__')[1]]
+    row[0] += 1
+    row[1] += sum(len(f['names']) for f in (v.get('files') or {}).values())
+    row[2] += sum(len(names) for names in (v.get('kept') or {}).values())
+for task, (trials, changed, kept) in sorted(by_task.items()):
+    print(task, 'trials', trials, 'changed tests', changed, 'kept', kept, '<- check' if changed and not kept else '')
+PY
+```
+
+- **The checklist re-score** changes the `not_met_or_unclear>=k` readings if any trial had no known verdict, and any reading if `--reparse` recovers a reply (the recorded run had 4 of 453 unjudged). `cost` says whether `spent_usd` was a lower bound.
+- **The cross-check:** if any task is marked, re-run with the fix (same seed and cap, $0, hours): `python3 -m modelpilot.miss_crosscheck run --out runs/miss-crosscheck-<ts> --jobs 6`, then `score`. Every reading that includes the marked tasks can change, and the miss tasks (parse, tomli, ISMAGS) only if one of them is marked.
+
 ### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
 
 User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku passes, the tests are too easy"), so harder tasks come before item 8's labels, from sqlglot (MIT; surveyed October 4, above), in stages. Stage 1 builds 8 tasks and screens them with one low concise and one Opus 5.5 trial each; a full batch follows only if the repository produces misses. sqlglot joins the tuning split; the final split and its lock are unchanged.
