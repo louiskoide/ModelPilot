@@ -11,6 +11,13 @@ $0, offline, branch `codex/haiku-explorer` (overnight queue item 3, built the da
 - **Expectation, not a result:** the caveman pass found a median 7.9 KB of tool results a trial, so savings are likely small. Step 2 (an arm with `--agents`) is built only if the replay pays.
 - **To run** (the machine with the dev runs, $0): `python3 -m modelpilot.explorer_replay --out runs/explorer-replay-<ts>.json`.
 - **Tests:** all 802 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 9 skipped and the 3 proxy expected failures (`runs/codex-haiku-explorer-regression-py312.log`). New: `tests/test_explorer_replay.py` (7, one trial worked by hand; also passes on Python 3.10.20).
+## October 14, 2026: the overnight branches merged; 795 tests pass together
+
+$0, no model request. Merged with merge commits, in order: #63 (sqlglot stage 2 screen), #70 (ledger locks), #72 (Jev launcher path), #69 (proxy shapes), #68 (README), #67 (TypeSafe support), #71 (requirements checklist). #66, the overnight run's `runs/` handoff, was closed unmerged and its files copied to `runs/`.
+
+- **Conflicts:** only `docs/changelog.md`, since each overnight branch added its entry at the top. The six were chained, each merging the one before it with its entry stacked on top, so each merged cleanly in turn; #63 conflicted with none.
+- **Tests:** all 795 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 3 of them expected failures (#69's proxy bugs), no skips (`runs/post-merge-regression-py312.log`). The chain's tip, which differs from `main` only by #63's docs, also passed with `work/` symlinked into a worktree (`runs/codex-chain-regression-py312.log`), so `CLAUDE.md`'s note that the Jev launcher's checkout-path test fails there is removed.
+- **CI:** one flake. `test_jev_accounted_launch.ExplicitClientTests.test_explicit_binary_wins_over_path` timed out (10 s) once on Python 3.14 in #67's push run; the same commit passed in its pull-request run, and the job passed on re-run.
 
 ## October 14, 2026 (overnight run): miss detector, requirements checklist built offline, not run
 
