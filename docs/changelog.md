@@ -2,6 +2,15 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026 (cloud batch): the proxy's three shape bugs fixed
+
+$0, offline, branch `claude/proxy-shape-fixes` (cloud batch item 2). Details: `docs/m1-results.md`, "The three shape bugs fixed".
+
+- **Server-side tool fees:** `logged_usage` keeps `server_tool_use`'s counters, and `priced_usage` leaves a reply's cost unknown when one counts a web search ($10 per 1,000 searches, a fee no rates table here carries) or a counter it doesn't know. Web fetch isn't metered and keeps its token price. Source: the claude-api skill's pricing notes, read October 14. No recorded run's usage has `web_search_requests` above 0 (checked on the main machine on October 14), so no recorded cost changes.
+- **Upstream failures:** only a failed write to the client is the client going away (`ClientGone`, `connection_closed`). An upstream that closes before its status line now gets the client a 502 and logs `transport_error`/`RemoteDisconnected`; a reset mid-stream logs `ConnectionResetError`; `GET /v1/models` too. Accounting is unchanged: both were already lost requests of unknown cost.
+- **Repeated headers** are forwarded as sent, in order (`clean_headers` returns pairs, `send_request` sends them).
+- **Tests:** all 814 offline tests pass on Python 3.12 with the pinned 2.1.284 client, no expected failures left and no skips (`runs/cloud-proxy-shape-fixes-regression-py312.log`). `tests/test_proxy_shapes.py`: the three `expectedFailure` decorators removed, their assertions tightened (a cost of None, the counter logged, two separate headers), and 3 new tests (an upstream reset mid-stream, a catalog upstream that closes, unmetered and malformed counters); each new or fixed test fails on the old code. `tests/test_proxy.py` and the soak's fixtures are unchanged and pass; the proxy test modules also pass on Python 3.10.20.
+
 ## October 14, 2026: the Haiku explorer doesn't pay (plan item 14, step 1 result); step 2 not built
 
 $0, the user's run on the main machine of `python3 -m modelpilot.explorer_replay` (branch `codex/haiku-explorer`): `runs/explorer-replay-20261014-111951.json`. Details: `docs/m6-modelpilot-policy.md`, "Helper role: a read/search explorer, step 1", Result.

@@ -25,7 +25,7 @@ Observation-log SHA-256: `907a4f148e1c5560327688092746c7bd069a02280f571be63417d4
 
 ## Remaining M1 work
 
-The dry-run implementation passed its overnight synthetic checks. M1 is not yet certified against actual Claude Code traffic. Next validate API-key-based Claude Code streaming, tool calls, cancellation, headers and usage through the proxy. Subscription OAuth, cloud adapters, chunked client uploads, server-side fallback accounting, tool surcharges and long-running streams beyond the 120-second inactivity timeout remain limitations. Cost scenarios assume a warm source, cold target, unchanged context/output and five-minute TTL; quality and actual remaining task length are unknown. Keep routing disabled.
+The dry-run implementation passed its overnight synthetic checks. M1 is not yet certified against actual Claude Code traffic. Next validate API-key-based Claude Code streaming, tool calls, cancellation, headers and usage through the proxy. Subscription OAuth, cloud adapters, chunked client uploads, server-side fallback accounting, tool surcharges (since October 14 a reply whose usage counts a web search is left unknown, not priced on its tokens) and long-running streams beyond the 120-second inactivity timeout remain limitations. Cost scenarios assume a warm source, cold target, unchanged context/output and five-minute TTL; quality and actual remaining task length are unknown. Keep routing disabled.
 
 The soak stopped automatically. The overnight follow-up is disabled after this completion report; no further overnight runs are scheduled by this task.
 
@@ -55,8 +55,30 @@ Passes:
 - A keep-alive client: one reply per connection (`Connection: close`), each request forwarded and logged once.
 - An event or reply over 1 MiB: forwarded, cost unknown (`oversized_response`). The bound is checked between reads, so an event a little over it can still be parsed and priced.
 
-Bugs found, each an `expectedFailure` test with the fix it needs:
+Bugs found, each an `expectedFailure` test with the fix it needs (all three fixed the same day; see the next section):
 
 1. **Server-side web search isn't priced and isn't unknown.** `cache_probe.priced_usage` reads tokens only, so a reply whose usage has `server_tool_use.web_search_requests` (Claude Code's WebSearch runs it; the pricing page lists $10 per 1,000 searches) is logged as a known cost without the search fee, and `logged_usage` drops the counter. Fix: keep numeric `server_tool_use` counters in `logged_usage`; return None from `priced_usage` when a fee-bearing counter is positive unless the model's rates carry that fee.
 2. **An upstream that closes without replying gets no 502.** `http.client.RemoteDisconnected` subclasses `ConnectionResetError`, so `do_POST`'s client-disconnect branch takes it: the client gets a closed connection instead of the 502 the next branch would send, and the row reads `connection_closed` instead of `transport_error`. Accounting is unaffected (both count as lost requests). An upstream reset mid-stream is labelled the same way. Fix: treat `RemoteDisconnected` and errors from `conn.request`/`getresponse`/`read1` as upstream failures before the client branch, or confine that branch to `self.wfile` writes.
 3. **A header sent twice is forwarded once.** `clean_headers` builds a dict from `HTTPMessage.items()`, so the last value wins: two `anthropic-beta` headers reach the API as one, two `Set-Cookie` headers reach the client as one. Low impact for Claude Code (fetch merges repeats into one header). Fix: keep (name, value) pairs and send them one by one.
+
+## The three shape bugs fixed — October 14, 2026 (cloud batch, tests only, $0)
+
+Cloud batch item 2, branch `claude/proxy-shape-fixes`. The three `expectedFailure` decorators are gone and each test passes for the reason it names, strengthened where it allowed a weaker fix. `tests/test_proxy.py` and the soak's fixtures are unchanged and pass.
+
+1. **Server-side tool fees.**
+   - `logged_usage` keeps `usage.server_tool_use`'s numeric counters (names `[a-z_]`, at most 64 characters).
+   - `cache_probe.priced_usage` returns None when one counts a request with a fee: web search, $10 per 1,000 searches. It also returns None for any counter it doesn't know, and for anything in `server_tool_use` that isn't a counter.
+   - Web fetch isn't metered, so `web_fetch_requests` keeps the token price. Source: the claude-api skill's pricing notes (bundled with client 2.1.300, read October 14, 2026: "web searches at $10 per 1,000"; `web_fetch_requests` "currently always 0 since web fetch is not metered").
+   - No rates table carries the search fee, so such a reply's cost is unknown (`usage_problem: unpriced_usage`) and so is its trial's total.
+   - Checked on the main machine on October 14: no recorded run's usage has `web_search_requests` above 0, so no recorded cost changes.
+   - Not covered: code execution's container hours (billed past a free allowance) don't appear in usage at all. Claude Code doesn't declare that tool.
+2. **Upstream failures are the upstream's.**
+   - Only writes to the client raise `ClientGone`, which logs a row `connection_closed`. Every other exception is the upstream's: `transport_error` with its type, and a 502 if the client has had nothing yet.
+   - An upstream that closes before its status line now gets the client a 502 and logs `RemoteDisconnected`. Before the fix the client got no reply and the row read `connection_closed`.
+   - An upstream reset mid-stream (new test, an RST after the first event) logs `ConnectionResetError` as a `transport_error`; the client keeps what had arrived.
+   - The same split now holds for `GET /v1/models` (new test).
+   - Accounting is unchanged: either status was already a lost request of unknown cost.
+3. **Repeated headers.** `clean_headers` returns (name, value) pairs in order, and requests go out through `putrequest`/`putheader` (`proxy.send_request`). Two `anthropic-beta` headers now reach the upstream as two headers, and two `Set-Cookie` headers reach the client as two. Host is still sent once, the upstream's. Where the active arm adds a beta, the client's repeats are merged into one header with it, matched in any case.
+
+Tests: 20 in `tests/test_proxy_shapes.py` (17 before; 3 new: the reset, the catalog close, the unmetered counters). Each new or fixed test fails on the old code.
+
