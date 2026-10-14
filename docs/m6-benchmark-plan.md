@@ -866,7 +866,7 @@ The M tasks: `mi-subfactorial` (low concise 1/3, Sonnet medium 0/2, Opus 2/2), `
 - For an Opus user it doesn't: low concise misses where Opus passes on 4 of 37 valid tasks (Y_O), and nothing here predicts which.
 - sqlglot stage 1 is too easy to separate settings: 1 miss in 56 counted trials (low concise on duckdb, 1 of 3).
 
-### Miss detector: requirements checklist (October 14, built offline, $0; not run)
+### Miss detector: requirements checklist (October 14: built offline, then run; not a detector)
 
 The miss detector's next candidate after its first two signals failed (October 13: the misses are implied requirements never implemented, so neither the agents' tests nor the task's suite shows them). Overnight queue item 4, branch `codex/miss-checklist`, `modelpilot/miss_checklist.py`. Dev split only (`miss_detector.split_runs('dev')`); nothing reads the holdout.
 
@@ -880,7 +880,31 @@ The miss detector's next candidate after its first two signals failed (October 1
 
 **Break-even against item 7.** A miss noticed late was repaired 28 of 28 times at $0.056 each. If every flag costs one such fix attempt, the check pays only when an unnoticed miss would do more damage than (check cost + flags × $0.056) / misses caught, per trial, at the dev miss rate 40/453. Haiku: about $0.10 at perfect recall and 5% false flags, $0.20 at half the misses and 10%, $0.37–0.39 at half and 25%. Sonnet: $0.37, $0.74 and $0.91 (diffs ×1), up to $1.17 (×3). For comparison, the forced Opus review at the finish cost $0.069 a task and rescued none, and a redo costs about $0.25. Whether the checklist catches misses at all is unknown until `list` and `judge` run (the user's call; Haiku's run is under $1).
 
-### Miss detector: cross-run test checks (October 14, built offline, $0; not run)
+#### Result (run October 14): it flags tasks, not misses
+
+The user's run, API key: `list` and `judge` on Haiku 5.5 low, code `938a199`, `runs/miss-checklist-20261014-085157`. **$0.752 known:** list $0.021, judge $0.730, about $0.0017 a trial. Three judge requests failed without usage (2 timeouts, 1 HTTP error; none retried), so it's a lower bound. 449 of the 453 counted dev trials were judged; the 4 not judged (those 3 and an unusable reply) are all passes. Further readings, $0: `runs/miss-detector-readings-20261014.py` (`.json` beside it).
+
+"Expected" is the number of misses a rule would flag if, within each task, its flags fell on trials regardless of grade (each task hypergeometric, summed exactly); p is that null's chance of the observed count or more. "Per miss caught" is the rule deployed with one late fix per flag (item 7, $0.056), the break-even damage per unnoticed miss if every fix repairs.
+
+| Rule | Misses flagged | Passes flagged | Expected (p) | Per trial | Per miss caught |
+| --- | --- | --- | --- | --- | --- |
+| `not_met>=1` | 20/40 | 155/409 | 18.5 (0.24) | $0.0235 | $0.53 |
+| `not_met_or_unclear>=1` | 34/40 | 236/409 | 34.4 (0.75) | $0.0353 | $0.47 |
+| `not_met>=2` | 11/40 | 41/409 | 10.5 (0.50) | $0.0081 | $0.33 |
+| `not_met_or_unclear>=2` | 28/40 | 83/409 | 26.7 (0.28) | $0.0155 | $0.25 |
+| `not_met>=3` | 4/40 | 10/409 | 3.4 (0.46) | $0.0034 | $0.38 |
+| `not_met_or_unclear>=3` | 14/40 | 26/409 | 12.1 (0.19) | $0.0066 | $0.21 |
+
+- **Overall, `not_met_or_unclear>=2` clears the stated bar:** 28 of 40 misses at 20% of passes. Leaving out each main task: 18/30 without parse, 13/19 without tomli, 27/34 without ISMAGS.
+- **Within a task it separates nothing.** The misses get 28 flags where 26.7 are expected (p 0.28), and no rule does better than its null (p 0.19–0.75). The flags follow the task's checks:
+  - **parse:** R1 (`'{:,d}'` parses '1,000,000') and R2 (negative grouped integers) are judged not met or unclear on all 10 misses and all 12 passes. The passes pass the hidden tests, so the judge is wrong there.
+  - **tomli:** R3 ("every error the parser raises uses the new form") is unclear on 19/21 misses and 2/3 passes: a diff can't show every raise site.
+  - **ISMAGS:** no check separates (the best, R4, 3/6 misses against 6/18 passes).
+  - **Tasks without a miss:** 49 of 336 passes flagged (15%).
+- **What it means.** The checklist measures the task's checks, mostly how many a diff can't settle, not the trial's work. A task-level signal could still help if it ranked new tasks, which is item 8's question; turn-start features failed it, and the checklist wasn't tested on held-out tasks. Deployed, the best rule costs $0.0155 a trial, $0.25 per miss caught (as much as an Opus redo). Its fixes would start from notes such as "R1 not met" that are wrong on passing work, while item 7's fixes started from a host-written bug report.
+- **Verdict: not a miss detector.** No pre-registration. Not tried: a judge given the whole tree rather than the diff (it could settle tomli's R3, at many times the input), and Sonnet 5.5 as judge ($11–16).
+
+### Miss detector: cross-run test checks (October 14: built offline, then run; no rule that pays)
 
 Overnight queue item 2, built the next day (branch `codex/miss-crosscheck`, `modelpilot/miss_crosscheck.py`) where the dev runs aren't, so tested on a synthetic task only; it runs at $0 on the machine that has them. The misses are implied requirements never implemented, so the agent's own tests can't catch them, and Opus's spec-written tests caught parse 8/8 but none of tomli or ISMAGS (item 5). This asks whether tests that *other* agents wrote while solving the same task do. Dev split only.
 
@@ -893,6 +917,30 @@ Overnight queue item 2, built the next day (branch `codex/miss-crosscheck`, `mod
 - **If it works.** A rule that flags at least half the misses at a tolerable false-flag rate gets a holdout pre-registration drafted (modelled on item 8's), not run: the holdout is the user's call.
 
 Commands, on the machine with the dev runs: `python3 -m modelpilot.miss_crosscheck estimate --out runs/miss-crosscheck-plan-<ts>.json`, then `run --out runs/miss-crosscheck-<ts> --jobs 6`, then `score runs/miss-crosscheck-<ts>`.
+
+#### Result (run October 14): Opus's tests catch misses, but checking with Opus costs more than using it
+
+The user's run, $0: `runs/miss-crosscheck-20261014-112627` (`--max-peers 16`, seed 0), 453 counted dev trials, 0 errors, 610 s (the plan estimated 286 s, `runs/miss-crosscheck-plan-20261014-111952.json`). 423 trials' diffs carried tests that pass on their own tree. Peer tests run: 20,027 passed, 410 assertion failures, 258 other errors, 46 API-shape noise. Further readings, $0: `runs/miss-detector-readings-20261014.py`. Columns as in the checklist's result; the deployed cost is the peer runs a reading needs (recorded mean cold-equivalent cost) plus a late fix per flag.
+
+| Peers | Misses flagged | Passes flagged | Expected (p) | Reference-filtered | Per trial | Per miss caught |
+| --- | --- | --- | --- | --- | --- | --- |
+| Same arm, one | 5/26 | 16/232 | 4.8 (0.58) | 1/26, 3/232 | $0.106 | $5.45 |
+| Same arm, all (1.4 a trial) | 8/26 | 20/232 | 7.4 (0.48) | 4/26, 3/232 | $0.146 | $4.70 |
+| Opus 5.5, one | 17/39 | 21/375 | 12.5 (0.009) | 11/39, 2/375 | $0.255 | $6.21 |
+| Opus 5.5, all (1.3 a trial) | 34/39 | 27/375 | 26.3 (<0.001) | 20/39, 2/375 | $0.329 | $4.01 |
+| Any, one | 10/40 | 27/413 | 7.5 (0.09) | 5/40, 2/413 | $0.103 | $4.67 |
+| Any, all (14.2 a trial) | 39/40 | 123/413 | 33.5 (<0.001) | 25/40, 38/413 | $1.42 | $16.47 |
+
+- **A same-arm second run, the cheap deployment, carries no signal:** 5 of 26 misses flagged where 4.8 are expected.
+- **Opus 5.5's tests do carry a signal within tasks**, unlike the agents' own tests (October 13) and Opus's tests written from the instruction alone (item 5, none of tomli or ISMAGS). All Opus peers flag 34 of 39 misses at 7% of passes, 26.3 expected; with the reference filter, 20/39 at 2/375. Per task, averaged over single Opus peers: tomli 8.7/20 misses against 0/3 passes, ISMAGS 3.0/6 against 3.2/17, parse 2.8/10 against 2.9/12.
+- **But it can't pay.** The second run is an Opus 5.5 run ($0.26 a task), and an Opus run's own fix passes strictly 0.981 of the time (`opus-vs-modelpilot-20261006.json`). Checking cheap work with Opus costs more than doing the work with Opus.
+- **`reference_bound` is mislabelled.** The output calls it an upper bound, but it keeps only the peer tests the reference fix passes, so it flags fewer misses and fewer passes. It bounds the false flags, not the catches. Most catches by peers other than Opus come from tests the reference fix fails too.
+- **Exploratory, by the peer's model (chosen after seeing the readings above):** one Haiku 5.5 peer ($0.026 a run) flags 17.5 of 37 misses on average over every single-peer choice, at 42 of 413 passes (10%), p 0.001 within tasks (20,000 within-task shuffles). All Haiku peers (2.7 a trial) flag 23/37 at 80/413. Sonnet 5.5 peers: 7.6/40, p 0.06.
+  - **It rests on few trials:** tomli 7.0/19 against 0.5/3 (3 passes), ISMAGS 1.0/5 against 0/18, `mi-is-sorted-lt-only` 1/1 against 0/15, parse 8.2/10 against 7.8/12.
+  - **Most catches use wrong tests:** with the reference filter, 3.7 of 37 remain. In four catches of five the test fails on the reference fix as well, so a late fix steered by it would chase Haiku's reading of the task.
+  - **Deployed:** $0.034 a trial, $0.86 per miss caught at full repair. These were full Haiku sessions, which the October 10 decision rules out as a session setting.
+- **Descriptive p-values.** These come from many readings on the dev split: 6 checklist rules, 12 cross-check readings and 6 by peer model.
+- **Verdict: no pre-stated reading gives a rule that can pay.** Opus "all" clears the stated bar but loses to running Opus. The Haiku reading is post hoc and rests on about three tasks. Item 8's seed-8 runs (low concise, Sonnet medium, Opus) hold no Haiku trial, so testing it would need new Haiku runs on the holdout tasks. A pre-registration is drafted only on the user's go.
 
 ### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
 
