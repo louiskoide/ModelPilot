@@ -86,6 +86,9 @@ def report(items):
     def mean(values):
         values = [v for v in values if v is not None]
         return sum(values) / len(values) if values else None
+
+    def unknown(values):  # trials a mean leaves out (October 15 audit: they were dropped without a count)
+        return sum(v is None for v in values)
     arms = {}
     for record, item in items:
         arms.setdefault(record['arm'], []).append(item)
@@ -98,7 +101,14 @@ def report(items):
                     'mean_turn_usd': {k: mean(t['turn_cost_usd'].get(k) for t in kept) for k in ('plan', 'compact', 'fix')},
                     'mean_compaction_usd': mean(t['compaction_usd'] for t in kept),
                     'mean_compaction_output_tokens': mean(t['compaction_output_tokens'] for t in kept),
-                    'mean_fix_first_write_tokens': mean(t['fix_first_write_tokens'] for t in kept)}
+                    'mean_fix_first_write_tokens': mean(t['fix_first_write_tokens'] for t in kept),
+                    # How many eligible trials each mean above leaves out as unknown (or, for a control's compaction,
+                    # absent): the means cover the rest.
+                    'unknown': {'turn_usd': {k: unknown([t['turn_cost_usd'].get(k) for t in kept])
+                                             for k in ('plan', 'compact', 'fix')},
+                                'compaction_usd': unknown([t['compaction_usd'] for t in kept]),
+                                'compaction_output_tokens': unknown([t['compaction_output_tokens'] for t in kept]),
+                                'fix_first_write_tokens': unknown([t['fix_first_write_tokens'] for t in kept])}}
     return out
 
 
