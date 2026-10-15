@@ -1,6 +1,6 @@
 # Changelog
 
-Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
+Entries through October 14, 2026, newest first. **New entries go in `docs/changelog/`, one file each** (its README), so parallel branches don't conflict here. Each says what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
 ## October 14, 2026: the miss detector's two runs: the checklist flags tasks, not misses; Opus's tests catch misses but checking with Opus costs more than using it
 
