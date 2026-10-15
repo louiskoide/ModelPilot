@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "modelpilot"
 version = "0.1.0"
-description = "Cache experiments for risk-first model routing"
+description = "A cache-aware model and effort governor for Claude Code, and a benchmark that compares it with fixed settings and with the Jev router"
 requires-python = ">=3.10"
 dependencies = []
 
@@ -19,6 +19,8 @@ modelpilot-soak = "modelpilot.soak:main"
 modelpilot-state = "modelpilot.m2:main"
 modelpilot-mcp = "modelpilot.m2_mcp:main"
 modelpilot-worker-check = "modelpilot.worker_check:main"
+modelpilot-doctor = "modelpilot.doctor:main"
+modelpilot-timeline = "modelpilot.timeline:main"
 
 [tool.setuptools.packages.find]
 include = ["modelpilot*"]
