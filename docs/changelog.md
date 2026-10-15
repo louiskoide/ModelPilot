@@ -70,6 +70,25 @@ $0, offline, branch `claude/oct14-review` (cloud batch item 1; the recorded runs
 - **No bug found** in the checklist's rules and trial selection, the cross-check's peer selection, own-tree filter, `-k` reading (extra matches run, never read: new test), readings and price, `explorer_replay` (nothing that flips "doesn't pay"), or the `m2.State` lock fix.
 - **Tests:** all 826 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 3 expected failures (the proxy shapes), no skips (`runs/cloud-oct14-review-regression-py312.log`). New: 5 in `tests/test_miss_checklist.py`, 10 in `tests/test_miss_crosscheck.py` (8 of them the synthetic task re-run under a `pyproject.toml`), one assertion in `tests/test_bench_report.py`; the three modules also pass on Python 3.10.20. This machine's baseline: 811 pass on clean `main` once the Jev baseline checkout has its pinned dependencies (`runs/cloud-baseline-with-jev-deps-regression-py312.log`); without them 2 Jev tests fail (`runs/cloud-baseline-regression-py312.log`).
 
+## October 14, 2026: the miss detector's two runs: the checklist flags tasks, not misses; Opus's tests catch misses but checking with Opus costs more than using it
+
+$0.752 known spend (the checklist, API key, the user's run); the cross-check and every further reading $0. Runs: `runs/miss-checklist-20261014-085157`, `runs/miss-crosscheck-20261014-112627`; further readings `runs/miss-detector-readings-20261014.py` (`.json` beside it). Details: `docs/m6-benchmark-plan.md`, both "Miss detector" sections, Result.
+
+- **Checklist** (Haiku 5.5 low, $0.0017 a trial): `not_met_or_unclear>=2` flags 28/40 misses at 83/409 passes and holds with each main task left out. **Within a task it separates nothing:** 28 flags against 26.7 expected if each task's flags fell regardless of grade (p 0.28; every rule p 0.19–0.75).
+  - The flags follow the task's checks. parse's first two are judged not met or unclear on all 22 trials, passes included. tomli's "every raise site" check is unclear on 21 of 24, because a diff can't show it.
+  - Not a miss detector; no pre-registration. The spend is a lower bound: 3 judge requests failed without usage, none retried.
+- **Cross-check** (peers' tests on each trial's tree; 610 s, 0 errors): a same-arm second run carries no signal (5/26 misses, 4.8 expected). Opus 5.5's tests do: all Opus peers flag 34/39 misses at 27/375 passes (26.3 expected, p < 0.001), and 20/39 at 2/375 with the reference filter.
+  - It can't pay. An Opus peer run (about $0.26) costs more than using Opus, whose own fixes pass 0.981.
+  - `reference_bound` is labelled an upper bound, but it bounds the false flags, not the catches: it flags fewer of both.
+- **Exploratory** (by the peer's model, chosen after seeing the above): one Haiku 5.5 peer ($0.026 a run) flags 17.5/37 misses at 10% of passes (p 0.001 within tasks).
+  - It rests on few trials: tomli's 3 passes, ISMAGS and one single-miss task.
+  - Four catches in five come from tests the reference fix fails too.
+  - Sonnet 5.5 peers: p 0.06.
+  - All p-values are descriptive, from 24 readings.
+- **Proposed (the user's call):** end the miss detector line here, at $0. Or pre-register the Haiku-peer rule and test it on the holdout tasks. Item 8's seed-8 runs hold no Haiku trial, so that needs about 114–266 new Haiku 5.5 runs (about $3–7 cold-equivalent, or the subscription), a $0 cross-check, and an exception to the October 10 decision for Haiku sessions in this helper role.
+- **`CLAUDE.md`:** plan item 8 notes the post-run detectors; item 14 notes the explorer's result (the October 14 entry below).
+- **Tests:** `tests/test_claude_md.py` only (docs and a `runs/` script changed; `CLAUDE.md` at 8,182 bytes).
+
 ## October 14, 2026: the Haiku explorer doesn't pay (plan item 14, step 1 result); step 2 not built
 
 $0, the user's run on the main machine of `python3 -m modelpilot.explorer_replay` (branch `codex/haiku-explorer`): `runs/explorer-replay-20261014-111951.json`. Details: `docs/m6-modelpilot-policy.md`, "Helper role: a read/search explorer, step 1", Result.
