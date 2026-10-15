@@ -7,7 +7,11 @@ context itself, and always exits 0 so a governor fault cannot stop the client. W
 MODELPILOT_REVIEW_AT_STOP=1 (the ModelPilot arm's review at the finish) Stop also holds the
 agent's finish once per turn, so the proxy's policy can deliver a review on the request that follows.
 
-Coordinator commands (same MODELPILOT_* environment, or flags): queue-change, ack-rebase, status.
+With MODELPILOT_SUITE (a JSON suite declaration, October 14; off by default) a Stop that really ends a turn runs
+the declared suite on the host and records its result as a ledger observation (modelpilot.suite_adapter): never a
+block, never a change. The hook waits for the suite, so give its settings entry a timeout above the suite's.
+
+Coordinator commands (same MODELPILOT_* environment, or flags): queue-change, ack-rebase, status, run-suite.
 """
 import argparse
 import hashlib
@@ -31,6 +35,8 @@ REVIEW_AT_STOP = 'MODELPILOT_REVIEW_AT_STOP'
 # 'off': an idle rebuild plan keeps a queued compaction without its cost check (Governor.plan_rebase); for scenarios
 # that test delivery and observation on contexts too small for compaction to pay.
 COMPACTION_CHECK = 'MODELPILOT_COMPACTION_CHECK'
+# A declared test suite (suite_adapter.load_spec's JSON) the Stop hook runs at a turn's end; unset, nothing runs.
+SUITE = 'MODELPILOT_SUITE'
 
 
 def binding(env):
@@ -209,6 +215,26 @@ def rebase_notice(plan):
     return f"ModelPilot (dry-run) suggests one rebuild now ({plan['trigger']}): {steps}. Nothing was changed. {ack}"
 
 
+def suite_at_stop(gov, task, owner, payload, declaration):
+    """The declared suite at a turn's end, on the session's workspace (the hook's cwd), landed as an observation or
+    refused (suite_adapter.run_and_land); a tree already observed at this revision isn't run again. Returns a stuck
+    notice for the user when the observation brings one, else None."""
+    from . import suite_adapter
+    try:
+        spec = suite_adapter.load_spec(declaration)
+    except ValueError as error:
+        gov.note('suite_refused', {'refusal': 'bad_declaration', 'error_type': type(error).__name__}, task)
+        return None
+    cwd = payload.get('cwd')
+    if not isinstance(cwd, str) or not Path(cwd).is_dir():
+        gov.note('suite_refused', {'refusal': 'no_workspace', 'suite': spec['name']}, task)
+        return None
+    outcome = suite_adapter.run_and_land(gov, task, owner, spec, cwd)
+    if outcome.get('landed') and outcome['recommendation']['recommendation'] != 'hold':
+        return stuck_notice(gov, task, outcome['recommendation'])
+    return None
+
+
 def handle(event, payload, env, clock=time.time):
     db, session, limit, task, owner = binding(env)
     gov = Governor(db, session, limit, clock=clock)
@@ -247,6 +273,9 @@ def handle(event, payload, env, clock=time.time):
                 block = review_block(gov, task, owner, payload)
             if not block:
                 gov.note('client_stop', {}, task)  # the turn really ends: an idle gap starts here
+                if env.get(SUITE):
+                    notice = suite_at_stop(gov, task, owner, payload, env[SUITE])
+                    notices += [notice] if notice else []
     finally:
         gov.close()
     output = {'decision': 'block', 'reason': block} if block else {}
@@ -303,6 +332,11 @@ def coordinator(argv):
     ack = commands.add_parser('ack-rebase', parents=[common])
     ack.add_argument('plan_id')
     commands.add_parser('status', parents=[common])
+    suite = commands.add_parser('run-suite', parents=[common], help='run the declared suite once and record it')
+    suite.add_argument('--spec', type=Path, required=True, help='a JSON suite declaration (suite_adapter.load_spec)')
+    suite.add_argument('--workspace', type=Path, required=True)
+    suite.add_argument('--owner', default=os.environ.get('MODELPILOT_OWNER'))
+    suite.add_argument('--always', action='store_true', help='run even if this tree was observed at this revision')
     args = parser.parse_args(argv)
     if not args.db or not args.session or args.limit_usd is None:
         parser.error('--db, --session and --limit-usd (or MODELPILOT_* environment) are required')
@@ -312,6 +346,13 @@ def coordinator(argv):
             result = {'change_id': gov.queue_change(args.kind, json.loads(args.value), args.revision)}
         elif args.command == 'ack-rebase':
             result = gov.acknowledge_rebase(args.plan_id)
+        elif args.command == 'run-suite':
+            from . import suite_adapter
+            if not args.task or not args.owner:
+                parser.error('run-suite needs --task and --owner (or MODELPILOT_TASK, MODELPILOT_OWNER)')
+            spec = suite_adapter.load_spec(args.spec.read_text())
+            result = suite_adapter.run_and_land(gov, args.task, args.owner, spec, args.workspace,
+                                                skip_unchanged=not args.always)
         else:
             result = {'policy': gov.policy(), 'pending_changes': gov.pending_changes(),
                       'outstanding_plans': gov.outstanding_plans()}

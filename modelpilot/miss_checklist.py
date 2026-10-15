@@ -17,8 +17,10 @@ reference fix, the edge suite or any agent's diff. judge: one request per counte
 task's checklist and the trial's saved agent.diff, never its grade. Without --live each writes its prompts and a plan
 (requests, token limits, the most each can cost) and sends nothing. With --live (ANTHROPIC_API_KEY in the environment)
 each request is sent once, with no retry and no fallback model, and none is sent once the next one's maximum cost would
-take the total past --limit-usd (a stopping threshold, not a billing cap). Errors, refusals and replies without a valid
-JSON block are recorded as they are. score ($0) reads the verdicts against the strict labels.
+take the total past --limit-usd (a stopping threshold, not a billing cap; an unknown cost counts at its most). Errors,
+refusals and replies without a valid JSON block are recorded as they are. score ($0) reads the verdicts against the strict
+labels; --reparse reads them again from the saved replies with the current parser, and --out-file writes a new score
+beside an earlier one (reviewed October 14: docs/m6-benchmark-plan.md, "Review of October 14's scorers").
 """
 import argparse
 import hashlib
@@ -26,6 +28,7 @@ import json
 import os
 from pathlib import Path
 import re
+import urllib.error
 from . import bench_tasks, cache_probe
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -102,9 +105,12 @@ def reply_text(response):
 
 
 def json_block(text):
-    """The reply's ```json block (else its first top-level JSON list), parsed; None when there is none."""
-    found = re.search(r'```(?:json)?\s*\n(.*?)```', text, re.S)
-    candidates = [found.group(1)] if found else []
+    """The reply's ```json block (else another fenced block, else its first top-level JSON list), parsed; None when
+    there is none. Every fenced block is tried, json-tagged ones first: until the October 14 review only the first match
+    was, and the text between a block quoting the diff and the answer's block could be taken for it."""
+    fenced = re.findall(r'```([\w-]*)[ \t]*\n(.*?)```', text, re.S)
+    candidates = [body for tag, body in fenced if tag.lower() == 'json'] + \
+        [body for tag, body in fenced if tag.lower() != 'json']
     start = text.find('[')
     if start >= 0:
         candidates.append(text[start:text.rfind(']') + 1])
@@ -130,33 +136,46 @@ def valid_checks(value):
 
 def verdicts_for(checks, value):
     """One verdict per check, in the checklist's order: the reply's where it gives a known verdict for that id, else
-    'missing' (counted with unclear by score). None when the reply isn't a list."""
+    'missing' (counted with unclear by score). None when the reply isn't a list or gives no known verdict for any check
+    (an unusable reply: until the October 14 review it was judged all 'missing' and so flagged by every
+    not_met_or_unclear rule)."""
     if not isinstance(value, list):
         return None
     given = {}
     for v in value:
         if isinstance(v, dict) and isinstance(v.get('id'), str) and v.get('verdict') in VERDICTS:
             given.setdefault(v['id'].strip(), {'verdict': v['verdict'], 'evidence': str(v.get('evidence', ''))[:2000]})
-    return [dict({'id': c['id']}, **given.get(c['id'], {'verdict': 'missing', 'evidence': ''})) for c in checks]
+    out = [dict({'id': c['id']}, **given.get(c['id'], {'verdict': 'missing', 'evidence': ''})) for c in checks]
+    return out if any(v['verdict'] != 'missing' for v in out) else None
 
 
 def send_all(items, out, rates, limit_usd, transport, parse):
-    """Each (key, payload) sent once, in order, under the limit; replies saved whole under out/responses. parse(key,
-    response) returns the fields a usable reply adds to its row, or None for an unusable one. Never retried."""
-    results, spent = {}, 0.0
+    """Each (key, payload) sent once, in order, until the next one's maximum cost would take the total past the limit;
+    from there none is sent (until the October 14 review a later, smaller request still went, so a stopped run's sent
+    set leaned to small prompts). Replies saved whole under out/responses. parse(key, response) returns the fields a
+    usable reply adds to its row, or None for an unusable one. Never retried.
+
+    The stop counts an unknown cost at its most: a reply priced_usage can't price and, since the review, an error (a
+    timeout after the API took the request may still be billed). spent_usd is that counter; known_usd sums the priced
+    replies alone, a lower bound of what was billed; unknown_cost counts the rest by kind (cost_gaps)."""
+    results, spent, known, stopped = {}, 0.0, 0.0, False
     (out/'responses').mkdir()
     for key, payload in items:
-        if spent + max_cost(payload, rates) > limit_usd:
+        if stopped or spent + max_cost(payload, rates) > limit_usd:
+            stopped = True
             results[key] = {'status': 'not_sent', 'reason': 'limit'}
             continue
         try:
             response, request_id = transport(payload)
         except Exception as error:  # recorded, never retried: a retry changes what was billed
-            results[key] = dict(cache_probe.error_details(error), status='error', error_type=type(error).__name__)
+            spent += max_cost(payload, rates)
+            results[key] = dict(cache_probe.error_details(error), status='error', error_type=type(error).__name__,
+                                **({'http_status': error.code} if isinstance(error, urllib.error.HTTPError) else {}))
             continue
         (out/'responses'/f'{key}.json').write_text(json.dumps(response, indent=2) + '\n')
         cost = cache_probe.priced_usage(payload, response.get('model'), response.get('usage'), rates)
         spent += cost if cost is not None else max_cost(payload, rates)  # unknown cost counts at its most
+        known += cost or 0.0
         row = {'request_id': request_id, 'stop_reason': response.get('stop_reason'), 'usage': response.get('usage'),
                'cost_usd': cost}
         parsed = parse(key, response)
@@ -164,7 +183,23 @@ def send_all(items, out, rates, limit_usd, transport, parse):
         results[key] = row
     sent = [r for r in results.values() if r['status'] != 'not_sent']
     # An error may still have been billed (a timeout after the API took the request): its cost is unknown.
-    return results, {'spent_usd': round(spent, 6), 'cost_complete': all(r.get('cost_usd') is not None for r in sent)}
+    return results, {'spent_usd': round(spent, 6), 'known_usd': round(known, 6),
+                     'cost_complete': all(r.get('cost_usd') is not None for r in sent), 'unknown_cost': cost_gaps(results)}
+
+
+def cost_gaps(results):
+    """The sent rows without a measured cost, by kind: 'http_error' (the API answered with an error status and no
+    usage), 'transport_error' (a timeout, lost connection or unreadable reply: possibly billed, cost unknown) or
+    'unpriced_reply' (a reply priced_usage can't price: counted at its most by the stop, so spent_usd is no lower bound
+    once there is one). Empty when cost_complete."""
+    gaps = {}
+    for r in results.values():
+        if r.get('status') == 'not_sent' or r.get('cost_usd') is not None:
+            continue
+        kind = 'unpriced_reply' if r.get('status') != 'error' else \
+            'http_error' if r.get('error_category') == 'http' else 'transport_error'
+        gaps[kind] = gaps.get(kind, 0) + 1
+    return gaps
 
 
 def default_transport():
@@ -284,24 +319,82 @@ def share(rows, rule):
             'passes_flagged': sum(flagged(r['verdicts'], k, unclear) for r in passes), 'passes': len(passes)}
 
 
-def score(out):
+def reparsed(out, trials, results):
+    """results with each sent trial's verdicts read again from its saved reply by the current parser (score --reparse,
+    $0): a reply the send-time parser missed can become judged, and one it judged with no known verdict unusable."""
+    out, new = Path(out), dict(results)
+    for row in trials:
+        key = trial_key(row)
+        saved, checklist = out/'judge'/'responses'/f'{key}.json', out/'checklists'/f"{row['task']}.json"
+        if (results.get(key) or {}).get('status') not in ('judged', 'unusable_reply') or not saved.exists() \
+                or not checklist.exists():
+            continue
+        verdicts = verdicts_for(json.loads(checklist.read_text()), json_block(reply_text(json.loads(saved.read_text()))))
+        new[key] = {k: v for k, v in results[key].items() if k not in ('status', 'verdicts')}
+        new[key].update({'status': 'judged', 'verdicts': verdicts} if verdicts else {'status': 'unusable_reply'})
+    return new
+
+
+def spend(out):
+    """$0: each step's recorded spend beside what its rows support: known_usd (priced replies only, a lower bound of
+    the bill), the rows without a cost by kind (cost_gaps), and for each unpriced reply what priced_usage reads."""
+    out, report = Path(out), {}
+    for step, base in (('list', out), ('judge', out/'judge')):
+        if not (base/'plan.json').exists():
+            continue
+        plan = json.loads((base/'plan.json').read_text())
+        results = plan.get('results') or {}
+        unpriced = {}
+        for key, r in results.items():
+            saved = base/'responses'/f'{key}.json'
+            if r.get('status') in ('not_sent', 'error') or r.get('cost_usd') is not None or not saved.exists():
+                continue
+            response, usage = json.loads(saved.read_text()), r.get('usage') or {}
+            unpriced[key] = {'requested': plan.get('model'), 'answered': response.get('model'),
+                             'service_tier': usage.get('service_tier'), 'inference_geo': usage.get('inference_geo'),
+                             'cache_creation_input_tokens': usage.get('cache_creation_input_tokens'),
+                             'cache_creation_breakdown': 'cache_creation' in usage}
+        report[step] = {'recorded_spent_usd': plan.get('spent_usd'), 'recorded_cost_complete': plan.get('cost_complete'),
+                        'known_usd': round(sum(r['cost_usd'] for r in results.values() if r.get('cost_usd') is not None), 6),
+                        'unknown_cost': cost_gaps(results), 'unpriced_replies': unpriced,
+                        'not_sent': sum(r.get('status') == 'not_sent' for r in results.values())}
+    return report
+
+
+def score(out, path=None, reparse=False):
     """$0: each rule's misses and passes flagged, overall, per task, and with each task left out (37 of the 40 dev
-    misses are on 3 tasks, so the overall figure can rest on one of them)."""
+    misses are on 3 tasks, so the overall figure can rest on one of them). Written to path (default out/score.json),
+    never over an earlier file. reparse: verdicts read again from the saved replies (reparsed). A trial counts as judged
+    only if its reply gave a known verdict for at least one check; every other trial is unjudged, listed by why and by
+    label, so a reading can be bounded by counting them either way."""
     out = Path(out)
     trials = json.loads((out/'judge'/'trials.json').read_text())
-    results = json.loads((out/'judge'/'plan.json').read_text())['results']
-    rows = [dict(r, verdicts=results[trial_key(r)]['verdicts']) for r in trials
-            if results.get(trial_key(r), {}).get('status') == 'judged']
+    plan = json.loads((out/'judge'/'plan.json').read_text())
+    results = reparsed(out, trials, plan['results']) if reparse else plan['results']
+    judged = {k: r['verdicts'] for k, r in results.items()
+              if r.get('status') == 'judged' and any(v['verdict'] != 'missing' for v in r.get('verdicts') or ())}
+    rows = [dict(r, verdicts=judged[trial_key(r)]) for r in trials if trial_key(r) in judged]
     tasks = sorted({r['task'] for r in rows})
+    unjudged = {}
+    for r in trials:
+        if trial_key(r) in judged:
+            continue
+        status = ((results.get(trial_key(r)) or (plan.get('trials') or {}).get(trial_key(r)) or {}).get('status')
+                  or 'not_planned')
+        status = 'no_known_verdict' if status == 'judged' else status
+        counts = unjudged.setdefault(status, {'misses': 0, 'passes': 0})
+        counts['passes' if r['strict_pass'] else 'misses'] += 1
     report = {'trials': len(trials), 'judged': len(rows), 'unjudged': len(trials) - len(rows),
               'unjudged_misses': sum(not r['strict_pass'] for r in trials) - sum(not r['strict_pass'] for r in rows),
-              'rules': {}}
+              'unjudged_by_status': unjudged, 'reparsed': reparse,
+              'judged_with_missing_verdicts': sum(any(v['verdict'] == 'missing' for v in r['verdicts']) for r in rows),
+              'cost': spend(out), 'rules': {}}
     for rule in RULES:
         report['rules'][rule] = {
             'overall': share(rows, rule),
             'per_task': {t: share([r for r in rows if r['task'] == t], rule) for t in tasks},
             'leave_one_task_out': {t: share([r for r in rows if r['task'] != t], rule) for t in tasks}}
-    with (out/'score.json').open('x') as f:  # never overwrite evidence
+    with Path(path or out/'score.json').open('x') as f:  # never overwrite evidence
         json.dump(report, f, indent=1)
         f.write('\n')
     return report
@@ -362,12 +455,15 @@ def main():
     j.add_argument('--limit-usd', type=float, default=5.0)
     c = sub.add_parser('score')
     c.add_argument('out', type=Path)
+    c.add_argument('--out-file', type=Path, help='a new file for the score (default: <out>/score.json)')
+    c.add_argument('--reparse', action='store_true', help='read the verdicts again from the saved replies')
     args = parser.parse_args()
     if getattr(args, 'live', False) and not os.environ.get('ANTHROPIC_API_KEY'):
         raise SystemExit('Set ANTHROPIC_API_KEY in the environment; no requests sent.')
     if args.step == 'score':
-        report = score(args.out)
+        report = score(args.out, args.out_file, args.reparse)
         print(json.dumps({rule: r['overall'] for rule, r in report['rules'].items()}, indent=1))
+        print(json.dumps({k: report[k] for k in ('trials', 'judged', 'unjudged_by_status', 'cost')}, indent=1))
         return
     trials = dev_trials(rates())
     if not trials:
@@ -390,10 +486,11 @@ def main():
         print(text)
     elif args.step == 'list':
         plan = list_checks(dev_tasks(trials), args.out, rates(), args.model, args.live, args.limit_usd)
-        print(json.dumps({k: plan.get(k) for k in ('live', 'max_cost_usd', 'limit_usd', 'spent_usd')}, indent=1))
+        print(json.dumps({k: plan.get(k) for k in ('live', 'max_cost_usd', 'limit_usd', 'spent_usd', 'known_usd')}, indent=1))
     else:
         report = judge(args.out, trials, rates(), args.live, args.limit_usd)
-        print(json.dumps({k: report.get(k) for k in ('live', 'max_cost_usd', 'limit_usd', 'spent_usd')}, indent=1))
+        print(json.dumps({k: report.get(k) for k in ('live', 'max_cost_usd', 'limit_usd', 'spent_usd', 'known_usd')},
+                         indent=1))
 
 
 if __name__ == '__main__':
