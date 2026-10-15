@@ -25,6 +25,7 @@ from pathlib import Path
 import shutil
 import subprocess
 from . import bench, bench_report, bench_tasks
+from .proxy import read_log
 
 ROOT = Path(__file__).resolve().parents[1]
 SEQUENCES = ROOT/'bench'/'sequences.json'
@@ -346,7 +347,7 @@ def load_run(run_dir, rates):
     for path in sorted(Path(run_dir).glob('*/*/*/trial.json')):
         record = json.loads(path.read_text())
         log = path.parent/'observations.jsonl'
-        rows = [json.loads(l) for l in log.read_text().splitlines() if l.strip()] if log.exists() else []
+        rows = read_log(log)
         out.append((record, turns(record, rows, rates)))
     return out
 

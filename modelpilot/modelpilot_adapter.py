@@ -16,6 +16,7 @@ import sys
 from .cache_probe import tier
 from .governor import Governor
 from .governed_session import hook_settings, OWNER
+from .proxy import read_log
 from .hooks import REVIEW_AT_STOP, channel_declaration
 
 
@@ -212,7 +213,7 @@ class ModelPilotAdapter:
         finally:
             gov.close()
         log=Path(directory)/'observations.jsonl'
-        rows=[json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+        rows=read_log(log)  # a cut last line reads as a row of unknown cost
         messages=[r for r in rows if r.get('kind')=='messages']
         refused=[r for r in rows if r.get('kind')=='refused']
         # The policy's own consults and notes the governor admitted: their spend is in the governor's total too.

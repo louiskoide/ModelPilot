@@ -526,13 +526,8 @@ def reconcile_log(gov, log_path):
     unknown). A row the proxy could not reserve ('untracked') is recorded now, so its spend
     counts. An orphan with no row at all, e.g. the proxy died mid-request, stays unknown.
     """
-    rows = []
-    with open(log_path) as f:
-        for line in f:
-            if line.strip():
-                row = json.loads(line)
-                if row.get('governor_request_id'):
-                    rows.append(row)
+    from .proxy import read_log  # a cut last line (the proxy killed mid-write) reads as unknown, not a crash
+    rows = [row for row in read_log(log_path) if row.get('governor_request_id')]
     settled = untracked = 0
     for row in rows:
         request_id = row['governor_request_id']

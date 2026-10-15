@@ -43,7 +43,7 @@ from .governed_session import client_env, subscription_login, subscription_token
 from .cache_probe import ACCOUNT_MESSAGE
 from .jev_route_check import PATCH, TOKEN_FIELDS, check_anthropic_key, parse_events
 from .policy_actions import MODELS as POLICY_TIERS
-from .proxy import ProxyServer
+from .proxy import ProxyServer, read_log
 
 ROOT = Path(__file__).resolve().parents[1]
 # A trial passes only if it also passes its task's edge suite, where it has one (user decision, October 4):
@@ -554,7 +554,7 @@ def task_repo(task):
 
 
 def read_rows(log):
-    return [json.loads(line) for line in log.read_text().splitlines() if line.strip()] if log.exists() else []
+    return read_log(log)  # a cut last line reads as a row of unknown cost (proxy.read_log)
 
 
 def redact(text, key):

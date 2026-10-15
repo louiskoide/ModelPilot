@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 import statistics
 from .cache_probe import prompt_tokens, tier
+from .proxy import read_log
 
 ARM = 'modelpilot-explore'
 
@@ -81,7 +82,7 @@ def load(run_dirs, rates):
         for path in sorted(Path(run).glob(f'*/{ARM}/*/trial.json')):
             record = json.loads(path.read_text())
             log = path.parent/'observations.jsonl'
-            rows = [json.loads(l) for l in log.read_text().splitlines() if l.strip()] if log.exists() else []
+            rows = read_log(log)
             views.append(trial_view(record, rows, rates))
     return views
 
