@@ -146,6 +146,88 @@ class ChecklistTests(unittest.TestCase):
         self.assertEqual([v['verdict'] for v in mc.verdicts_for(CHECKS, given)], ['missing', 'not_met'])
         self.assertIsNone(mc.verdicts_for(CHECKS, {'R1': 'met'}))
 
+    def payload(self, max_tokens):
+        return dict(mc.list_request(TASK, 'haiku'), max_tokens=max_tokens)
+
+    def test_once_the_limit_stops_a_request_no_later_one_is_sent(self):
+        # October 14 review: a later, smaller request still went once a larger one was stopped, so a stopped run's
+        # judged set leaned to small diffs. The module docstring's rule is that none is sent from there on.
+        small, large = self.payload(100), self.payload(50_000)
+        limit = mc.max_cost(small, self.rates) * 2.5
+        sent = []
+        results, totals = mc.send_all([('a', small), ('b', large), ('c', small)], self.root, self.rates, limit,
+                                      lambda p: (sent.append(p) or reply('[]'), 'req'), lambda key, r: None)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual([results[k]['status'] for k in 'abc'], ['unusable_reply', 'not_sent', 'not_sent'])
+        self.assertEqual(totals['unknown_cost'], {})
+
+    def test_an_error_counts_at_its_most_and_the_spend_keeps_known_apart(self):
+        import io
+        import urllib.error
+        payload = self.payload(1000)
+        most = mc.max_cost(payload, self.rates)
+        errors = iter([TimeoutError('slow'), urllib.error.HTTPError('u', 529, 'overloaded', {}, io.BytesIO(b'{}'))])
+
+        def transport(p):
+            error = next(errors, None)
+            if error:
+                raise error
+            return reply('[]'), 'req'
+        results, totals = mc.send_all([('a', payload), ('b', payload), ('c', payload), ('d', payload)], self.root,
+                                      self.rates, 3 * most * (1 + 1e-9), transport, lambda key, r: None)
+        self.assertEqual([results[k]['status'] for k in 'abcd'], ['error', 'error', 'unusable_reply', 'not_sent'])
+        self.assertEqual((results['b']['http_status'], results['b']['error_category']), (529, 'http'))
+        reply_cost = results['c']['cost_usd']
+        self.assertAlmostEqual(totals['known_usd'], reply_cost)  # a lower bound of the bill
+        self.assertAlmostEqual(totals['spent_usd'], 2 * most + reply_cost)  # the stop's counter
+        self.assertEqual(totals['unknown_cost'], {'transport_error': 1, 'http_error': 1})
+        self.assertFalse(totals['cost_complete'])
+
+    def test_a_reply_with_no_known_verdict_is_unusable_and_scores_as_unjudged(self):
+        self.assertIsNone(mc.verdicts_for(CHECKS, [{'id': 'R1', 'verdict': 'Met'}, {'id': 'R2', 'status': 'met'}]))
+        judge = self.out/'judge'
+        judge.mkdir(parents=True)
+        trials = [{'run': 'r', 'task': 't', 'arm': 'a', 'trial': i, 'strict_pass': s} for i, s in enumerate((False, True))]
+        missing = [{'id': 'R1', 'verdict': 'missing'}, {'id': 'R2', 'verdict': 'missing'}]
+        results = {mc.trial_key(trials[0]): {'status': 'judged', 'verdicts': [{'id': 'R1', 'verdict': 'not_met'},
+                                                                              {'id': 'R2', 'verdict': 'met'}]},
+                   mc.trial_key(trials[1]): {'status': 'judged', 'verdicts': missing}}  # as recorded before the review
+        (judge/'trials.json').write_text(json.dumps(trials))
+        (judge/'plan.json').write_text(json.dumps({'results': results}))
+        report = mc.score(self.out)
+        self.assertEqual((report['judged'], report['unjudged']), (1, 1))
+        self.assertEqual(report['unjudged_by_status'], {'no_known_verdict': {'misses': 0, 'passes': 1}})
+        self.assertEqual(report['rules']['not_met_or_unclear>=1']['overall'],
+                         {'misses_flagged': 1, 'misses': 1, 'passes_flagged': 0, 'passes': 0})
+
+    def test_a_fenced_diff_before_the_answer_does_not_hide_it(self):
+        text = ('The change:\n```diff\n-    a = [1]\n+    a = [1, 2]\n```\nVerdicts:\n```json\n'
+                + json.dumps([{'id': 'R1', 'verdict': 'met', 'evidence': '+ a'}]) + '\n```\n')
+        self.assertEqual(mc.json_block(text), [{'id': 'R1', 'verdict': 'met', 'evidence': '+ a'}])
+
+    def test_a_rescore_reparses_saved_replies_into_a_new_file_and_reports_the_spend(self):
+        mc.list_checks([TASK], self.out, self.rates, live=True, transport=lambda p: (listed(), 'req_1'))
+        hidden = ('```diff\n+ x = [0]\n```\nThen:\n```json\n' + json.dumps([{'id': 'R1', 'verdict': 'not_met'}]) + '\n```')
+        replies = iter([reply(hidden), reply('```json\n[{"id": "R2", "verdict": "met"}]\n```', model='claude-haiku-5-5-x')])
+        trials = self.trials()[:2]
+        mc.judge(self.out, trials, self.rates, live=True, transport=lambda p: (next(replies), 'req'))
+        plan = json.loads((self.out/'judge'/'plan.json').read_text())
+        # Recorded with the parser of the day: simulate the first reply as the old parser left it.
+        plan['results'][mc.trial_key(trials[0])] = {k: v for k, v in plan['results'][mc.trial_key(trials[0])].items()
+                                                    if k != 'verdicts'} | {'status': 'unusable_reply'}
+        (self.out/'judge'/'plan.json').write_text(json.dumps(plan))
+        first = mc.score(self.out)
+        self.assertEqual(first['unjudged_by_status'], {'unusable_reply': {'misses': 1, 'passes': 0}})
+        again = mc.score(self.out, self.root/'rescore.json', reparse=True)
+        self.assertEqual((again['judged'], again['unjudged'], again['reparsed']), (2, 0, True))
+        self.assertEqual(again['rules']['not_met>=1']['overall']['misses_flagged'], 1)
+        self.assertTrue((self.root/'rescore.json').exists())
+        cost = again['cost']['judge']
+        self.assertEqual(cost['unknown_cost'], {'unpriced_reply': 1})  # the answering model isn't the one asked
+        (unpriced,) = cost['unpriced_replies'].values()
+        self.assertEqual((unpriced['requested'], unpriced['answered']), ('claude-haiku-5-5', 'claude-haiku-5-5-x'))
+        self.assertEqual(again['cost']['list']['unknown_cost'], {})
+
     def test_the_estimate_and_its_break_even_against_the_late_fix(self):
         trials = [{'task': TASK['id'], 'diff_bytes': 6000}] * 10
         haiku, sonnet = (mc.estimate([TASK], trials, self.rates, m) for m in ('haiku', 'sonnet'))

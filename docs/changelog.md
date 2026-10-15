@@ -2,6 +2,17 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026 (cloud batch): review of October 14's scorers; 7 bugs fixed, re-scores queued
+
+$0, offline, branch `claude/oct14-review` (cloud batch item 1; the recorded runs aren't in the container). Details and the main-machine commands: `docs/m6-benchmark-plan.md`, "Review of October 14's scorers".
+
+- **Cross-check (could change every reading of an affected task):** in a tree with no pytest configuration of its own, pytest 8 took ModelPilot's `pyproject.toml` above `runs/` as rootdir, so every selected test read `not_run`, no peer test was kept and nothing flagged. Fixed with `--rootdir`; each task's own-tree outcomes are now in the summary. Which dev tasks were hit needs the main machine's `peer_tests.json` (parse wasn't: it has `.pytest.ini`).
+- **Checklist:** a reply with no known verdict was judged all `missing`, which every `not_met_or_unclear` rule flagged; `json_block` took the text after a fenced diff for the answer; the `--limit-usd` stop skipped a request and went on sending smaller ones; an error added $0 to the stop's counter; and `score` could run once only. Now: unusable, every fenced block tried, a stop for good, errors at their most, `known_usd` (a lower bound) and `unknown_cost` by kind beside `spent_usd`, `score --reparse --out-file`, and unjudged trials listed by why.
+- **`cost_complete: false`** has two sources: an error (no cost; spent counted $0, so a lower bound only if every gap was an error) or a reply `priced_usage` can't price (counted at its most, so no lower bound). `score`'s `cost` block tells which on the recorded run.
+- **`bench_report --router-rates`:** a Jev trial without a routing record priced its router at $0; now unknown.
+- **No bug found** in the checklist's rules and trial selection, the cross-check's peer selection, own-tree filter, `-k` reading (extra matches run, never read: new test), readings and price, `explorer_replay` (nothing that flips "doesn't pay"), or the `m2.State` lock fix.
+- **Tests:** all 826 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 3 expected failures (the proxy shapes), no skips (`runs/cloud-oct14-review-regression-py312.log`). New: 5 in `tests/test_miss_checklist.py`, 10 in `tests/test_miss_crosscheck.py` (8 of them the synthetic task re-run under a `pyproject.toml`), one assertion in `tests/test_bench_report.py`; the three modules also pass on Python 3.10.20. This machine's baseline: 811 pass on clean `main` once the Jev baseline checkout has its pinned dependencies (`runs/cloud-baseline-with-jev-deps-regression-py312.log`); without them 2 Jev tests fail (`runs/cloud-baseline-regression-py312.log`).
+
 ## October 14, 2026: the miss detector's two runs: the checklist flags tasks, not misses; Opus's tests catch misses but checking with Opus costs more than using it
 
 $0.752 known spend (the checklist, API key, the user's run); the cross-check and every further reading $0. Runs: `runs/miss-checklist-20261014-085157`, `runs/miss-crosscheck-20261014-112627`; further readings `runs/miss-detector-readings-20261014.py` (`.json` beside it). Details: `docs/m6-benchmark-plan.md`, both "Miss detector" sections, Result.
