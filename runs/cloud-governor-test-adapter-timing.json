@@ -1,0 +1,14 @@
+{
+ "stop_without_suite": {
+  "median_s": 0.0031,
+  "max_s": 0.0048
+ },
+ "stop_with_tiny_suite_1_file": {
+  "median_s": 0.0394,
+  "max_s": 0.074
+ },
+ "stop_with_tiny_suite_500_files": {
+  "median_s": 0.2253,
+  "max_s": 0.2662
+ }
+}

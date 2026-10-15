@@ -1,0 +1,33 @@
+{
+ "runs": 50,
+ "busy_loops": 0,
+ "cpus": 4,
+ "node": "v22.22.0",
+ "failures": 0,
+ "seconds": {
+  "node_start": {
+   "n": 50,
+   "median": 0.024,
+   "p95": 0.031,
+   "max": 0.034
+  },
+  "node_with_stub_imports": {
+   "n": 50,
+   "median": 0.027,
+   "p95": 0.034,
+   "max": 0.04
+  },
+  "child_sh": {
+   "n": 50,
+   "median": 0.001,
+   "p95": 0.002,
+   "max": 0.008
+  },
+  "launch": {
+   "n": 50,
+   "median": 0.061,
+   "p95": 0.072,
+   "max": 0.084
+  }
+ }
+}

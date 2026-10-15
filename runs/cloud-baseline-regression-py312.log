@@ -1,0 +1,416 @@
+..........................................................................A sonnet-5 0 PASS 0.8
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.8
+..A sonnet-5 0 PASS 0.4
+C sonnet-5 0 PASS 0.4
+B sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.8
+A sonnet-5 0 PASS 0.8
+A sonnet-5 0 PASS 0.8
+.......................................................E.................................................................................................................effort/0/a/system cold error 
+........ttl/1h/0/claude-sonnet-5-5/past_5m touch_0_1h ok write
+ttl/1h/0/claude-sonnet-5-5/past_5m touch_1_1h ok write
+..effort/0/claude-sonnet-5/system cold error hit
+........................................................................................................................................................................................F....................................bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/1 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/3 REPAIRED 0.1
+..bench-x/parse-decimal-grouping/arm/3 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/1 REPAIRED 0.1
+.bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.3
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.3
+bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+................................................................................................................................................................................................x...x..x..............................................................control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched error 
+..control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched rejected 
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+control/haiku/tool_continuation/0 seed ok write
+control/haiku/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+effort_down/sonnet/tool_continuation/0 seed ok write
+effort_down/sonnet/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+effort_up/opus/tool_continuation/0 seed ok write
+effort_up/opus/tool_continuation/0 switched ok write
+to_haiku/sonnet/tool_continuation/0 seed ok write
+to_haiku/sonnet/tool_continuation/0 switched ok write
+to_haiku/opus/tool_continuation/0 seed ok write
+to_haiku/opus/tool_continuation/0 switched ok write
+from_haiku/tool_continuation/0 seed ok write
+from_haiku/tool_continuation/0 switched ok write
+effort_up/haiku/tool_continuation/0 seed ok write
+effort_up/haiku/tool_continuation/0 switched ok write
+control/sonnet/new_turn/0 seed ok write
+control/sonnet/new_turn/0 switched ok write
+control/opus/new_turn/0 seed ok write
+control/opus/new_turn/0 switched ok write
+control/haiku/new_turn/0 seed ok write
+control/haiku/new_turn/0 switched ok write
+effort_up/sonnet/new_turn/0 seed ok write
+effort_up/sonnet/new_turn/0 switched ok write
+effort_down/sonnet/new_turn/0 seed ok write
+effort_down/sonnet/new_turn/0 switched ok write
+model_up/new_turn/0 seed ok write
+model_up/new_turn/0 switched ok write
+model_down/new_turn/0 seed ok write
+model_down/new_turn/0 switched ok write
+effort_up/opus/new_turn/0 seed ok write
+effort_up/opus/new_turn/0 switched ok write
+to_haiku/sonnet/new_turn/0 seed ok write
+to_haiku/sonnet/new_turn/0 switched ok write
+to_haiku/opus/new_turn/0 seed ok write
+to_haiku/opus/new_turn/0 switched ok write
+from_haiku/new_turn/0 seed ok write
+from_haiku/new_turn/0 switched ok write
+effort_up/haiku/new_turn/0 seed ok write
+effort_up/haiku/new_turn/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+control/haiku/tool_continuation/0 seed ok write
+control/haiku/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+effort_down/sonnet/tool_continuation/0 seed ok write
+effort_down/sonnet/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+effort_up/opus/tool_continuation/0 seed ok write
+effort_up/opus/tool_continuation/0 switched ok write
+to_haiku/sonnet/tool_continuation/0 seed ok write
+to_haiku/sonnet/tool_continuation/0 switched ok write
+to_haiku/opus/tool_continuation/0 seed ok write
+to_haiku/opus/tool_continuation/0 switched ok write
+from_haiku/tool_continuation/0 seed ok write
+from_haiku/tool_continuation/0 switched ok write
+effort_up/haiku/tool_continuation/0 seed ok write
+effort_up/haiku/tool_continuation/0 switched ok write
+control/sonnet/new_turn/0 seed ok write
+control/sonnet/new_turn/0 switched ok write
+control/opus/new_turn/0 seed ok write
+control/opus/new_turn/0 switched ok write
+control/haiku/new_turn/0 seed ok write
+control/haiku/new_turn/0 switched ok write
+effort_up/sonnet/new_turn/0 seed ok write
+effort_up/sonnet/new_turn/0 switched ok write
+effort_down/sonnet/new_turn/0 seed ok write
+effort_down/sonnet/new_turn/0 switched ok write
+model_up/new_turn/0 seed ok write
+model_up/new_turn/0 switched ok write
+model_down/new_turn/0 seed ok write
+model_down/new_turn/0 switched ok write
+effort_up/opus/new_turn/0 seed ok write
+effort_up/opus/new_turn/0 switched ok write
+to_haiku/sonnet/new_turn/0 seed ok write
+to_haiku/sonnet/new_turn/0 switched ok write
+to_haiku/opus/new_turn/0 seed ok write
+to_haiku/opus/new_turn/0 switched ok write
+from_haiku/new_turn/0 seed ok write
+from_haiku/new_turn/0 switched ok write
+effort_up/haiku/new_turn/0 seed ok write
+effort_up/haiku/new_turn/0 switched ok write
+.model_up/new_turn/0 seed ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+.control/sonnet/tool_continuation/0 seed error 
+.model_down/tool_continuation/0 seed ok write
+.model_up/tool_continuation/0 seed ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched rejected 
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+.model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed unpriced write
+.haiku/move_control/tool_continuation/0 seed ok write
+haiku/move_control/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/0 seed ok write
+haiku/native_medium/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 seed ok write
+haiku/move_pm/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 seed ok write
+haiku/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 seed ok write
+haiku/move_pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 seed ok write
+haiku/move_control/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 seed ok write
+haiku/native_medium/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 seed ok write
+haiku/move_pm/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 seed ok write
+haiku/native_xhigh/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 seed ok write
+haiku/move_pm_xhigh/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 step3 ok partial_hit_and_write
+...haiku/move_control/tool_continuation/0 seed ok write
+haiku/move_control/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 seed ok write
+haiku/move_top/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 seed ok write
+haiku/move_pm/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step3 ok partial_hit_and_write
+..Plan (transitions, 2 repeat(s)): 96 requests at most; admission estimates total $11.03 (a conservative upper bound, not a forecast); $8 budget; client shape 2.1.284 (Claude Code); results: /tmp/tmp0_of70g4/run
+Dry-run only. Add --live to send paid requests.
+..effort/control/tool_continuation/0 seed ok write
+effort/control/tool_continuation/0 step1 ok partial_hit_and_write
+effort/control/tool_continuation/0 step2 ok partial_hit_and_write
+effort/control/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 seed ok write
+effort/native_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 seed ok write
+effort/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 seed ok write
+effort/top_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 seed ok write
+effort/pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step2 rejected 
+effort/pm_high/tool_continuation/0 seed ok write
+effort/pm_high/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step2 rejected 
+effort/pm_xhigh/tool_continuation/0 seed ok write
+effort/pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step2 rejected 
+effort/pm_xhigh_after/tool_continuation/0 seed ok write
+effort/pm_xhigh_after/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 seed ok write
+effort/pm_xhigh_at_start/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step3 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 seed ok write
+effort/opus_pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step2 rejected 
+..effort/control/tool_continuation/0 seed ok write
+effort/control/tool_continuation/0 step1 ok partial_hit_and_write
+effort/control/tool_continuation/0 step2 ok partial_hit_and_write
+effort/control/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 seed ok write
+effort/native_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 seed ok write
+effort/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 seed ok write
+effort/top_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 seed ok write
+effort/pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 seed ok write
+effort/pm_high/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 seed ok write
+effort/pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 seed ok write
+effort/pm_xhigh_after/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 seed ok write
+effort/pm_xhigh_at_start/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step3 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 seed ok write
+effort/opus_pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step3 ok partial_hit_and_write
+......return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/model_near/tool_continuation/0 return ok partial_hit_and_write
+.return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_near/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 return ok partial_hit_and_write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 rejected 
+...Plan (returns, 2 repeat(s)): 44 requests at most; admission estimates total $8.87 (a conservative upper bound, not a forecast); $8 budget; client shape 2.1.284 (Claude Code); results: /tmp/tmpsckmqi8f/run
+Dry-run only. Add --live to send paid requests.
+...return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_near/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 return ok partial_hit_and_write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/model_near/tool_continuation/0 return ok partial_hit_and_write
+.............................
+======================================================================
+ERROR: test_stock_jev_on_this_client_serves_everything_on_opus_without_routing (test_bench_jev.OfflineJevTrialTests.test_stock_jev_on_this_client_serves_everything_on_opus_without_routing)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/ModelPilot/modelpilot/bench_jev.py", line 107, in start
+    info = json.loads(line)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/decoder.py", line 337, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/decoder.py", line 355, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/user/ModelPilot/tests/test_bench_jev.py", line 444, in test_stock_jev_on_this_client_serves_everything_on_opus_without_routing
+    record = self.trial('jev-stock', 'stock', self.FIX)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ModelPilot/tests/test_bench_jev.py", line 381, in trial
+    return bench.run_trial(self.task, arm, self.out/name, self.cli, 'sk-ant-offline-not-a-key',
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ModelPilot/modelpilot/bench.py", line 881, in run_trial
+    while trial.step():
+          ^^^^^^^^^^^^
+  File "/home/user/ModelPilot/modelpilot/bench.py", line 636, in step
+    self.setup()
+  File "/home/user/ModelPilot/modelpilot/bench.py", line 688, in setup
+    self.route = self.router.start(proxy_url, dirs, self.jev_key, self.dir/'jev.stderr.txt', stub=self.jev_stub)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ModelPilot/modelpilot/bench_jev.py", line 110, in start
+    raise JevRouterDown(f'Jev router did not start (see {stderr_path}).')
+modelpilot.bench_jev.JevRouterDown: Jev router did not start (see /tmp/tmpdjuwt1jd/bench/stock/jev.stderr.txt).
+
+======================================================================
+FAIL: test_stock_silent_default_is_not_routing (test_jev_proxy_integration.PinnedProxyTests.test_stock_silent_default_is_not_routing)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/ModelPilot/tests/test_jev_proxy_integration.py", line 43, in test_stock_silent_default_is_not_routing
+    probe,evidence,rows,cost=self.probe('stock')
+                             ^^^^^^^^^^^^^^^^^^^
+  File "/home/user/ModelPilot/tests/test_jev_proxy_integration.py", line 27, in probe
+    self.assertEqual(result.returncode,0,result.stderr)
+AssertionError: 1 != 0 : node:internal/modules/package_json_reader:314
+  throw new ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null);
+        ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@typesafe-ai/sdk' imported from /home/user/ModelPilot/work/jev-router-baseline/src/config.mjs
+    at Object.getPackageJSONURL (node:internal/modules/package_json_reader:314:9)
+    at packageResolve (node:internal/modules/esm/resolve:767:81)
+    at moduleResolve (node:internal/modules/esm/resolve:853:18)
+    at defaultResolve (node:internal/modules/esm/resolve:983:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:731:20)
+    at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+    at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:310:38)
+    at ModuleJob._link (node:internal/modules/esm/module_job:182:49) {
+  code: 'ERR_MODULE_NOT_FOUND'
+}
+
+Node.js v22.22.0
+
+
+----------------------------------------------------------------------
+Ran 811 tests in 335.634s
+
+FAILED (failures=1, errors=1, expected failures=3)
