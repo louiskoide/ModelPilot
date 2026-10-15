@@ -95,6 +95,8 @@ class AdapterTests(unittest.TestCase):
                 self.verdict(**verdict)
                 result = sa.run(self.spec, self.work)
                 self.assertEqual((result['outcome'], result['reason']), ('unknown', reason))
+        missing = dict(self.spec, command=[str(self.work/'no-such-suite')])
+        self.assertEqual(sa.run(missing, self.work)['reason'], 'did_not_start')  # recorded unknown, not raised
         (self.work/'.mp-junit.xml').write_text('<testsuites')  # a stale, broken report is deleted before the run
         self.verdict(tests=1, failures=0, report=False)
         self.assertEqual(sa.run(self.spec, self.work)['reason'], 'no_junit')

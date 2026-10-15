@@ -14,7 +14,8 @@ object), or `python -m modelpilot.hooks run-suite --spec FILE` from a coordinato
   the report's counts; without it, from the exit status alone (failures then unknown when it fails).
 - watch: workspace-relative globs whose files the run is fenced on (default every .py file).
 
-A result is `pass`, `fail` or `unknown`, never a pass by default: a timeout, a report missing or unreadable, no test run,
+A result is `pass`, `fail` or `unknown`, never a pass by default: a command that doesn't start, a timeout, a report
+missing or unreadable, no test run,
 a nonzero exit with no failure in the report, or a watched file changing during the run is unknown. `land` records it
 only if the watched files still hash as they did when the run started and the task's revision is the one it ran at with
 the lease held (M2's own check), so a result for an older tree or a corrected task is refused, not landed. Observations
@@ -116,8 +117,11 @@ def run(spec, root):
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     started = time.monotonic()
     with tempfile.TemporaryFile() as output:
-        process = subprocess.Popen(spec['command'], cwd=root/spec['cwd'], env=env, stdin=subprocess.DEVNULL,
-                                   stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            process = subprocess.Popen(spec['command'], cwd=root/spec['cwd'], env=env, stdin=subprocess.DEVNULL,
+                                       stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+        except OSError:  # no such command or cwd: the suite never ran, which is no result, not a hook failure
+            return dict(out, reason='did_not_start')
         try:
             out['exit_code'] = process.wait(timeout=spec['timeout_seconds'])
         except subprocess.TimeoutExpired:
