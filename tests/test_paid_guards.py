@@ -85,6 +85,16 @@ class Traps:
                 traps.block(f'launch {argv[:3]!r}')
             return popen_init(popen, args, *rest, **kwargs)
 
+        def os_trap(name):
+            real = getattr(os, name)
+
+            def trapped(*args, **kwargs):
+                # Popen's own spawn (posix_spawn on some builds) was vetted by guarded_popen: let it through.
+                if sys._getframe(1).f_globals.get('__name__') == 'subprocess':
+                    return real(*args, **kwargs)
+                traps.block(f'os.{name}')
+            return trapped
+
         patches = [
             mock.patch.object(socket, 'create_connection', lambda address, *a, **k: traps.block(f'create_connection {address!r}')),
             mock.patch.object(socket.socket, 'connect', guarded_connect),
@@ -97,7 +107,7 @@ class Traps:
             mock.patch.object(os, 'system', lambda command: traps.block(f'os.system {command!r}')),
             mock.patch.object(getpass, 'getpass', lambda *a, **k: traps.block('getpass: asked for a credential')),
             mock.patch.object(builtins, 'input', lambda *a, **k: traps.block('input')),
-        ] + [mock.patch.object(os, name, lambda *a, **k: traps.block(f'os.{name}'))
+        ] + [mock.patch.object(os, name, os_trap(name))
              for name in ('posix_spawn', 'posix_spawnp', 'execv', 'execve', 'execvp', 'execvpe') if hasattr(os, name)]
         with contextlib.ExitStack() as stack:
             for patch in patches:
@@ -211,6 +221,19 @@ class PaidGuardTests(unittest.TestCase):
                              '2.1.284 (Claude Code)')
         self.assertEqual(len(traps.attempts), 9)
         self.assertEqual(len(traps.version_checks), 1)
+
+    def test_popens_own_spawn_passes_and_a_direct_one_is_blocked_by_name(self):
+        """subprocess starts a child through os.posix_spawn on some builds (close_fds=False anywhere; with close_fds too
+        on Python 3.13+ where glibc has posix_spawn_file_actions_addclosefrom_np, as on CI's 3.14): that is Popen's own
+        call, already vetted by the Popen trap, and must go through. A module calling os.posix_spawn itself must not."""
+        traps = Traps(self.fake)
+        with traps.active():
+            done = subprocess.run([str(self.fake), '--version'], capture_output=True, text=True, close_fds=False)
+            self.assertEqual(done.stdout.strip(), '2.1.284 (Claude Code)')
+            with self.assertRaises(Blocked) as blocked:
+                os.posix_spawn(self.fake, [self.fake, '-p', 'hi'], {})
+        self.assertEqual(str(blocked.exception), 'os.posix_spawn')
+        self.assertEqual((traps.attempts, len(traps.version_checks)), (['os.posix_spawn'], 1))
 
 
 def mains():
