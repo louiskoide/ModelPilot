@@ -115,3 +115,38 @@ Overnight item 1, branch `claude/stack-review`: #78's `ClientGone`/`transport_er
 ## The client's connectivity check — October 15, 2026 (overnight cloud run, tests only, $0)
 
 Found by the offline end-to-end check (`tests/test_e2e_dry_run.py`, `docs/governor.md`, "Offline end-to-end check"): at the start of every invocation the pinned 2.1.284 client sends `HEAD /api/hello` to its base URL, with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` set. The proxy has no `HEAD` handler, so `BaseHTTPRequestHandler` answers 501 without forwarding or logging it, and the client carries on as normal. Not billable; no accounting changes. A proxy log doesn't show these requests, and whether the real API's answer changes anything in the client is untested.
+
+## Seeded fuzzing of the stream parser and pricing — October 15, 2026 (overnight cloud run, tests only, $0)
+
+Overnight item 7, branch `claude/fuzz`: `tests/test_fuzz.py`, standard library only, fixed seeds (usage 20261015, streams 15102026). The default set takes about 4 s: 20,000 usage dicts and 160 replies through a real `ProxyServer`. `FUZZ_ITERATIONS=N` runs N usage dicts and N/20 replies.
+
+- **The reference pricer** is written in the test from `configs/m0.json`'s rates and the documented rules, not from `cache_probe`. A reply has a known cost only when all of these hold:
+  - every counter is a whole number, 0 or more;
+  - the reply is from the model that was asked for, at the standard tier, with global (or no) residency, and not in fast mode;
+  - its cache writes carry a lifetime split that adds up;
+  - `server_tool_use` holds counters only, and only web fetch above 0;
+  - no iteration comes from a fallback or from another model.
+- **Usage generator:** dicts with fields missing, extra, null, negative, fractional, boolean or a string; nested `server_tool_use`, `iterations` and `cache_creation`; both lifetimes.
+- **Stream generator:** text, thinking with a signature, `tool_use` with a split `input_json_delta`, a server tool use and its result, pings, unknown event types, `error` events, LF or CRLF, SSE comments, an occasional event over 1 MiB, random chunking from 1 byte to 70 KB, and 10% cut short.
+- **Invariants:**
+  - the client gets the upstream's bytes exactly;
+  - each request gets exactly one log row;
+  - a known cost equals the reference's and is never negative;
+  - afterwards a plain request still succeeds, so no handler error stopped the server.
+  - Unknown is always allowed. An event a little over the 1 MiB bound may still be priced, as documented above.
+
+**Found, all in `cache_probe`, all fixed the same night.** Each case is a test in `FuzzFindingTests` that fails on the old code. Of the first 20,000 usage dicts, 831 disagreed with the reference:
+
+1. **Negative counts were priced, 38 times as a negative cost.** For example, `output_tokens: -55831` came out at −$0.49.
+2. **Boolean and fractional counts were priced** (`True` as 1, `0.0`, `1.5`), in the four counters and in the lifetime split.
+3. **A null lifetime split with cache writes priced every write at the 5m rate** (`cache_creation: null`). `priced_usage` checked only that the key was present. If the writes were 1h, that is a smaller wrong total: 110,323 tokens priced at $0.41 instead of up to $0.66.
+4. **A reply naming the model asked for but whose `usage.iterations` lists a fallback's turn, or another model's, was priced at the asked model's rates.** Claude Code 2.1.284 sends no fallbacks; this is the conservative reading of M1's fallback rule.
+
+**Fixes:**
+- `cost()` refuses a count that isn't a whole number 0 or more (`whole_count`), in the counters and in the split.
+- `priced_usage` takes writes without a dict split as a missing split, and returns unknown on a fallback iteration (`fallback_iterations`).
+- Recorded runs are unaffected: logged usage keeps only non-negative integer counters (`logged_usage`), and no recorded reply has a null split or iterations, as far as their logged usage shows (it doesn't keep `iterations`).
+
+**Streams (default set):** no finding. Bytes were identical every time, there was one row per request, the server kept serving, and no known stream cost disagreed once the reference let an event a little over 1 MiB be priced. Rows carry what the proxy parsed.
+
+**Long run:** two parts, seeds as above. **Usage:** `FUZZ_ITERATIONS=1500000`, 1.5 million dicts in about 2 minutes, no disagreement after the fixes (`runs/cloud-overnight-fuzz-long.log`; the same command's stream part hit the 30-minute limit: the test then read the whole log back after every request, a quadratic cost, fixed to read it as it grows). **Streams:** `FUZZ_ITERATIONS=600000`, 30,000 replies in 422 s. That run found a fifth bug: **a `message_delta` whose usage was `[]` (or a list of pairs) passed `dict.update`**, so the reply was priced on `message_start`'s placeholder output count (125 replies; `runs/cloud-overnight-fuzz-long-streams.log`). `UsageObserver.merge` now takes anything but an object as unreadable usage (`unparseable_event`), with a test that fails on the old code. Rerun on the fix: 30,000 replies in 413 s, nothing found (`runs/cloud-overnight-fuzz-long-streams-2.log`).
