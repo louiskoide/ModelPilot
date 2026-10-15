@@ -2,6 +2,21 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026: a turn-start risk predictor, pre-registered before any request (Haiku 5.5 reads the instruction and the code)
+
+$0, offline, user request (option (a) of the October 14 discussion: "lets try a first then"). Branch `risk-predictor`, stacked on `miss-detector-results`. New `modelpilot/risk_predictor.py`; the pre-registration is `docs/m6-benchmark-plan.md`, "Turn-start risk predictor: pre-registration", committed with the module (SHA-256 recorded there) before any request.
+
+- **What it asks:** whether Haiku 5.5, given a task's instruction and the base commit's source it names, picks out the tasks low concise or Sonnet 5.5 medium misses (item 8's M). It would be a turn-start signal for routing an Opus user's risky tasks to Opus. Item 8's features and the post-run detectors failed; Opus finds the misses only by solving.
+- **Fixed in advance:**
+  - Tasks: 66, the 29 dev tasks and item 8's 38 less petersen.
+  - Labels: M on 8 tasks, matching item 8's published labels.
+  - Requests: 3 to Haiku low per task; each task's score is the median risk.
+  - Test: the top third flagged and tested with the hypergeometric. A pass needs 6 of the 8 caught (p 0.014). On a fail, the search for a miss predictor on this benchmark ends.
+- **Said in advance:** the labels were known when the prompt was written, so a pass is a lead that must hold on new tasks, not evidence.
+- **Plan** (offline, nothing sent): 198 requests, expected $0.62, at most $9.98. Every task gets source, 2–90 KB (median 86 KB), after one generic fix found in the plan: a one-file repository (parse) ranked every name at zero.
+- **To run** (API key, the user's call): `python3.12 -m modelpilot.risk_predictor rate --out runs/risk-predictor-<ts> --live --limit-usd 2`, then `score runs/risk-predictor-<ts>`.
+- **Tests:** all 820 offline tests pass on Python 3.12 with the pinned 2.1.284 client, the 3 proxy expected failures among them (`runs/risk-predictor-regression-py312.log`). New: `tests/test_risk_predictor.py` (9: the base commit's source only, never the fix or tests; excerpts within the budget; one request per sample, no retry; the top-third test and verdicts).
+
 ## October 14, 2026: the miss detector's two runs: the checklist flags tasks, not misses; Opus's tests catch misses but checking with Opus costs more than using it
 
 $0.752 known spend (the checklist, API key, the user's run); the cross-check and every further reading $0. Runs: `runs/miss-checklist-20261014-085157`, `runs/miss-crosscheck-20261014-112627`; further readings `runs/miss-detector-readings-20261014.py` (`.json` beside it). Details: `docs/m6-benchmark-plan.md`, both "Miss detector" sections, Result.
