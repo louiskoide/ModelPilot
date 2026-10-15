@@ -18,6 +18,8 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
+from modelpilot import proxy
 from modelpilot.bench import accounting
 from modelpilot.bench_report import transport_check
 from modelpilot.cache_probe import priced_usage
@@ -520,6 +522,38 @@ class ShapeTests(unittest.TestCase):
         row = self.rows()[-1]
         self.assertEqual((row['http_status'], row['status'], row['error_type']), (200, 'transport_error', 'ConnectionResetError'))
         self.assert_unknown(row)
+
+    def test_a_client_that_stops_reading_is_the_clients_failure(self):
+        """October 15 review of #78: a write to a client that stopped reading times out (TimeoutError, the handler's
+        socket timeout, 120 s; 0.5 s here) rather than failing with a broken pipe or a reset, and was taken for the
+        upstream's failure: transport_error/TimeoutError. Any failed write to the client is now the client's
+        (proxy.ClientGone). Accounting was the same either way (a lost request of unknown cost)."""
+        def setup(handler):
+            original(handler)
+            handler.connection.settimeout(.5)
+            handler.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+        original = proxy.ProxyHandler.setup
+        piece = sse({'type': 'ping'}) * 512
+        self.reply({'headers': [('Content-Type', 'text/event-stream')],
+                    'pieces': [sse(message_start())] + [piece] * 200 + [sse(*message_end())]})
+        request = json.dumps({'model': MODEL, 'max_tokens': 8, 'stream': True, 'messages': []}).encode()
+        sock = socket.socket()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        with mock.patch.object(proxy.ProxyHandler, 'setup', setup):
+            sock.connect(('127.0.0.1', self.proxy.server_port))
+            sock.sendall(f'POST /v1/messages HTTP/1.1\r\nHost: proxy\r\nContent-Type: application/json\r\n'
+                         f'Content-Length: {len(request)}\r\n\r\n'.encode() + request)
+            try:
+                for _ in range(1000):  # the client never reads; the row is logged once the proxy gives up on it
+                    if self.log.exists() and self.log.read_text():
+                        break
+                    time.sleep(.01)
+                row = self.rows()[-1]
+            finally:
+                sock.close()
+        self.assertEqual((row['http_status'], row['status']), (200, 'connection_closed'), row.get('error_type'))
+        self.assert_unknown(row)
+        self.assertEqual(transport_check([row])['lost_requests'], 1)
 
     def test_a_catalog_upstream_that_closes_is_answered_with_a_502(self):
         self.reply({'drop': True})

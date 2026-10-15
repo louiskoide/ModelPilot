@@ -96,7 +96,9 @@ class ClientGone(Exception):
 def to_client(write, *args):
     try:
         return write(*args)
-    except (BrokenPipeError, ConnectionResetError) as e:
+    except OSError as e:
+        # Any failed write to the client is the client's: a broken pipe or reset, and since October 15 (a review of #78)
+        # also a client that stopped reading until the socket timed out (TimeoutError), which read transport_error.
         raise ClientGone() from e
 
 
@@ -648,7 +650,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         """A 502 to a client that has had nothing yet; if it has gone too, there is no one to tell."""
         try:
             self.send_error(502, 'Upstream connection failed')
-        except (BrokenPipeError, ConnectionResetError):
+        except OSError:
             pass
 
     def refuse(self, row, reason):
@@ -662,7 +664,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.send_header('Connection', 'close')
             self.end_headers()
             self.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
+        except OSError:
             pass
         self.close_connection = True
         # Its own kind, so request counts, accounting and cache attribution see only sent requests.
