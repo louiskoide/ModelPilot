@@ -2,6 +2,15 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026 (cloud batch): the proxy's three shape bugs fixed
+
+$0, offline, branch `claude/proxy-shape-fixes` (cloud batch item 2). Details: `docs/m1-results.md`, "The three shape bugs fixed".
+
+- **Server-side tool fees:** `logged_usage` keeps `server_tool_use`'s counters, and `priced_usage` leaves a reply's cost unknown when one counts a web search ($10 per 1,000 searches, a fee no rates table here carries) or a counter it doesn't know. Web fetch isn't metered and keeps its token price. Source: the claude-api skill's pricing notes, read October 14. No recorded run's usage has `web_search_requests` above 0 (checked on the main machine on October 14), so no recorded cost changes.
+- **Upstream failures:** only a failed write to the client is the client going away (`ClientGone`, `connection_closed`). An upstream that closes before its status line now gets the client a 502 and logs `transport_error`/`RemoteDisconnected`; a reset mid-stream logs `ConnectionResetError`; `GET /v1/models` too. Accounting is unchanged: both were already lost requests of unknown cost.
+- **Repeated headers** are forwarded as sent, in order (`clean_headers` returns pairs, `send_request` sends them).
+- **Tests:** all 814 offline tests pass on Python 3.12 with the pinned 2.1.284 client, no expected failures left and no skips (`runs/cloud-proxy-shape-fixes-regression-py312.log`). `tests/test_proxy_shapes.py`: the three `expectedFailure` decorators removed, their assertions tightened (a cost of None, the counter logged, two separate headers), and 3 new tests (an upstream reset mid-stream, a catalog upstream that closes, unmetered and malformed counters); each new or fixed test fails on the old code. `tests/test_proxy.py` and the soak's fixtures are unchanged and pass; the proxy test modules also pass on Python 3.10.20.
+
 ## October 14, 2026 (cloud batch): review of October 14's scorers; 7 bugs fixed, re-scores queued
 
 $0, offline, branch `claude/oct14-review` (cloud batch item 1; the recorded runs aren't in the container). Details and the main-machine commands: `docs/m6-benchmark-plan.md`, "Review of October 14's scorers".
@@ -50,6 +59,7 @@ $0, offline, branch `codex/haiku-explorer` (overnight queue item 3, built the da
 - **Expectation, not a result:** the caveman pass found a median 7.9 KB of tool results a trial, so savings are likely small. Step 2 (an arm with `--agents`) is built only if the replay pays.
 - **To run** (the machine with the dev runs, $0): `python3 -m modelpilot.explorer_replay --out runs/explorer-replay-<ts>.json`.
 - **Tests:** all 802 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 9 skipped and the 3 proxy expected failures (`runs/codex-haiku-explorer-regression-py312.log`). New: `tests/test_explorer_replay.py` (7, one trial worked by hand; also passes on Python 3.10.20).
+
 ## October 14, 2026: miss detector, cross-run test check built, not run
 
 $0, offline, branch `codex/miss-crosscheck` (overnight queue item 2, built the day after on the user's request; the dev runs weren't on the machine). New `modelpilot/miss_crosscheck.py`; details: `docs/m6-benchmark-plan.md`, "Miss detector: cross-run test checks".
@@ -59,6 +69,7 @@ $0, offline, branch `codex/miss-crosscheck` (overnight queue item 2, built the d
 - **Found while building:** pytest aborts the whole run when a node id sits in a file that fails to import, which a peer's file importing its own new API does; the check passes files with `-k` instead.
 - **To run** (the machine with the dev runs, $0): `python3 -m modelpilot.miss_crosscheck estimate --out runs/miss-crosscheck-plan-<ts>.json`, then `run --out runs/miss-crosscheck-<ts> --jobs 6`, then `score`. About 1,360 pytest runs over the 453 dev trials; `estimate` gives the hours. A rule flagging at least half the misses at a tolerable false-flag rate gets a holdout pre-registration drafted, not run.
 - **Tests:** all 804 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 9 skipped and the 3 proxy expected failures (`runs/codex-miss-crosscheck-regression-py312.log`). New: `tests/test_miss_crosscheck.py` (9: a synthetic task where a peer's test flags the miss, an invented-API test is noise and a test failing on its own tree is never used; also passes on Python 3.10.20).
+
 ## October 14, 2026: the overnight branches merged; 795 tests pass together
 
 $0, no model request. Merged with merge commits, in order: #63 (sqlglot stage 2 screen), #70 (ledger locks), #72 (Jev launcher path), #69 (proxy shapes), #68 (README), #67 (TypeSafe support), #71 (requirements checklist). #66, the overnight run's `runs/` handoff, was closed unmerged and its files copied to `runs/`.
