@@ -79,7 +79,7 @@ Not reachable: `typesafe.ai`, `docs.typesafe.ai` and `openrouter.ai` were each t
 
 ## Item 9. Further offline items
 
-- **Branch:** `claude/proxy-fallback-shape` (stacked on `claude/proxy-client-gaps`), pushed. Commits: `622dc41` test, `0b8848e` docs, `2c5fc69` chain merge of item 6 (the chain's tip). **PR:** https://github.com/louiskoide/ModelPilot/pull/83 (stacked on #82). **Tests:** 823 pass before the chain merge, no skips (`runs/cloud-proxy-fallback-shape-regression-py312.log`); the test also passes on Python 3.10.20.
+- **Branch:** `claude/proxy-fallback-shape` (stacked on `claude/proxy-client-gaps`), pushed. Commits: `622dc41` test, `0b8848e` docs, `2c5fc69` chain merge of item 6 (the chain's tip). **PR:** https://github.com/louiskoide/ModelPilot/pull/83 (stacked on #82; CI green). **Tests:** 823 pass before the chain merge, no skips (`runs/cloud-proxy-fallback-shape-regression-py312.log`); the test also passes on Python 3.10.20.
 - **What:** one test in `tests/test_proxy_shapes.py`: a reply served by a server-side fallback model (another model in the reply, `usage.iterations` with a `fallback_message`) is logged at the asked model with cost unknown, streamed or not. M1's "server-side fallback accounting" gap now has a test; it was already the rule, so no code changed.
 - Nothing else found that fits §1–§2: the remaining "Not done" and "Remaining" items need live runs, the recorded runs or a user decision.
 
