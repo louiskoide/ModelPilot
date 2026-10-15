@@ -161,6 +161,24 @@ class FuzzFindingTests(unittest.TestCase):
         self.assertIsNone(self.price(cache_creation=None))
         self.assertIsNotNone(self.price(cache_creation=None, cache_creation_input_tokens=0))  # nothing to split
 
+    def test_a_stream_event_whose_usage_isnt_an_object_leaves_the_cost_unknown(self):
+        """Found by the long stream run (30,000 replies): a message_delta usage of [] (or a list of pairs) passed
+        dict.update, so the reply was priced on message_start's placeholder output count."""
+        from modelpilot.proxy import UsageObserver, measured_cost
+        start = {'type': 'message_start', 'message': {'model': MODEL, 'usage': dict(self.USAGE, output_tokens=1)}}
+        for usage in ([], [['output_tokens', 999]], 'x', None, 7):
+            with self.subTest(usage=usage):
+                observer = UsageObserver(True)
+                for event in (start, {'type': 'message_delta', 'usage': usage}, {'type': 'message_stop'}):
+                    observer.feed(b'data: ' + json.dumps(event).encode() + b'\n\n')
+                observer.finish()
+                self.assertIsNone(measured_cost(observer, {'model': MODEL}, RATES))
+        observer = UsageObserver(True)
+        for event in (start, {'type': 'message_delta', 'usage': dict(self.USAGE)}, {'type': 'message_stop'}):
+            observer.feed(b'data: ' + json.dumps(event).encode() + b'\n\n')
+        observer.finish()
+        self.assertAlmostEqual(measured_cost(observer, {'model': MODEL}, RATES), self.price())
+
     def test_an_iteration_from_a_fallback_or_another_model_is_unknown(self):
         """The reply named the model asked for, but its iterations show another model's turn: no one rate fits."""
         self.assertIsNone(self.price(iterations=[{'type': 'message', 'model': MODEL},
@@ -245,14 +263,14 @@ def stream_reference(request, events, oversized, cut):
     usage, model = {}, None
     for e in events:
         if e['type'] == 'message_start':
-            if not isinstance(e['message'].get('usage'), dict):
+            if not isinstance(e['message'].get('usage', {}), dict):
                 return None
-            usage.update(e['message']['usage'])
+            usage.update(e['message'].get('usage', {}))
             model = e['message'].get('model')
         elif e['type'] == 'message_delta':
-            if not isinstance(e.get('usage'), dict):
+            if not isinstance(e.get('usage', {}), dict):  # present but not an object: unreadable
                 return None
-            usage.update(e['usage'])
+            usage.update(e.get('usage', {}))
     return reference(request, model, usage)
 
 
@@ -326,7 +344,8 @@ class StreamFuzzTests(unittest.TestCase):
 
     def test_streams_pass_byte_for_byte_and_are_priced_as_the_reference_or_unknown(self):
         rng = random.Random(15102026)
-        found, sent = [], 0
+        found, sent, rows = [], 0, []
+        log = open(self.log, 'a+')  # read as it grows: each request's row once, not the whole log every time
         for i in range(ITERATIONS // 20 or 160):
             streamed = rng.random() < .85
             request = {'model': MODEL, 'max_tokens': 8, 'stream': streamed, 'messages': []}
@@ -346,7 +365,8 @@ class StreamFuzzTests(unittest.TestCase):
             status, body = send(self.proxy.server_port, json.dumps(request).encode())
             sent += 1
             self.assertTrue(self.proxy.wait_idle(30))
-            rows = [json.loads(line) for line in self.log.read_text().splitlines()]
+            log.seek(0, 1)
+            rows += [json.loads(line) for line in log.read().splitlines()]
             if len(rows) != sent:
                 found.append((i, 'rows', len(rows), sent))
                 break
@@ -355,6 +375,7 @@ class StreamFuzzTests(unittest.TestCase):
                 found.append((i, 'bytes', len(body), len(data)))
             if not agrees(row['cost_usd'], expected) or (row['cost_usd'] is not None and row['cost_usd'] < 0):
                 found.append((i, 'cost', row['cost_usd'], expected, row.get('usage_problem')))
+        log.close()
         self.assertEqual(found[:5], [], f'{len(found)} findings')
         # No handler error stopped the server: a plain request still goes through, logged once.
         self.upstream.plan = (json.dumps({'model': MODEL, 'content': [], 'usage': {k: 1 for k in COUNTERS}}).encode(), None, False)
