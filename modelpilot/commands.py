@@ -76,6 +76,7 @@ COMMANDS = (
     command('spec_tests', 'Plan item 5: tests a stronger model writes from a spec; write paid, score $0', paid=True),
     command('thinking_probe', 'Thinking history across setting changes, direct API; capture-shape is $0', paid=True,
             plans=[['--out', '{tmp}/thinking-probe']]),
+    command('timeline', "A session's requests and the governor's events as one static HTML page ($0)"),
     command('worker_check', 'Bounded live M3 check: search and fixed-test worker sessions', paid=True, plans=[[]]),
 )
 
