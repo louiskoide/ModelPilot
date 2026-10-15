@@ -2,6 +2,16 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026 (cloud batch): the governor's test adapter, built offline, off by default
+
+$0, offline, branch `claude/governor-test-adapter` (cloud batch item 5). New `modelpilot/suite_adapter.py`; details: `docs/governor.md`, "Test adapter".
+
+- **What:** the governor's `Not done` asked for `suite`/`failures` from an explicit test adapter rather than parsed output. A suite is declared in the governor's settings (`MODELPILOT_SUITE`, or `hooks run-suite --spec`) and run by the host, with no shell and no credentials. Its result is read from JUnit XML or the exit status and recorded as an M2 observation (`suite`, `suite_outcome`, `failures`, `tree_hash`).
+- **Safe by construction:** a timeout, a missing or unreadable report, no test run, a nonzero exit with no failure, or a file changing during the run is `unknown`, never a pass. A result lands only if the watched files still hash as when the run started and M2 accepts the revision (acknowledged, lease held). An edit after the run, or a correction or cancellation during it, is refused and journaled. A task with an undelivered correction isn't run at all.
+- **Where:** the `Stop` hook, when a turn really ends: the one point where the agent isn't editing or running its own tests. It is off unless declared; observations only, never a block or a change. **Wall time:** the hook waits for the suite, so a turn's end takes the suite's run time plus about 0.04 s (one watched file) to 0.23 s (500). Without a suite, `Stop` takes 0.003 s (`runs/cloud-governor-test-adapter-timing.json`, a tiny local suite).
+- **Not done:** no live session, and failure text isn't observed. Whether a turn's end may wait for a suite of seconds to minutes is the user's call before it's turned on anywhere.
+- **Tests:** all 827 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 3 expected failures (the proxy shapes, fixed on `claude/proxy-shape-fixes`), no skips (`runs/cloud-governor-test-adapter-regression-py312.log`). New: `tests/test_suite_adapter.py` (16 tests: a pass, a failure, a timeout, the other unknowns including a command that doesn't start, the exit-status mode, a stale result after an edit, a revision fenced by a correction, an undelivered correction, an unchanged tree, declarations, the Stop hook three ways, the coordinator command, M2's new fields); it and the changed `tests/test_hooks.py` and `tests/test_m2.py` modules also pass on Python 3.10.20.
+
 ## October 14, 2026 (cloud batch): the Jev launcher test's CI timeout was node's cold start
 
 $0, branch `claude/jev-launch-flake` (cloud batch item 4). `test_jev_accounted_launch.ExplicitClientTests.test_explicit_binary_wins_over_path` timed out (10 s) once on Python 3.14 in #67's push run.

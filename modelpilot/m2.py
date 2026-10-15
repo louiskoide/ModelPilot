@@ -164,16 +164,22 @@ class State:
         return self.get(task)
 
     def observe(self, task, revision, owner, observation):
-        allowed = {'error','file','content_hash','suite','failures','retry_language','progress'}
+        # suite_outcome and tree_hash (October 14): a host-run suite's verdict and the files it ran against
+        # (modelpilot.suite_adapter); an unknown outcome carries no failures, so it never feeds stalled_tests.
+        allowed = {'error','file','content_hash','suite','failures','retry_language','progress','suite_outcome','tree_hash'}
         if set(observation)-allowed:
             raise ValueError('Unknown observation fields')
         payload = dict(observation)
+        if 'suite_outcome' in payload and payload['suite_outcome'] not in ('pass','fail','unknown'):
+            raise ValueError('suite_outcome must be pass, fail or unknown')
+        if payload.get('suite_outcome') == 'unknown' and 'failures' in payload:
+            raise ValueError('an unknown suite outcome has no failure count')
         for key in ('retry_language','progress'):
             if key in payload and type(payload[key]) is not bool:
                 raise ValueError(f'{key} must be boolean')
         if 'failures' in payload and (type(payload['failures']) is not int or payload['failures'] < 0):
             raise ValueError('failures must be a nonnegative integer')
-        for key in ('error','file','content_hash','suite'):
+        for key in ('error','file','content_hash','suite','tree_hash'):
             if key in payload and not isinstance(payload[key], str):
                 raise ValueError(f'{key} must be a string')
         if 'error' in payload:
