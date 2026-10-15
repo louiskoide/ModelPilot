@@ -138,7 +138,10 @@ def run_selected(tree, task, python, scratch, ids):
     """The given pytest node ids in a tree, with the grader's isolation (no credentials, own HOME and TMPDIR), the
     repository's own addopts dropped. Their files are passed, not the ids, with -k on the selected names: a node id in a
     file that fails to import aborts the whole run ("found no collectors"), and a peer's file importing its own new API
-    is common. Tests -k also matches are run but never read. Returns junit_outcomes or {'error'}."""
+    is common. Tests -k also matches are run but never read. The tree is pytest's rootdir, so JUnit names a test from
+    the tree as outcome_of reads it: without --rootdir, a tree with no pytest configuration of its own takes the nearest
+    pyproject.toml above it (pytest 8), ModelPilot's when the scratch is under runs/, and every selected test read as
+    not_run (October 14 review). Returns junit_outcomes or {'error'}."""
     scratch = Path(scratch)
     scratch.mkdir(parents=True, exist_ok=True)
     xml = scratch/'junit.xml'
@@ -150,7 +153,8 @@ def run_selected(tree, task, python, scratch, ids):
     files = sorted({i.split('::', 1)[0] for i in ids})
     names = sorted({i.rsplit('::', 1)[1] for i in ids})
     argv = [python, '-m', 'pytest', '-q', '-p', 'no:cacheprovider', '-o', 'addopts=', '-o', 'junit_family=xunit1',
-            '--continue-on-collection-errors', '-k', ' or '.join(names), f'--junitxml={xml.resolve()}', *files]
+            f'--rootdir={Path(tree).resolve()}', '--continue-on-collection-errors', '-k', ' or '.join(names),
+            f'--junitxml={xml.resolve()}', *files]
     try:
         run = subprocess.run(argv, cwd=tree, env=env, capture_output=True, text=True, timeout=TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -211,8 +215,9 @@ def peer_tests(trial, task, repo, python, scratch, reference=True):
     own = run_selected(tree, task, python, scratch/'own-run', [i for p, v in files.items() for i in node_ids(p, v['names'])])
     if 'error' in own:
         return dict(out, error='own_' + own['error'])
-    out['kept'] = {p: [n for n in v['names'] if outcome_of(own['results'], p, n)['outcome'] == 'passed']
-                   for p, v in files.items()}
+    outcomes = {(p, n): outcome_of(own['results'], p, n)['outcome'] for p, v in files.items() for n in v['names']}
+    out['own_outcomes'] = {o: list(outcomes.values()).count(o) for o in sorted(set(outcomes.values()))}
+    out['kept'] = {p: [n for n in v['names'] if outcomes[(p, n)] == 'passed'] for p, v in files.items()}
     out['kept'] = {p: names for p, names in out['kept'].items() if names}
     shutil.rmtree(scratch/'own', ignore_errors=True)
     if reference and out['kept']:
@@ -412,21 +417,27 @@ def crosscheck(trials, tasks, out, python, repo_of, max_peers=16, seed=0, jobs=4
     report = {'max_peers': max_peers, 'seed': seed, 'python': python, 'seconds': round(time.monotonic() - started, 1),
               'trials': len(rows), 'misses': sum(not r['strict_pass'] for r in rows),
               'errors': sum(bool(r['error']) for r in rows), 'rows': rows}
-    report['summary'] = score_rows(rows)
+    report['summary'] = score_rows(rows, tests)
     with (out/'crosscheck.json').open('x') as f:
         json.dump(report, f, indent=1)
         f.write('\n')
     return report
 
 
-def score_rows(rows):
-    classes = {}
+def score_rows(rows, tests=None):
+    """The summary: readings, the reference bound, the price, outcome counts, and (with tests, phase 1's results) each
+    task's own-tree outcomes, where a task whose selected tests all read not_run would show."""
+    classes, own = {}, {}
     for r in rows:
         for result in (r.get('cross') or {}).values():
             for label, n in result['classes'].items():
                 classes[label] = classes.get(label, 0) + n
+        for label, n in ((tests or {}).get(r['key'], {}).get('own_outcomes') or {}).items():
+            own.setdefault(r['task'], {})[label] = own.get(r['task'], {}).get(label, 0) + n
+    errors = [r for r in rows if r.get('error')]
     return {'readings': summarize(rows), 'reference_bound (an upper bound a host can\'t reach)': summarize(rows, 'reference_bound'),
-            'price': price(rows), 'peer_test_outcomes': classes,
+            'price': price(rows), 'peer_test_outcomes': classes, 'own_tree_outcomes_by_task': own,
+            'errors': {'trials': len(errors), 'misses': sum(not r['strict_pass'] for r in errors)},
             'caveat': '37 of the 40 dev misses are on 3 tasks; see leave_one_task_out'}
 
 

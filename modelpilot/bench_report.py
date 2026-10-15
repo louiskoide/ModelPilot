@@ -365,8 +365,10 @@ def load_router_rate(path):
 def router_cost(routing, rate):
     """One Jev trial's TypeSafe dollars at an explicit rate, or None when any decision can't be priced: a stub router (an
     offline test, never TypeSafe), a router call that failed (whether it was billed is unknown), a decision without
-    usage, or usage without whole token counts. A trial whose router was never called (unrouted_sentinel) costs 0."""
-    if routing.get('router') == 'stub' or any(m != 'unrouted_sentinel' for m in routing.get('fail_open') or ()):
+    usage, or usage without whole token counts. A trial whose router was never called (unrouted_sentinel) costs 0; one
+    without a routing record (no decision count) is unknown, never 0 (October 14 review)."""
+    if routing.get('router') == 'stub' or any(m != 'unrouted_sentinel' for m in routing.get('fail_open') or ()) \
+            or not isinstance(routing.get('decisions'), int):
         return None
     usage, decisions = routing.get('router_usage') or [], routing.get('decisions') or 0
     if len(usage) < decisions:

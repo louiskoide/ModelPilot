@@ -151,6 +151,23 @@ def cost(usage, rates, ttl, when=None):
             w5 * rates['write_5m'] + w1 * rates['write_1h']) / 1e6
 
 
+# Server-side tools whose requests bill nothing beyond tokens. usage.server_tool_use counts them per reply; web search
+# costs $10 per 1,000 searches and web fetch isn't metered (claude-api skill's pricing notes, read October 14, 2026).
+UNMETERED_SERVER_TOOLS = ('web_fetch_requests',)
+
+
+def server_tool_fees_unknown(usage):
+    """True when usage.server_tool_use counts a request with a fee no rates table here carries (web search), or holds
+    anything other than counters. Until October 14's cloud batch such a reply was priced on its tokens alone."""
+    tools = usage.get('server_tool_use')
+    if tools is None:
+        return False
+    if not isinstance(tools, dict):
+        return True
+    return any(isinstance(v, bool) or not isinstance(v, int) or v < 0 or (v > 0 and k not in UNMETERED_SERVER_TOOLS)
+               for k, v in tools.items())
+
+
 def priced_usage(request, model, usage, rates):
     """Measured cost of one response, or None when any pricing input is ambiguous.
 
@@ -158,6 +175,8 @@ def priced_usage(request, model, usage, rates):
     """
     if not isinstance(usage, dict) or model != request.get('model'):
         return None  # aliases/fallback need explicit rate mapping, not guessing
+    if server_tool_fees_unknown(usage):
+        return None  # a server-side tool's fee (web search) isn't in the token rates
     # "not_available": the model has no data-residency option (e.g. Haiku 4.5), so standard pricing applies.
     if usage.get('service_tier', 'standard') != 'standard' or usage.get('inference_geo', 'global') not in ('global', 'not_available'):
         return None

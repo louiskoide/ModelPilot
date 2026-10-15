@@ -66,8 +66,38 @@ def read_chunked(stream, limit=MAX_BODY):
 
 
 def clean_headers(headers):
-    blocked = HOP | {x.strip().lower() for x in headers.get('Connection', '').split(',')}
-    return {k: v for k, v in headers.items() if k.lower() not in blocked}
+    """The end-to-end headers as (name, value) pairs in their order, a header sent twice kept twice (a dict kept only
+    its last value until October 14's cloud batch); hop-by-hop names and the names Connection lists are dropped."""
+    connection = headers.get_all('Connection') or [] if hasattr(headers, 'get_all') else [headers.get('Connection', '')]
+    blocked = HOP | {x.strip().lower() for x in ','.join(connection).split(',')}
+    return [(k, v) for k, v in headers.items() if k.lower() not in blocked]
+
+
+def without(pairs, *names):
+    """Header pairs (or a dict's items) less every pair with one of these names, in any case."""
+    drop = {n.lower() for n in names}
+    return [(k, v) for k, v in (pairs.items() if isinstance(pairs, dict) else pairs) if k.lower() not in drop]
+
+
+def send_request(conn, method, path, pairs, body=None):
+    """http.client's request() with the headers as ordered pairs, so repeats go out as sent. As with request(), Host
+    comes from the connection; every other header, Content-Length and Accept-Encoding included, is the caller's."""
+    conn.putrequest(method, path, skip_accept_encoding=True)
+    for k, v in pairs:
+        conn.putheader(k, v)
+    conn.endheaders(body)
+
+
+class ClientGone(Exception):
+    """A write to the client failed: the client went away. Only writes to the client raise it, so an upstream that
+    resets or closes (http.client.RemoteDisconnected is a ConnectionResetError) is never taken for the client."""
+
+
+def to_client(write, *args):
+    try:
+        return write(*args)
+    except (BrokenPipeError, ConnectionResetError) as e:
+        raise ClientGone() from e
 
 
 class UsageObserver:
@@ -147,13 +177,22 @@ def counter(value):
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
+SERVER_TOOL_NAME = re.compile(r'[a-z_]{1,64}')
+
+
 def logged_usage(usage):
     """Numeric counters only, never free-form upstream strings. The cache-write TTL split is
-    kept when complete, so a logged row can be re-priced (e.g. as a cold-equivalent cost)."""
+    kept when complete, so a logged row can be re-priced (e.g. as a cold-equivalent cost), and so
+    are server_tool_use's counters (October 14 cloud batch), whose fees priced_usage doesn't price."""
     row = {k: v for k, v in usage.items() if k in USAGE_COUNTERS and counter(v)}
     split = usage.get('cache_creation')
     if isinstance(split, dict) and all(counter(split.get(k)) for k in TTL_COUNTERS):
         row['cache_creation'] = {k: split[k] for k in TTL_COUNTERS}
+    tools = usage.get('server_tool_use')
+    if isinstance(tools, dict):
+        counts = {k: v for k, v in tools.items() if isinstance(k, str) and SERVER_TOOL_NAME.fullmatch(k) and counter(v)}
+        if counts:
+            row['server_tool_use'] = counts
     return row
 
 
@@ -446,12 +485,12 @@ class ProxyServer(ThreadingHTTPServer):
                        cost_usd=0.0, wall_seconds=0.0)
             self.record(row)
             return out
-        sent = {k: v for k, v in headers.items() if k.lower() not in ('accept-encoding', 'content-length', 'content-type')}
-        sent.update({'Content-Length': str(len(raw)), 'Accept-Encoding': 'identity', 'Content-Type': 'application/json'})
+        sent = without(headers, 'accept-encoding', 'content-length', 'content-type') + [
+            ('Content-Length', str(len(raw))), ('Accept-Encoding', 'identity'), ('Content-Type', 'application/json')]
         start = time.monotonic()
         conn = self.connection(timeout)
         try:
-            conn.request('POST', '/v1/messages', body=raw, headers=sent)
+            send_request(conn, 'POST', '/v1/messages', sent, raw)
             response = conn.getresponse()
             row['http_status'] = out['http_status'] = response.status
             provider_id = response.headers.get('request-id', '')
@@ -569,10 +608,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         start = time.monotonic()
         sent_headers = False
         conn = self.upstream_connection()
-        headers = {k: v for k, v in clean_headers(self.headers).items() if k.lower() != 'accept-encoding'}
-        headers['Accept-Encoding'] = 'identity'
+        headers = without(clean_headers(self.headers), 'accept-encoding') + [('Accept-Encoding', 'identity')]
         try:
-            conn.request('GET', self.path, headers=headers)
+            send_request(conn, 'GET', self.path, headers)
             response = conn.getresponse()
             data = response.read(MAX_BODY + 1)
             if len(data) > MAX_BODY:
@@ -586,25 +624,32 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     return
             row['http_status'] = response.status
             self.send_response_only(response.status, response.reason)
-            for k, v in clean_headers(response.headers).items():
+            for k, v in clean_headers(response.headers):
                 self.send_header(k, v)
             self.send_header('Content-Length', str(len(data)))
             self.send_header('Connection', 'close')
-            self.end_headers()
             sent_headers = True
-            self.wfile.write(data)
+            to_client(self.end_headers)
+            to_client(self.wfile.write, data)
             row['status'] = 'ok' if 200 <= response.status < 300 else 'upstream_error'
-        except (BrokenPipeError, ConnectionResetError):
+        except ClientGone:
             row['status'] = 'connection_closed'
         except Exception as e:
             row['error_type'] = type(e).__name__
             if not sent_headers:
-                self.send_error(502, 'Upstream connection failed')
+                self.upstream_failed()
         finally:
             conn.close()
             self.close_connection = True
             row['wall_seconds'] = time.monotonic()-start
             self.server.record(row)
+
+    def upstream_failed(self):
+        """A 502 to a client that has had nothing yet; if it has gone too, there is no one to tell."""
+        try:
+            self.send_error(502, 'Upstream connection failed')
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def refuse(self, row, reason):
         """Active arm only: answer with an API-style error instead of forwarding. Nothing is billed."""
@@ -698,13 +743,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
         headers = clean_headers(self.headers)
         extra_beta = (outcome.get('beta') if governed and self.server.policy is not None else None)
         if extra_beta:
-            names = [b.strip() for b in (headers.get('anthropic-beta') or '').split(',') if b.strip()]
-            headers = {k: v for k, v in headers.items() if k.lower() != 'anthropic-beta'}
-            headers['anthropic-beta'] = ','.join(names + ([extra_beta] if extra_beta not in names else []))
-        headers['Content-Length'] = str(len(raw))
+            names = [b.strip() for k, v in headers if k.lower() == 'anthropic-beta' for b in v.split(',') if b.strip()]
+            headers = without(headers, 'anthropic-beta') + [
+                ('anthropic-beta', ','.join(names + ([extra_beta] if extra_beta not in names else [])))]
+        headers = headers + [('Content-Length', str(len(raw)))]
         # Negotiate identity so usage inspection does not depend on client compression support.
-        headers = {k: v for k, v in headers.items() if k.lower() != 'accept-encoding'}
-        headers['Accept-Encoding'] = 'identity'
+        headers = without(headers, 'accept-encoding') + [('Accept-Encoding', 'identity')]
         tools = request.get('tools')
         mode = self.server.policy.mode if ticket is not None else 'active' if self.server.active else 'dry-run'
         counting = path.path == '/v1/messages/count_tokens'
@@ -756,18 +800,18 @@ class ProxyHandler(BaseHTTPRequestHandler):
         sent_headers = False
         observer = UsageObserver(bool(request.get('stream')))
         try:
-            conn.request('POST', self.path, body=raw, headers=headers)
+            send_request(conn, 'POST', self.path, headers, raw)
             response = conn.getresponse()
             row['http_status'] = response.status
             provider_id = response.headers.get('request-id', '')
             if PROVIDER_ID.fullmatch(provider_id):
                 row['provider_request_id'] = provider_id
             self.send_response_only(response.status, response.reason)
-            for k, v in clean_headers(response.headers).items():
+            for k, v in clean_headers(response.headers):
                 self.send_header(k, v)
             self.send_header('Connection', 'close')
-            self.end_headers()
             sent_headers = True
+            to_client(self.end_headers)
             row['response_encoding'] = response.headers.get('Content-Encoding', 'identity').lower()
             if row['response_encoding'] != 'identity':
                 observer.fail('compressed_response')  # bytes still forwarded; don't parse compressed payloads
@@ -779,8 +823,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 if first:
                     row['first_byte_seconds'] = time.monotonic()-start
                     first = False
-                self.wfile.write(data)
-                self.wfile.flush()
+                to_client(self.wfile.write, data)
+                to_client(self.wfile.flush)
                 observer.feed(data)
             observer.finish()
             row['status'] = 'ok' if 200 <= response.status < 300 else 'upstream_error'
@@ -796,12 +840,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if not counting:
                 row['decision'] = forecast(request, row['usage'], self.server.rates) if row['cost_usd'] is not None else {
                     'action': 'hold', 'applied': False, 'reason': 'incomplete_or_unpriced_response'}
-        except (BrokenPipeError, ConnectionResetError):
+        except ClientGone:
             row['status'] = 'connection_closed'
         except Exception as e:
+            # The upstream failed (an error before or while its reply arrived, a reset or a close without a status
+            # line): transport_error with its type, and a 502 if the client has had nothing yet.
             row['error_type'] = type(e).__name__
             if not sent_headers:
-                self.send_error(502, 'Upstream connection failed')
+                self.upstream_failed()
         finally:
             conn.close()
             self.close_connection = True
