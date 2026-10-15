@@ -248,6 +248,8 @@ class SummaryTests(unittest.TestCase):
         for usage in ({'input_tokens': '10', 'output_tokens': 0}, {'input_tokens': 10}, {'input_tokens': True, 'output_tokens': 0}, 'x'):
             self.assertIsNone(cost(router_usage=[usage]), usage)
         self.assertEqual(cost(decisions=0, router_usage=[], router=None, fail_open=['unrouted_sentinel']), 0)
+        # October 14 review: a Jev trial with no routing record says nothing about its router, so it isn't $0.
+        self.assertIsNone(bench_report.router_cost({}, self.RATE))
         fixed = record('t0', 'opus')
         self.assertIs(bench_report.with_router_cost(fixed, self.RATE), fixed)
 
