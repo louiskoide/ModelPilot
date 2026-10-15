@@ -79,10 +79,10 @@ Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 fou
 5. Dropped for the quality floor (user decision, Oct 8).
 6. Mid-task compaction: no loss shown (Oct 13), not on Haiku. Long sessions await approval.
 7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
-8. Done Oct 11: fail.
+8. Done Oct 11: fail. Post-run miss detectors: none shown to pay (Oct 14).
 9. Caveman: parked (user decision); its $0 pass found at most 1%, all lossy.
 10. Dropped (8 failed); Jev's advisor role too (Oct 11).
 11. 4b held (user decision; its trial-count rule gives n=1).
 12. Governor: live checks passed (Oct 12); idle plans wait out the cache TTL, a prompt late; compact if it pays (Oct 13).
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
-14. Haiku 5.5: helper roles only (simple steps), unbuilt.
+14. Haiku 5.5: helper roles only; the read/search explorer doesn't pay (Oct 14).
