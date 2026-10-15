@@ -195,6 +195,19 @@ A 1h boundary saves more each time but comes only after 3,630 s idle, so far les
   - **Rule change:** yes. Active mode is approved for the benchmark arm only. It is gated on evidence: `CLAUDE.md` keeps routing off "until integration has explicit evidence", and "Enforcement" above waits on the integrated arm's measured results (work items 3–4), not yet run. The ModelPilot arm's own evidence so far is that it never left low concise on the 29 tuning tasks.
 - **(d) Leave it as is.** $0 and no build. Every followed idle plan keeps paying the table's figure extra, and an unfollowed plan is just a notice.
 
+**Evidence from recorded sessions (October 15, overnight cloud run; $0, built on synthetic logs, not yet run on recorded ones).** `python3 -m modelpilot.idle_replay <runs> [--follow 0,0.25,0.5,0.75,1] [--out FILE]` reads bench runs of every shape (`trial.json` sessions with their row ranges) and governed sessions (`summary.json` invocations). Between two of a trial's sessions:
+
+- **The boundary:** the gap runs from the last answered main-loop request's end to the next session's first one (not a compaction request). It is an idle boundary when it reaches the earlier request's lifetime boundary (`m5.idle_boundary`, 330 s or 3,630 s).
+- **What it paid:** the prefix that request rewrote (`write_sources`'s rule), in tokens and at the row's write rate.
+- **Other rebuilds** are reported by cause across the trials.
+- **Each option above, at a follow rate P:**
+  - (a): P × the boundaries' rewrites at the old setting's write rate, less P × the prefix of each short pause where an early switch threw a warm entry away (same rate; a model change's other rate isn't modelled);
+  - (b): P × the rewrites;
+  - (c): the rewrites, with no P;
+  - (d): 0.
+
+  Each is priced on Sonnet 5.5 and Opus 5.5 at 5m and 1h. Every transition counts as if a change had been queued there. Transitions without usage or times are counted, never priced, and so are the two around a `/compact` turn, whose summary starts a new prefix. It makes no recommendation.
+
 ### Test adapter (October 14, cloud batch, offline; off by default)
 
 `modelpilot/suite_adapter.py`. The task's test suite is run by the host and recorded as a ledger observation, so `suite`/`failures` come from a run the host made, never from the session's output or the model's claims. Dry-run: observations only, nothing blocked, no model, effort or context change.
