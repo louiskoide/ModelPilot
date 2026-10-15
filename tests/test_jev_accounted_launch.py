@@ -18,6 +18,19 @@ LAUNCHER = ROOT/'modelpilot/jev_accounted_launch.mjs'
 RATES = json.loads((ROOT/'configs/jev-rates.json').read_text())['rates'] if (ROOT/'configs/jev-rates.json').exists() else {}
 
 
+def setUpModule():
+    """Start node once, untimed, before any timed launch (October 14 cloud batch). In CI no earlier test runs node, so
+    the first launch here paid the runner's cold start of the node binary: 2.03 s and 0.29 s in two passing jobs, against
+    0.08-0.11 s for every later launch in the same jobs, and over the 10 s timeout once (#67's push run, Python 3.14).
+    The timeouts below are for the launcher: 0.06 s median here, 0.21 s at most with the CPUs oversubscribed twice
+    (50 runs each, runs/cloud-jev-launch-flake-timing-*.json)."""
+    if shutil.which('node'):
+        try:
+            subprocess.run([shutil.which('node'), '-e', ''], capture_output=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            pass  # the timed tests will say so
+
+
 @unittest.skipUnless(shutil.which('node') and (JEV/'src/proxy.mjs').exists(), 'needs node and work/jev-router-compat')
 class AccountedLaunchSelfTest(unittest.TestCase):
     """Jev's real proxy -> ModelPilot ProxyServer -> loopback fixture; stub router, no Claude Code."""

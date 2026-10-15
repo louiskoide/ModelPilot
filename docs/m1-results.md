@@ -25,7 +25,7 @@ Observation-log SHA-256: `907a4f148e1c5560327688092746c7bd069a02280f571be63417d4
 
 ## Remaining M1 work
 
-The dry-run implementation passed its overnight synthetic checks. M1 is not yet certified against actual Claude Code traffic. Next validate API-key-based Claude Code streaming, tool calls, cancellation, headers and usage through the proxy. Subscription OAuth, cloud adapters, chunked client uploads, server-side fallback accounting, tool surcharges and long-running streams beyond the 120-second inactivity timeout remain limitations. Cost scenarios assume a warm source, cold target, unchanged context/output and five-minute TTL; quality and actual remaining task length are unknown. Keep routing disabled.
+The dry-run implementation passed its overnight synthetic checks. M1 is not yet certified against actual Claude Code traffic. Next validate API-key-based Claude Code streaming, tool calls, cancellation, headers and usage through the proxy. Subscription OAuth, cloud adapters, chunked client uploads, server-side fallback accounting (since October 14 a reply served by another model is tested to stay unknown), tool surcharges (since October 14 a reply whose usage counts a web search is left unknown, not priced on its tokens) and long-running streams beyond the 120-second inactivity timeout remain limitations. Cost scenarios assume a warm source, cold target, unchanged context/output and five-minute TTL; quality and actual remaining task length are unknown. Keep routing disabled.
 
 The soak stopped automatically. The overnight follow-up is disabled after this completion report; no further overnight runs are scheduled by this task.
 
@@ -55,8 +55,52 @@ Passes:
 - A keep-alive client: one reply per connection (`Connection: close`), each request forwarded and logged once.
 - An event or reply over 1 MiB: forwarded, cost unknown (`oversized_response`). The bound is checked between reads, so an event a little over it can still be parsed and priced.
 
-Bugs found, each an `expectedFailure` test with the fix it needs:
+Bugs found, each an `expectedFailure` test with the fix it needs (all three fixed the same day; see the next section):
 
 1. **Server-side web search isn't priced and isn't unknown.** `cache_probe.priced_usage` reads tokens only, so a reply whose usage has `server_tool_use.web_search_requests` (Claude Code's WebSearch runs it; the pricing page lists $10 per 1,000 searches) is logged as a known cost without the search fee, and `logged_usage` drops the counter. Fix: keep numeric `server_tool_use` counters in `logged_usage`; return None from `priced_usage` when a fee-bearing counter is positive unless the model's rates carry that fee.
 2. **An upstream that closes without replying gets no 502.** `http.client.RemoteDisconnected` subclasses `ConnectionResetError`, so `do_POST`'s client-disconnect branch takes it: the client gets a closed connection instead of the 502 the next branch would send, and the row reads `connection_closed` instead of `transport_error`. Accounting is unaffected (both count as lost requests). An upstream reset mid-stream is labelled the same way. Fix: treat `RemoteDisconnected` and errors from `conn.request`/`getresponse`/`read1` as upstream failures before the client branch, or confine that branch to `self.wfile` writes.
 3. **A header sent twice is forwarded once.** `clean_headers` builds a dict from `HTTPMessage.items()`, so the last value wins: two `anthropic-beta` headers reach the API as one, two `Set-Cookie` headers reach the client as one. Low impact for Claude Code (fetch merges repeats into one header). Fix: keep (name, value) pairs and send them one by one.
+
+## The three shape bugs fixed — October 14, 2026 (cloud batch, tests only, $0)
+
+Cloud batch item 2, branch `claude/proxy-shape-fixes`. The three `expectedFailure` decorators are gone and each test passes for the reason it names, strengthened where it allowed a weaker fix. `tests/test_proxy.py` and the soak's fixtures are unchanged and pass.
+
+1. **Server-side tool fees.**
+   - `logged_usage` keeps `usage.server_tool_use`'s numeric counters (names `[a-z_]`, at most 64 characters).
+   - `cache_probe.priced_usage` returns None when one counts a request with a fee: web search, $10 per 1,000 searches. It also returns None for any counter it doesn't know, and for anything in `server_tool_use` that isn't a counter.
+   - Web fetch isn't metered, so `web_fetch_requests` keeps the token price. Source: the claude-api skill's pricing notes (bundled with client 2.1.300, read October 14, 2026: "web searches at $10 per 1,000"; `web_fetch_requests` "currently always 0 since web fetch is not metered").
+   - No rates table carries the search fee, so such a reply's cost is unknown (`usage_problem: unpriced_usage`) and so is its trial's total.
+   - Checked on the main machine on October 14: no recorded run's usage has `web_search_requests` above 0, so no recorded cost changes.
+   - Not covered: code execution's container hours (billed past a free allowance) don't appear in usage at all. Claude Code doesn't declare that tool.
+2. **Upstream failures are the upstream's.**
+   - Only writes to the client raise `ClientGone`, which logs a row `connection_closed`. Every other exception is the upstream's: `transport_error` with its type, and a 502 if the client has had nothing yet.
+   - An upstream that closes before its status line now gets the client a 502 and logs `RemoteDisconnected`. Before the fix the client got no reply and the row read `connection_closed`.
+   - An upstream reset mid-stream (new test, an RST after the first event) logs `ConnectionResetError` as a `transport_error`; the client keeps what had arrived.
+   - The same split now holds for `GET /v1/models` (new test).
+   - Accounting is unchanged: either status was already a lost request of unknown cost.
+3. **Repeated headers.** `clean_headers` returns (name, value) pairs in order, and requests go out through `putrequest`/`putheader` (`proxy.send_request`). Two `anthropic-beta` headers now reach the upstream as two headers, and two `Set-Cookie` headers reach the client as two. Host is still sent once, the upstream's. Where the active arm adds a beta, the client's repeats are merged into one header with it, matched in any case.
+
+Tests: 20 in `tests/test_proxy_shapes.py` (17 before; 3 new: the reset, the catalog close, the unmetered counters). Each new or fixed test fails on the old code.
+
+## Real-client cancellation, chunked uploads and idle streams — October 14, 2026 (cloud batch, tests only, $0)
+
+Cloud batch item 3, branch `claude/proxy-client-gaps` (stacked on the shape fixes): `tests/test_proxy_client_gaps.py`, 8 tests. The real-client tests run the pinned 2.1.284 in `-p` mode through the proxy to a loopback upstream, with a fake key, an empty HOME and config, no tools, `CLAUDE_CODE_MAX_RETRIES=0`. They skip without node or that client first on PATH. No proxy bug was found, so `proxy.py` is unchanged here.
+
+- **Real-client cancellation** (SIGINT, SIGTERM, SIGKILL, each sent about 0.3 s into a stream of pings 50 ms apart): for every signal the proxy closed the upstream before its stream ended. The row is `connection_closed` with HTTP 200 and cost unknown, after well under the stream's 10 s. There is one row per request that reached the upstream, `bench.accounting` counts it once as unpriced (total unknown), and `transport_check` counts it lost. None of the three signals made the client send a second request. What the client did:
+  - **SIGINT:** exit 0 with a `result` event of subtype `error_during_execution`. A harness must not read a 0 exit as success; `bench` reads the result's subtype.
+  - **SIGTERM:** exit 143 with no `result` event.
+  - **SIGKILL:** exit −9 with no `result` event.
+
+  These are pinned in the tests, so a client change shows.
+- **Chunked request bodies** (raw sockets: 7-byte, 4 KiB and single chunks, chunk extensions, a trailer). The upstream gets the exact bytes with a `Content-Length`, and the row is priced. Refused with 400 before anything reaches the upstream, and nothing logged:
+  - 33 chunks of 1 MiB: the proxy stops at the chunk that would pass 32 MiB, without reading the rest;
+  - chunked framing with a `Content-Length` too;
+  - `gzip, chunked`, or the `Transfer-Encoding` header sent twice;
+  - a size that isn't hex, a short chunk, or no last chunk.
+- **A stream idle past the inactivity timeout.** The upstream sends `message_start`, then nothing for 3 s; the proxy's upstream timeout (`ProxyServer.connection`'s 120 s) is lowered to 1 s in the test only.
+  - **The proxy** gives up after about a second. The client already has the HTTP 200 and `message_start`, then the reply ends with no `message_stop`. The row is `transport_error`/`TimeoutError` with cost unknown.
+  - **The pinned client** sent the request again *without streaming*, even with `CLAUDE_CODE_MAX_RETRIES=0`, and the session succeeded (exit 0, `success`). This reproduces offline the hidden retry `bench_report.transport_check` found in `bench-20261011-234003`.
+  - **In the log** the retry is its own row, priced, and the cut request stays unknown. `transport_check` reports 1 lost and 1 sent after, so `bench_report` would exclude such a trial (`connection_retried`).
+
+Still untested: a real client cancelled during a tool call or between requests, subscription OAuth, and a live provider's own idle behaviour.
+

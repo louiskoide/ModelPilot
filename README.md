@@ -14,7 +14,7 @@ ModelPilot is a cache-aware model and effort governor for Claude Code, and a ben
 - **Predicting misses.** On 38 other tasks, no rule applied at a turn's start found the misses.
 - **Where the money goes.** Cache writes are about 45% of cost, mostly from context growth, not rebuilds. 80–90% of tool-result bytes are source code read or searched.
 
-Every result, failures included, is in [docs/evidence.md](docs/evidence.md) with its run directory. [docs/changelog.md](docs/changelog.md) has the dated history, costs and test counts.
+Every result, failures included, is in [docs/evidence.md](docs/evidence.md) with its run directory. [docs/changelog/](docs/changelog/) (since October 14, one file per entry) and [docs/changelog.md](docs/changelog.md) (before) have the dated history, costs and test counts.
 
 ## What is not measured
 
@@ -55,6 +55,6 @@ Tests that drive the real Claude Code client, the benchmark or Jev need the pinn
 
 - [docs/code-map.md](docs/code-map.md): what each module does.
 - [docs/evidence.md](docs/evidence.md): measured results and their run directories.
-- [docs/changelog.md](docs/changelog.md): what changed, when, at what cost.
+- [docs/changelog/](docs/changelog/) and, before October 14, [docs/changelog.md](docs/changelog.md): what changed, when, at what cost.
 - [docs/governor.md](docs/governor.md): the governor and its limits.
 - [CLAUDE.md](CLAUDE.md): working context and rules for coding agents on this repository.

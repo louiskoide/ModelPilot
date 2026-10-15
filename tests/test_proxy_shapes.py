@@ -1,23 +1,26 @@
 """Request and response shapes the proxy had not been tested on (M1's open gaps: other request shapes, broad client
 compatibility, cancellation; docs/m1-results.md). Each reply comes from a local upstream scripted per test, so nothing
 leaves the machine. Every test asserts byte-for-byte passthrough and accounting that is either correct or explicitly
-unknown (cost_usd None, never a guess). A bug found here is an expectedFailure test naming the fix it needs; the proxy
-itself is not changed by this file."""
+unknown (cost_usd None, never a guess). The three bugs this file found on October 14 (expectedFailure tests then) were
+fixed in proxy.py and cache_probe.py the same day; their tests now pass."""
 import base64
 import gzip
 import hashlib
 import http.client
+import io
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
 import socket
+import struct
 import tempfile
 import threading
 import time
 import unittest
 from modelpilot.bench import accounting
 from modelpilot.bench_report import transport_check
+from modelpilot.cache_probe import priced_usage
 from modelpilot.proxy import MAX_BODY, ProxyServer
 
 MODEL = 'claude-sonnet-4-6'
@@ -57,7 +60,8 @@ TEXT_STREAM = sse(message_start(), {'type': 'content_block_start', 'index': 0, '
 class ShapeUpstream(BaseHTTPRequestHandler):
     """Answers each request as server.reply(seen) says: {'status', 'reason', 'headers': [(name, value)], 'pieces',
     'framing': 'chunked' | 'length' | 'close', 'delay' (between pieces), 'wait' (before the status line),
-    'end': False (a chunked reply cut before its last chunk), 'drop': True (close without replying)}."""
+    'end': False (a chunked reply cut before its last chunk), 'drop': True (close without replying), 'reset': True (reset
+    the connection after the pieces)}. A GET gets the plan's pieces as one JSON reply, or nothing with 'drop'."""
     protocol_version = 'HTTP/1.1'
 
     def log_message(self, *_):
@@ -92,6 +96,14 @@ class ShapeUpstream(BaseHTTPRequestHandler):
                     time.sleep(plan['delay'])
                 self.wfile.write(f'{len(part):x}\r\n'.encode() + part + b'\r\n' if framing == 'chunked' else part)
                 self.wfile.flush()
+            if plan.get('reset'):  # an RST, not a FIN: close every file on the socket, then the socket with linger 0
+                self.close_connection = True
+                self.rfile.close()
+                self.wfile.close()
+                self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+                self.connection.close()
+                self.wfile = io.BytesIO()  # the handler flushes and closes it after do_POST
+                return
             if framing == 'chunked' and plan.get('end', True):
                 self.wfile.write(b'0\r\n\r\n')
                 self.wfile.flush()
@@ -101,6 +113,19 @@ class ShapeUpstream(BaseHTTPRequestHandler):
         finally:
             with self.server.lock:
                 self.server.finished.append(finished)
+
+
+    def do_GET(self):
+        plan = self.server.reply({'path': self.path, 'headers': [(k.lower(), v) for k, v in self.headers.items()]})
+        self.close_connection = True
+        if plan.get('drop'):
+            return
+        body = b''.join(plan.get('pieces', []))
+        self.send_response_only(plan.get('status', 200))
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 class ShapeTests(unittest.TestCase):
@@ -331,7 +356,7 @@ class ShapeTests(unittest.TestCase):
         try:
             self.send(json.dumps({'model': MODEL, 'max_tokens': 8, 'messages': []}).encode())
         except http.client.RemoteDisconnected:
-            pass  # the client gets no reply at all: see the expectedFailure test below
+            pass  # before October 14's fix the client got no reply; it now gets a 502 (test below)
         row, = self.rows()
         self.assertIsNone(row['http_status'])
         self.assert_unknown(row)
@@ -419,13 +444,11 @@ class ShapeTests(unittest.TestCase):
 
     # Bugs found. Each test states the behaviour the proxy should have; proxy.py and cache_probe.py are not changed here.
 
-    @unittest.expectedFailure
     def test_a_reply_that_ran_server_side_web_search_is_priced_with_its_fee_or_left_unknown(self):
-        """BUG: cache_probe.priced_usage prices tokens only and ignores usage.server_tool_use, so a reply that ran the
-        API's server-side web search (Claude Code's WebSearch tool; $10 per 1,000 searches on the pricing page) is logged
-        as a known cost that leaves the search fee out, and logged_usage drops the counter, so the row can't be repriced.
-        Fix: keep numeric server_tool_use counters in logged_usage, and have priced_usage return None when a fee-bearing
-        counter (web_search_requests) is positive unless the model's rates carry that fee."""
+        """Fixed October 14 (an expectedFailure until then): cache_probe.priced_usage priced tokens only and ignored
+        usage.server_tool_use, so a reply that ran the API's server-side web search (Claude Code's WebSearch tool; $10 per
+        1,000 searches) was logged as a known cost without the search fee, and logged_usage dropped the counter. Now the
+        counters are logged and a positive fee-bearing one leaves the cost unknown (no rates table carries the fee)."""
         usage = dict(USAGE, server_tool_use={'web_search_requests': 2})
         streamed = sse(message_start(usage), *message_end(usage))
         replied = json.dumps({'type': 'message', 'model': MODEL, 'content': [], 'usage': usage}).encode()
@@ -434,39 +457,96 @@ class ShapeTests(unittest.TestCase):
                 self.reply({'headers': [('Content-Type', 'application/json')], 'pieces': [body]})
                 self.send(json.dumps({'model': MODEL, 'max_tokens': 8, 'stream': stream_mode, 'messages': [],
                                       'tools': [{'type': 'web_search_20250305', 'name': 'web_search'}]}).encode())
-                cost = self.rows()[-1]['cost_usd']
-                self.assertTrue(cost is None or cost >= USAGE_USD + 2 * 10 / 1000 - 1e-9, cost)
+                row = self.rows()[-1]
+                self.assertTrue(row['cost_usd'] is None or row['cost_usd'] >= USAGE_USD + 2 * 10 / 1000 - 1e-9, row['cost_usd'])
+                self.assertIsNone(row['cost_usd'])  # unknown, not the tokens alone
+                self.assertEqual(row['usage_problem'], 'unpriced_usage')
+                self.assertEqual(row['usage']['server_tool_use'], {'web_search_requests': 2})  # kept for repricing
 
-    @unittest.expectedFailure
+    def test_unmetered_or_zero_server_tool_counters_keep_the_token_price(self):
+        for tools in ({'web_search_requests': 0, 'web_fetch_requests': 3}, {'web_search_requests': 0}):
+            with self.subTest(tools=tools):
+                usage = dict(USAGE, server_tool_use=tools)
+                self.reply({'headers': [('Content-Type', 'application/json')], 'pieces': [json.dumps(
+                    {'type': 'message', 'model': MODEL, 'content': [], 'usage': usage}).encode()]})
+                self.send(json.dumps({'model': MODEL, 'max_tokens': 8, 'messages': []}).encode())
+                row = self.rows()[-1]
+                self.assertAlmostEqual(row['cost_usd'], USAGE_USD)  # web fetch isn't metered
+                self.assertEqual(row['usage']['server_tool_use'], tools)
+        for odd in ({'web_search_requests': -1}, {'code_execution_requests': 1}, {'web_search_requests': '2'}, [1]):
+            self.assertIsNone(priced_usage({'model': MODEL}, MODEL, dict(USAGE, server_tool_use=odd), RATES), odd)
+
+    def test_a_reply_served_by_a_fallback_model_is_left_unknown(self):
+        """M1's "server-side fallback accounting" (October 14 cloud batch): a request sent with server-side fallbacks
+        can be answered by another model (the reply's model names it; usage.iterations lists a fallback_message). The
+        proxy can't tell which model's rates billed which part, so the cost is unknown, never priced at the asked
+        model's rates or the answering model's alone. Claude Code 2.1.284 sends no fallbacks; this pins the rule."""
+        usage = dict(USAGE, iterations=[{'type': 'message', 'model': MODEL}, {'type': 'fallback_message', 'model': 'claude-opus-4-8'}])
+        start = message_start(usage)
+        start['message']['model'] = 'claude-opus-4-8'
+        replies = ((False, json.dumps({'type': 'message', 'model': 'claude-opus-4-8', 'content': [], 'usage': usage}).encode()),
+                   (True, sse(start, *message_end(usage))))
+        for stream_mode, body in replies:
+            with self.subTest(stream=stream_mode):
+                self.reply({'headers': [('Content-Type', 'application/json')], 'pieces': [body]})
+                self.send(json.dumps({'model': MODEL, 'max_tokens': 8, 'stream': stream_mode, 'messages': [],
+                                      'fallbacks': 'default'}).encode())
+                row = self.rows()[-1]
+                self.assertEqual((row['status'], row['model'], row['cost_usd'], row['usage_problem']),
+                                 ('ok', MODEL, None, 'unpriced_usage'))
+                self.assertEqual(accounting([row], {})['cost_usd'], None)
+
     def test_an_upstream_that_closes_without_replying_is_answered_with_a_502(self):
-        """BUG: http.client.RemoteDisconnected (an upstream that closes before its status line) subclasses
-        ConnectionResetError, so ProxyHandler.do_POST's `except (BrokenPipeError, ConnectionResetError)` branch, meant for
-        a client that went away, takes it. The client then gets no reply instead of the 502 the next branch would send,
-        and the row says status connection_closed (the client's side) instead of transport_error with the upstream's
-        error. Accounting is unaffected (cost unknown; bench.accounting and bench_report.transport_check count either
-        status as lost). An upstream reset mid-stream is labelled the same way. Fix: catch http.client.RemoteDisconnected
-        (and ConnectionError raised by conn.request/getresponse/read1) as an upstream failure before the client branch, or
-        mark the client's side by wrapping only self.wfile writes in the connection_closed handler."""
+        """Fixed October 14 (an expectedFailure until then): http.client.RemoteDisconnected (an upstream that closes
+        before its status line) subclasses ConnectionResetError, so do_POST's branch meant for a client that went away
+        took it: the client got no reply instead of a 502, and the row said connection_closed instead of transport_error.
+        Accounting was unaffected (cost unknown, counted as lost either way). Only writes to the client now count as the
+        client going away (proxy.ClientGone)."""
         self.reply({'drop': True})
         status, _, _, _ = self.send(json.dumps({'model': MODEL, 'max_tokens': 8, 'messages': []}).encode())
         self.assertEqual(status, 502)
         row, = self.rows()
         self.assertEqual((row['status'], row['error_type']), ('transport_error', 'RemoteDisconnected'))
+        self.assert_unknown(row)
+        self.assertEqual(accounting([row], {})['transport_failures'], 1)
 
-    @unittest.expectedFailure
+    def test_an_upstream_reset_mid_stream_is_the_upstreams_failure(self):
+        self.reply({'headers': [('Content-Type', 'text/event-stream')], 'pieces': [sse(message_start())], 'reset': True})
+        try:
+            status, _, _, _ = self.send(json.dumps({'model': MODEL, 'max_tokens': 8, 'stream': True, 'messages': []}).encode())
+        except (http.client.IncompleteRead, ConnectionError):
+            status = 200  # the client sees the cut: the proxy had already sent the upstream's status line
+        self.assertEqual(status, 200)
+        row = self.rows()[-1]
+        self.assertEqual((row['http_status'], row['status'], row['error_type']), (200, 'transport_error', 'ConnectionResetError'))
+        self.assert_unknown(row)
+
+    def test_a_catalog_upstream_that_closes_is_answered_with_a_502(self):
+        self.reply({'drop': True})
+        conn = http.client.HTTPConnection('127.0.0.1', self.proxy.server_port, timeout=10)
+        try:
+            conn.request('GET', '/v1/models')
+            self.assertEqual(conn.getresponse().status, 502)
+        finally:
+            conn.close()
+        row, = self.rows()
+        self.assertEqual((row['kind'], row['status'], row['error_type']), ('models', 'transport_error', 'RemoteDisconnected'))
+
     def test_repeated_headers_are_all_forwarded(self):
-        """BUG: proxy.clean_headers builds a dict from HTTPMessage.items(), so of a header sent more than once only the
-        last value is forwarded: two anthropic-beta headers from a client reach the API as one (a beta silently dropped),
-        and two Set-Cookie headers from the API reach the client as one. Low impact for Claude Code (fetch merges repeats
-        into one comma-separated header before sending), but it breaks byte-for-byte passthrough. Fix: return the
-        (name, value) pairs, forward them with putheader/send_header one by one, and drop hop-by-hop names as now."""
+        """Fixed October 14 (an expectedFailure until then): proxy.clean_headers built a dict from HTTPMessage.items(), so
+        of a header sent more than once only the last value was forwarded: two anthropic-beta headers from a client
+        reached the API as one (a beta silently dropped), two Set-Cookie headers from the API reached the client as one.
+        Low impact for Claude Code (fetch merges repeats into one header). It now returns (name, value) pairs, sent one
+        by one, each repeat as its own header."""
         self.reply({'headers': [('Content-Type', 'text/event-stream'), ('Set-Cookie', 'a=1'), ('Set-Cookie', 'b=2')],
                     'pieces': [TEXT_STREAM]})
         _, _, headers, _ = self.send(json.dumps({'model': MODEL, 'max_tokens': 8, 'stream': True, 'messages': []}).encode(),
                                      headers=[('anthropic-beta', 'one-2026-01-01'), ('anthropic-beta', 'two-2026-01-01')])
         forwarded = [v for k, v in self.upstream.received[-1]['headers'] if k == 'anthropic-beta']
         self.assertEqual(sorted(b.strip() for v in forwarded for b in v.split(',')), ['one-2026-01-01', 'two-2026-01-01'])
+        self.assertEqual(forwarded, ['one-2026-01-01', 'two-2026-01-01'])  # two headers, in order, as sent
         self.assertEqual([v for k, v in headers if k == 'set-cookie'], ['a=1', 'b=2'])
+        self.assertEqual(sum(k == 'host' for k, _ in self.upstream.received[-1]['headers']), 1)  # Host once, the upstream's
 
 
 if __name__ == '__main__':

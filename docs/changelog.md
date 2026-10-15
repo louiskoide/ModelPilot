@@ -1,21 +1,80 @@
 # Changelog
 
-Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
+Entries through October 14, 2026, newest first. **New entries go in `docs/changelog/`, one file each** (its README), so parallel branches don't conflict here. Each says what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
-## October 14, 2026: a turn-start risk predictor, pre-registered before any request (Haiku 5.5 reads the instruction and the code)
+## October 14, 2026 (cloud batch): a reply served by a server-side fallback stays unknown cost (test only)
 
-$0, offline, user request (option (a) of the October 14 discussion: "lets try a first then"). Branch `risk-predictor`, stacked on `miss-detector-results`. New `modelpilot/risk_predictor.py`; the pre-registration is `docs/m6-benchmark-plan.md`, "Turn-start risk predictor: pre-registration", committed with the module (SHA-256 recorded there) before any request.
+$0, branch `claude/proxy-fallback-shape` (cloud batch item 9, stacked on `claude/proxy-client-gaps`). One of M1's listed gaps, "server-side fallback accounting", now has a test. A request sent with `fallbacks` and answered by another model can't be split between the two models' rates: the reply names the fallback model, and `usage.iterations` lists a `fallback_message`. The proxy logs it at the asked model with cost unknown (`unpriced_usage`), streamed or not, and the trial's total stays unknown. This was already the rule (`priced_usage` refuses a reply whose model differs from the request's); the test pins it. Claude Code 2.1.284 sends no fallbacks.
 
-- **What it asks:** whether Haiku 5.5, given a task's instruction and the base commit's source it names, picks out the tasks low concise or Sonnet 5.5 medium misses (item 8's M). It would be a turn-start signal for routing an Opus user's risky tasks to Opus. Item 8's features and the post-run detectors failed; Opus finds the misses only by solving.
-- **Fixed in advance:**
-  - Tasks: 66, the 29 dev tasks and item 8's 38 less petersen.
-  - Labels: M on 8 tasks, matching item 8's published labels.
-  - Requests: 3 to Haiku low per task; each task's score is the median risk.
-  - Test: the top third flagged and tested with the hypergeometric. A pass needs 6 of the 8 caught (p 0.014). On a fail, the search for a miss predictor on this benchmark ends.
-- **Said in advance:** the labels were known when the prompt was written, so a pass is a lead that must hold on new tasks, not evidence.
-- **Plan** (offline, nothing sent): 198 requests, expected $0.62, at most $9.98. Every task gets source, 2–90 KB (median 86 KB), after one generic fix found in the plan: a one-file repository (parse) ranked every name at zero.
-- **To run** (API key, the user's call): `python3.12 -m modelpilot.risk_predictor rate --out runs/risk-predictor-<ts> --live --limit-usd 2`, then `score runs/risk-predictor-<ts>`.
-- **Tests:** all 820 offline tests pass on Python 3.12 with the pinned 2.1.284 client, the 3 proxy expected failures among them (`runs/risk-predictor-regression-py312.log`). New: `tests/test_risk_predictor.py` (9: the base commit's source only, never the fix or tests; excerpts within the budget; one request per sample, no retry; the top-third test and verdicts).
+- **Tests:** all 823 offline tests pass on Python 3.12 with the pinned 2.1.284 client, no skips (`runs/cloud-proxy-fallback-shape-regression-py312.log`); one new test in `tests/test_proxy_shapes.py`, which also passes on Python 3.10.20.
+
+## October 14, 2026 (cloud batch): idle plans, options for making one free (DRAFT, for the user's decision)
+
+$0, offline, branch `claude/governor-idle-options` (cloud batch item 6). Nothing built. Details: `docs/governor.md`, "Idle plans: options for making one free".
+
+- **The saving at stake:** following a dry-run idle plan pays the prefix's rewrite twice. Riding on the boundary's request saves one rewrite at the old setting's rate: $0.010–0.033 per boundary for the October 12 session's 4,158 tokens, up to $0.24–0.76 at the compaction check's 95,000-token threshold (Sonnet 5.5 or Opus 5.5, 5m or 1h). An effort-only plan saves less.
+- **Options:**
+  - **(a)** a conditional plan at turn end, shown to the user only: 3–4 h, no rule change.
+  - **(b)** `UserPromptSubmit` holds the prompt at the boundary: 4–6 h, an enforcement change.
+  - **(c)** active mode sets the boundary request's setting in the proxy: 12–20 h plus a live check; gated on the integrated arm's evidence, a rule change.
+  - **(d)** leave it.
+- **Checked offline with the pinned 2.1.284 client** (new `tests/test_hook_outputs.py`, 3 tests, real client against the fixture):
+  - `additionalContext` reaches the model;
+  - a `systemMessage` from `UserPromptSubmit` or `Stop` goes to the user only, as a stream-json `informational` event, never into any request, a resumed turn included;
+  - a `UserPromptSubmit` block sends no request and shows the user the reason and the unsent prompt (`-p` mode ends with $0).
+
+  The interactive UI's display is unverified.
+- **Tests:** all 814 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 3 expected failures (the proxy shapes, fixed on `claude/proxy-shape-fixes`), no skips (`runs/cloud-governor-idle-options-regression-py312.log`). New: `tests/test_hook_outputs.py` (3, real client; skips without node or the pinned client; it also passes on Python 3.10.20).
+
+## October 14, 2026 (cloud batch): the governor's test adapter, built offline, off by default
+
+$0, offline, branch `claude/governor-test-adapter` (cloud batch item 5). New `modelpilot/suite_adapter.py`; details: `docs/governor.md`, "Test adapter".
+
+- **What:** the governor's `Not done` asked for `suite`/`failures` from an explicit test adapter rather than parsed output. A suite is declared in the governor's settings (`MODELPILOT_SUITE`, or `hooks run-suite --spec`) and run by the host, with no shell and no credentials. Its result is read from JUnit XML or the exit status and recorded as an M2 observation (`suite`, `suite_outcome`, `failures`, `tree_hash`).
+- **Safe by construction:** a timeout, a missing or unreadable report, no test run, a nonzero exit with no failure, or a file changing during the run is `unknown`, never a pass. A result lands only if the watched files still hash as when the run started and M2 accepts the revision (acknowledged, lease held). An edit after the run, or a correction or cancellation during it, is refused and journaled. A task with an undelivered correction isn't run at all.
+- **Where:** the `Stop` hook, when a turn really ends: the one point where the agent isn't editing or running its own tests. It is off unless declared; observations only, never a block or a change. **Wall time:** the hook waits for the suite, so a turn's end takes the suite's run time plus about 0.04 s (one watched file) to 0.23 s (500). Without a suite, `Stop` takes 0.003 s (`runs/cloud-governor-test-adapter-timing.json`, a tiny local suite).
+- **Not done:** no live session, and failure text isn't observed. Whether a turn's end may wait for a suite of seconds to minutes is the user's call before it's turned on anywhere.
+- **Tests:** all 827 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 3 expected failures (the proxy shapes, fixed on `claude/proxy-shape-fixes`), no skips (`runs/cloud-governor-test-adapter-regression-py312.log`). New: `tests/test_suite_adapter.py` (16 tests: a pass, a failure, a timeout, the other unknowns including a command that doesn't start, the exit-status mode, a stale result after an edit, a revision fenced by a correction, an undelivered correction, an unchanged tree, declarations, the Stop hook three ways, the coordinator command, M2's new fields); it and the changed `tests/test_hooks.py` and `tests/test_m2.py` modules also pass on Python 3.10.20.
+
+## October 14, 2026 (cloud batch): the Jev launcher test's CI timeout was node's cold start
+
+$0, branch `claude/jev-launch-flake` (cloud batch item 4). `test_jev_accounted_launch.ExplicitClientTests.test_explicit_binary_wins_over_path` timed out (10 s) once on Python 3.14 in #67's push run.
+
+- **Cause: the runner's first node start, not the launcher.** In CI no earlier test runs node (those that do need `work/` and skip), so this test is the job's first node process. Per-test times from the job logs:
+  - **The test itself:** 10.1 s in the failing job (the whole timeout), 2.03 s in its passing re-run, 0.29 s in the 3.10 job.
+  - **Every later launch in the same jobs:** 0.08–0.11 s, including the next test, which starts node twice.
+- **Not reproduced here:** 0 failures in 50 runs and in 50 more under 8 busy loops on 4 CPUs. One launch takes 0.061 s median and 0.084 s at most (0.134 and 0.207 s under load). Its parts: node start-up 0.024 s, node with the stub Jev modules 0.027 s, the child 0.001 s. Node's cold start with the page cache dropped is 0.085 s against 0.032 s warm. `runs/cloud-jev-launch-flake-timing-idle.json`, `-load8.json`.
+- **Fix:** `setUpModule` starts node once, untimed (at most 120 s), before any timed launch. The tests keep their 10 s timeouts and their meaning, which now measure the launcher alone. The launcher is unchanged: its launch path waits on nothing but the child's exit.
+- **Tests:** all 811 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 3 expected failures (the proxy shapes, fixed on `claude/proxy-shape-fixes`), no skips (`runs/cloud-jev-launch-flake-regression-py312.log`); `tests/test_jev_accounted_launch.py` also passes on Python 3.10.20. A flake fix can't start from a failing test: the cold start didn't reproduce here.
+
+## October 14, 2026 (cloud batch): real-client cancellation, chunked uploads and idle streams through the proxy; no bug found
+
+$0, offline, branch `claude/proxy-client-gaps` (cloud batch item 3, stacked on `claude/proxy-shape-fixes`). New `tests/test_proxy_client_gaps.py`; details: `docs/m1-results.md`, "Real-client cancellation, chunked uploads and idle streams".
+
+- **Cancellation, pinned 2.1.284 client in `-p` mode:** for SIGINT, SIGTERM and SIGKILL mid-stream, the proxy closed the upstream before its stream ended and logged one `connection_closed` row of unknown cost, counted once. No signal made the client send another request. SIGINT exits **0** with a result of `error_during_execution`; SIGTERM 143 and SIGKILL −9 leave no result.
+- **Chunked uploads:** forwarded byte for byte with a `Content-Length`; over 32 MiB (in 1 MiB chunks), ambiguous or malformed framing refused with 400 before anything is forwarded.
+- **Idle past the timeout** (lowered to 1 s in the test): the client gets the 200 and `message_start`, then the reply ends; the row is a `transport_error` of unknown cost. The client then **re-sent the request without streaming, despite `CLAUDE_CODE_MAX_RETRIES=0`**, and the session succeeded: the hidden retry `transport_check` found in `bench-20261011-234003`, now reproduced offline and logged as its own row.
+- **Tests:** all 822 offline tests pass on Python 3.12 with the pinned 2.1.284 client, no skips (`runs/cloud-proxy-client-gaps-regression-py312.log`). New: `tests/test_proxy_client_gaps.py` (8: three signals, three chunked-upload cases, two idle-stream cases; the real-client ones skip without node or the pinned client; also passes on Python 3.10.20). `proxy.py` unchanged: no bug found.
+
+## October 14, 2026 (cloud batch): the proxy's three shape bugs fixed
+
+$0, offline, branch `claude/proxy-shape-fixes` (cloud batch item 2). Details: `docs/m1-results.md`, "The three shape bugs fixed".
+
+- **Server-side tool fees:** `logged_usage` keeps `server_tool_use`'s counters, and `priced_usage` leaves a reply's cost unknown when one counts a web search ($10 per 1,000 searches, a fee no rates table here carries) or a counter it doesn't know. Web fetch isn't metered and keeps its token price. Source: the claude-api skill's pricing notes, read October 14. No recorded run's usage has `web_search_requests` above 0 (checked on the main machine on October 14), so no recorded cost changes.
+- **Upstream failures:** only a failed write to the client is the client going away (`ClientGone`, `connection_closed`). An upstream that closes before its status line now gets the client a 502 and logs `transport_error`/`RemoteDisconnected`; a reset mid-stream logs `ConnectionResetError`; `GET /v1/models` too. Accounting is unchanged: both were already lost requests of unknown cost.
+- **Repeated headers** are forwarded as sent, in order (`clean_headers` returns pairs, `send_request` sends them).
+- **Tests:** all 814 offline tests pass on Python 3.12 with the pinned 2.1.284 client, no expected failures left and no skips (`runs/cloud-proxy-shape-fixes-regression-py312.log`). `tests/test_proxy_shapes.py`: the three `expectedFailure` decorators removed, their assertions tightened (a cost of None, the counter logged, two separate headers), and 3 new tests (an upstream reset mid-stream, a catalog upstream that closes, unmetered and malformed counters); each new or fixed test fails on the old code. `tests/test_proxy.py` and the soak's fixtures are unchanged and pass; the proxy test modules also pass on Python 3.10.20.
+
+## October 14, 2026 (cloud batch): review of October 14's scorers; 7 bugs fixed, re-scores queued
+
+$0, offline, branch `claude/oct14-review` (cloud batch item 1; the recorded runs aren't in the container). Details and the main-machine commands: `docs/m6-benchmark-plan.md`, "Review of October 14's scorers".
+
+- **Cross-check (could change every reading of an affected task):** in a tree with no pytest configuration of its own, pytest 8 took ModelPilot's `pyproject.toml` above `runs/` as rootdir, so every selected test read `not_run`, no peer test was kept and nothing flagged. Fixed with `--rootdir`; each task's own-tree outcomes are now in the summary. Which dev tasks were hit needs the main machine's `peer_tests.json` (parse wasn't: it has `.pytest.ini`).
+- **Checklist:** a reply with no known verdict was judged all `missing`, which every `not_met_or_unclear` rule flagged; `json_block` took the text after a fenced diff for the answer; the `--limit-usd` stop skipped a request and went on sending smaller ones; an error added $0 to the stop's counter; and `score` could run once only. Now: unusable, every fenced block tried, a stop for good, errors at their most, `known_usd` (a lower bound) and `unknown_cost` by kind beside `spent_usd`, `score --reparse --out-file`, and unjudged trials listed by why.
+- **`cost_complete: false`** has two sources: an error (no cost; spent counted $0, so a lower bound only if every gap was an error) or a reply `priced_usage` can't price (counted at its most, so no lower bound). `score`'s `cost` block tells which on the recorded run.
+- **`bench_report --router-rates`:** a Jev trial without a routing record priced its router at $0; now unknown.
+- **No bug found** in the checklist's rules and trial selection, the cross-check's peer selection, own-tree filter, `-k` reading (extra matches run, never read: new test), readings and price, `explorer_replay` (nothing that flips "doesn't pay"), or the `m2.State` lock fix.
+- **Tests:** all 826 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 3 expected failures (the proxy shapes), no skips (`runs/cloud-oct14-review-regression-py312.log`). New: 5 in `tests/test_miss_checklist.py`, 10 in `tests/test_miss_crosscheck.py` (8 of them the synthetic task re-run under a `pyproject.toml`), one assertion in `tests/test_bench_report.py`; the three modules also pass on Python 3.10.20. This machine's baseline: 811 pass on clean `main` once the Jev baseline checkout has its pinned dependencies (`runs/cloud-baseline-with-jev-deps-regression-py312.log`); without them 2 Jev tests fail (`runs/cloud-baseline-regression-py312.log`).
 
 ## October 14, 2026: the miss detector's two runs: the checklist flags tasks, not misses; Opus's tests catch misses but checking with Opus costs more than using it
 
@@ -54,6 +113,7 @@ $0, offline, branch `codex/haiku-explorer` (overnight queue item 3, built the da
 - **Expectation, not a result:** the caveman pass found a median 7.9 KB of tool results a trial, so savings are likely small. Step 2 (an arm with `--agents`) is built only if the replay pays.
 - **To run** (the machine with the dev runs, $0): `python3 -m modelpilot.explorer_replay --out runs/explorer-replay-<ts>.json`.
 - **Tests:** all 802 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 9 skipped and the 3 proxy expected failures (`runs/codex-haiku-explorer-regression-py312.log`). New: `tests/test_explorer_replay.py` (7, one trial worked by hand; also passes on Python 3.10.20).
+
 ## October 14, 2026: miss detector, cross-run test check built, not run
 
 $0, offline, branch `codex/miss-crosscheck` (overnight queue item 2, built the day after on the user's request; the dev runs weren't on the machine). New `modelpilot/miss_crosscheck.py`; details: `docs/m6-benchmark-plan.md`, "Miss detector: cross-run test checks".
@@ -63,6 +123,7 @@ $0, offline, branch `codex/miss-crosscheck` (overnight queue item 2, built the d
 - **Found while building:** pytest aborts the whole run when a node id sits in a file that fails to import, which a peer's file importing its own new API does; the check passes files with `-k` instead.
 - **To run** (the machine with the dev runs, $0): `python3 -m modelpilot.miss_crosscheck estimate --out runs/miss-crosscheck-plan-<ts>.json`, then `run --out runs/miss-crosscheck-<ts> --jobs 6`, then `score`. About 1,360 pytest runs over the 453 dev trials; `estimate` gives the hours. A rule flagging at least half the misses at a tolerable false-flag rate gets a holdout pre-registration drafted, not run.
 - **Tests:** all 804 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 9 skipped and the 3 proxy expected failures (`runs/codex-miss-crosscheck-regression-py312.log`). New: `tests/test_miss_crosscheck.py` (9: a synthetic task where a peer's test flags the miss, an invented-API test is noise and a test failing on its own tree is never used; also passes on Python 3.10.20).
+
 ## October 14, 2026: the overnight branches merged; 795 tests pass together
 
 $0, no model request. Merged with merge commits, in order: #63 (sqlglot stage 2 screen), #70 (ledger locks), #72 (Jev launcher path), #69 (proxy shapes), #68 (README), #67 (TypeSafe support), #71 (requirements checklist). #66, the overnight run's `runs/` handoff, was closed unmerged and its files copied to `runs/`.

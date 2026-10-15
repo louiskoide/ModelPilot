@@ -169,6 +169,35 @@ class CrossCheckTests(unittest.TestCase):
         self.assertEqual(len(mx.sample_peers({'key': 'a'}, peers, 16, seed=0)), 10)
 
 
+    def test_tests_k_also_matches_are_run_but_never_read(self):
+        tree = self.root/'k-tree'
+        (tree/'tests').mkdir(parents=True)
+        (tree/'tests'/'test_k.py').write_text('def test_a():\n    pass\n\n\ndef test_a_more():\n    assert False\n\n\n'
+                                              'class TestA:\n    def test_a(self):\n        assert False\n')
+        ran = mx.run_selected(tree, self.task, PYTHON, self.root/'k-run', ['tests/test_k.py::test_a'])
+        self.assertEqual(ran['results'][('tests.test_k', 'test_a_more')]['outcome'], 'failed')  # -k matched it: it ran
+        self.assertEqual(mx.outcome_of(ran['results'], 'tests/test_k.py', 'test_a')['outcome'], 'passed')  # not read
+
+    def test_the_own_tree_outcomes_are_recorded_per_task(self):
+        report = mx.crosscheck(self.trials, {'synthetic': self.task}, self.root/'out', PYTHON, lambda task: self.repo, jobs=2)
+        own = report['summary']['own_tree_outcomes_by_task']['synthetic']
+        self.assertEqual(own, {'failed': 1, 'passed': 3})  # 'bad' fails on its own tree; nothing reads not_run
+        self.assertEqual(report['summary']['errors'], {'trials': 0, 'misses': 0})
+
+
+class UnderAProjectTests(CrossCheckTests):
+    """The same synthetic task with a pyproject.toml above the scratch, as ModelPilot's is above runs/ (October 14
+    review): pytest 8 then takes it as rootdir for a tree with no configuration of its own, and before --rootdir every
+    selected test read as not_run, so no peer test was ever kept and nothing could flag."""
+    def setUp(self):
+        super().setUp()
+        (self.root/'pyproject.toml').write_text('[project]\nname = "outer"\n')
+
+    def test_the_tree_is_the_rootdir(self):
+        found = mx.peer_tests(self.trials[0], self.task, self.repo, PYTHON, self.root/'s'/'pass')
+        self.assertEqual(found['own_outcomes'], {'passed': 1})
+        self.assertEqual(found['kept'], {'tests/test_core.py': ['Shout::test_strips']})
+
 
 class CliTests(unittest.TestCase):
     def test_the_cli_needs_the_dev_runs(self):

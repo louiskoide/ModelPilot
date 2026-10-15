@@ -6,7 +6,7 @@ import unittest
 ROOT = Path(__file__).resolve().parent.parent
 LIMIT_BYTES = 8192
 LIMIT_LINE = 500
-FIX = ('move history to docs/changelog.md, run evidence to docs/evidence.md and module detail to '
+FIX = ('move history to docs/changelog/, run evidence to docs/evidence.md and module detail to '
        'docs/code-map.md; CLAUDE.md keeps the current state and plan')
 
 
