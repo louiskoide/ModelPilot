@@ -41,8 +41,10 @@ class HygieneTests(unittest.TestCase):
         self.assertEqual(found, {})  # the first characters only, never a whole candidate secret
 
     def test_the_scan_catches_what_it_should(self):
-        for sample in ('sk-ant-api03-' + 'A' * 40, 'sk-' + 'b' * 40, 'AKIA' + 'C' * 16, '-----BEGIN RSA PRIVATE KEY-----',
-                       'Bearer ' + 'd' * 30, 'ghp_' + 'e' * 36, 'eyJ' + 'f' * 25 + '.' + 'g' * 15 + '.'):
+        # Each sample is assembled from pieces, so this file's own source doesn't match the scan above.
+        for sample in ('sk-ant-' + 'api03-' + 'A' * 40, 'sk-' + 'b' * 40, 'AKIA' + 'C' * 16,
+                       '-----BEGIN RSA ' + 'PRIVATE KEY-----', 'Bearer ' + 'd' * 30, 'ghp_' + 'e' * 36,
+                       'eyJ' + 'f' * 25 + '.' + 'g' * 15 + '.'):
             match = SECRETS.search(f'x {sample} y')
             self.assertTrue(match and match.group(0) not in DUMMIES, sample[:8])
 
