@@ -25,7 +25,7 @@ Observation-log SHA-256: `907a4f148e1c5560327688092746c7bd069a02280f571be63417d4
 
 ## Remaining M1 work
 
-The dry-run implementation passed its overnight synthetic checks. M1 is not yet certified against actual Claude Code traffic. Next validate API-key-based Claude Code streaming, tool calls, cancellation, headers and usage through the proxy. Subscription OAuth, cloud adapters, chunked client uploads, server-side fallback accounting, tool surcharges (since October 14 a reply whose usage counts a web search is left unknown, not priced on its tokens) and long-running streams beyond the 120-second inactivity timeout remain limitations. Cost scenarios assume a warm source, cold target, unchanged context/output and five-minute TTL; quality and actual remaining task length are unknown. Keep routing disabled.
+The dry-run implementation passed its overnight synthetic checks. M1 is not yet certified against actual Claude Code traffic. Next validate API-key-based Claude Code streaming, tool calls, cancellation, headers and usage through the proxy. Subscription OAuth, cloud adapters, chunked client uploads, server-side fallback accounting (since October 14 a reply served by another model is tested to stay unknown), tool surcharges (since October 14 a reply whose usage counts a web search is left unknown, not priced on its tokens) and long-running streams beyond the 120-second inactivity timeout remain limitations. Cost scenarios assume a warm source, cold target, unchanged context/output and five-minute TTL; quality and actual remaining task length are unknown. Keep routing disabled.
 
 The soak stopped automatically. The overnight follow-up is disabled after this completion report; no further overnight runs are scheduled by this task.
 

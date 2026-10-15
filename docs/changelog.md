@@ -2,6 +2,12 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026 (cloud batch): a reply served by a server-side fallback stays unknown cost (test only)
+
+$0, branch `claude/proxy-fallback-shape` (cloud batch item 9, stacked on `claude/proxy-client-gaps`). One of M1's listed gaps, "server-side fallback accounting", now has a test. A request sent with `fallbacks` and answered by another model can't be split between the two models' rates: the reply names the fallback model, and `usage.iterations` lists a `fallback_message`. The proxy logs it at the asked model with cost unknown (`unpriced_usage`), streamed or not, and the trial's total stays unknown. This was already the rule (`priced_usage` refuses a reply whose model differs from the request's); the test pins it. Claude Code 2.1.284 sends no fallbacks.
+
+- **Tests:** all 823 offline tests pass on Python 3.12 with the pinned 2.1.284 client, no skips (`runs/cloud-proxy-fallback-shape-regression-py312.log`); one new test in `tests/test_proxy_shapes.py`, which also passes on Python 3.10.20.
+
 ## October 14, 2026 (cloud batch): idle plans, options for making one free (DRAFT, for the user's decision)
 
 $0, offline, branch `claude/governor-idle-options` (cloud batch item 6). Nothing built. Details: `docs/governor.md`, "Idle plans: options for making one free".
