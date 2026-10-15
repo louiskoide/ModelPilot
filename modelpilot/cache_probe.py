@@ -128,6 +128,11 @@ def tier(rate, prompt=None, when=None):
     return next(t for t in tiers if t['max_prompt_tokens'] is None or prompt <= t['max_prompt_tokens'])
 
 
+def whole_count(value):
+    """A token count as the API reports one: a whole number, 0 or more (True and 1.0 are not)."""
+    return type(value) is int and value >= 0
+
+
 def cost(usage, rates, ttl, when=None):
     """One response's dollars at a model's rates on its date (when, unix seconds; None: now) and for its prompt."""
     if rates is None:
@@ -135,6 +140,8 @@ def cost(usage, rates, ttl, when=None):
     for key in ('input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens'):
         if key not in usage:
             raise ValueError(f'Missing usage field: {key}')
+        if not whole_count(usage[key]):  # October 15 fuzz: negative, fractional and boolean counts were priced
+            raise ValueError(f'Usage field {key} is not a whole count')
     rates = tier(rates, prompt_tokens(usage), when)
     creation = usage.get('cache_creation')
     total = usage['cache_creation_input_tokens']
@@ -143,7 +150,7 @@ def cost(usage, rates, ttl, when=None):
     else:
         w5 = creation['ephemeral_5m_input_tokens']
         w1 = creation['ephemeral_1h_input_tokens']
-        if w5 + w1 != total:
+        if not (whole_count(w5) and whole_count(w1)) or w5 + w1 != total:
             raise ValueError('Cache write breakdown does not equal total')
     return (usage['input_tokens'] * rates['input'] +
             usage['output_tokens'] * rates['output'] +
@@ -168,6 +175,15 @@ def server_tool_fees_unknown(usage):
                for k, v in tools.items())
 
 
+def fallback_iterations(usage, model):
+    """True when usage.iterations lists a fallback's turn, or a turn by another model than the one asked for: a
+    server-side fallback served part of the reply, so its tokens can't be priced at one model's rates."""
+    iterations = usage.get('iterations')
+    return isinstance(iterations, list) and any(
+        not isinstance(i, dict) or i.get('type') == 'fallback_message' or i.get('model', model) != model
+        for i in iterations)
+
+
 def priced_usage(request, model, usage, rates):
     """Measured cost of one response, or None when any pricing input is ambiguous.
 
@@ -182,8 +198,11 @@ def priced_usage(request, model, usage, rates):
         return None
     if request.get('speed') == 'fast':
         return None
-    # Missing TTL breakdown is ambiguous in real traffic; M0's single-TTL fallback is not used.
-    if usage.get('cache_creation_input_tokens', 0) and 'cache_creation' not in usage:
+    if fallback_iterations(usage, request.get('model')):
+        return None  # another model's turn in this reply: no one model's rates fit (October 15 fuzz)
+    # Missing TTL breakdown is ambiguous in real traffic; M0's single-TTL fallback is not used. A null breakdown is a
+    # missing one (October 15 fuzz: it priced every write at the 5m rate).
+    if usage.get('cache_creation_input_tokens', 0) and not isinstance(usage.get('cache_creation'), dict):
         return None
     try:
         return cost(usage, rates.get(model), '5m')
