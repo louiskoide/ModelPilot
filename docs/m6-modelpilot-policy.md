@@ -234,6 +234,29 @@ User decision, October 11, after item 8's pre-registered test failed (`runs/item
 - **Arms:** `modelpilot`, `modelpilot-delegate`, `modelpilot-for-sonnet` and `modelpilot-for-opus` have `'advisor': None` and no Jev checkout. A trial is eligible without a TypeSafe key, and its cost no longer has an unpriced router part (`cost_scope` `complete`). An arm set back to `'advisor': 'jev'` runs as before: without its key it stays where Jev's answer is needed and is ineligible (`no_advisor`), and a failed answer still means stay. `ActivePolicy(advised=…)` and `switch_policy.decide(advised=…)` carry the difference.
 - **Replayed** ($0, `runs/drop-jev-replay-20261011.py` → `.json`): all 229 journaled decisions of the recorded ModelPilot runs (`modelpilot`, `modelpilot-delegate`, `modelpilot-for-sonnet`; exploration left out), through today's policy with each arm's overrides, give the same action and target with Jev's recorded answer and without an advisor. No `modelpilot-for-opus` run is on record.
 - **Unchanged:** `advisor.py`, `jev_advisor.mjs`, the gate and `policy_replay` stay, for replays of advised runs. ModelPilot arms still need the API key: only fixed arms run on the subscription.
+### Calibration intervals (October 15, overnight cloud run; a report, $0)
+
+Overnight item 15. The policy reads each measured pass rate as `(passed + 1) / (trials + 2)` (`switch_policy.measured_ok`), the mean of a uniform prior's Beta(passed + 1, failed + 1) posterior. That posterior's equal-tailed 95% intervals, for the shipped config (the same for `modelpilot`, `modelpilot-for-sonnet` and `modelpilot-for-opus`, whose overrides don't touch the outcomes; `runs/cloud-overnight-calibration-intervals.json`):
+
+| Setting | Strict passes | Rate read | 95% interval |
+| --- | --- | --- | --- |
+| Sonnet 5.5 low (low concise) | 27/29 | 0.903 | 0.779–0.979 |
+| Sonnet 5.5 medium | 48/52 | 0.907 | 0.818–0.969 |
+| Opus 5.5 medium | 29/29 | 0.968 | 0.884–0.999 |
+| Haiku 5.5 low | 25/29 | 0.839 | 0.693–0.944 |
+| Haiku 5.5 medium | 56/58 | 0.950 | 0.883–0.989 |
+
+- **The intervals overlap:** Sonnet 5.5 low's and medium's almost entirely. These outcomes alone don't separate the two settings, nor either from Opus 5.5.
+- **What `policy_replay --intervals` adds:** for each replayable decision, it decides again with the rates moved within their intervals:
+  - each rate alone at 9 points across its interval, the others at their point values;
+  - all at their low ends, then all at their high ends;
+  - 64 seeded joint draws, each rate uniform within its interval.
+- **What each row records:** its `interval_flips` names every one-at-a-time rate that changes the decision (and to what), the corners that do, and how many draws do. The summary counts the decisions that can flip, by setting.
+- **It is a search, not a proof:** a flip strictly between grid points that the draws also miss is possible.
+- **Not varied:** the quality floor reads per-task outcomes, not these rates, and is left alone. So is Jev's weighted share (0.03).
+- **Decisions are replayed exactly as without the flag** (`tests/test_calibration_intervals.py` checks the rows, the summary and the config file's hash).
+- **Not run on recorded decisions:** none are in the cloud clone. The main-machine command is in the overnight report, `runs/cloud-overnight-20261014/REPORT.md`.
+- **On a synthetic turn start** from Sonnet 5.5 low, with the test fixture's Jev answer, low's rate anywhere in about 0.78–0.83 (the bottom of its interval) would move the decision to Sonnet 5.5 medium. That illustrates the method only; the recorded runs decide what it means.
 
 ## Why a policy is needed
 
