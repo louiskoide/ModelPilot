@@ -140,6 +140,8 @@ class PaidGuardTests(unittest.TestCase):
         if name == 'late_fix':  # a prepared directory with nothing ready: the plan still prints
             (tmp/'late-fix').mkdir()
             (tmp/'late-fix'/'plan.json').write_text(json.dumps({'items': [], 'python': '3.12', 'counts': {}}))
+        if name == 'governed_session':  # a declared suite for --suite
+            (tmp/'suite.json').write_text(json.dumps({'name': 'unit', 'command': ['python3', '-m', 'pytest', '-q']}))
 
     def run_plan(self, row, plan, extra=()):
         tmp = Path(tempfile.mkdtemp(dir=self.root))

@@ -23,16 +23,18 @@ import threading
 import time
 import uuid
 from .governor import Governor, reconcile_log
-from .hooks import COMPACTION_CHECK, EVENTS, channel_declaration
+from .hooks import COMPACTION_CHECK, EVENTS, SUITE, channel_declaration
 from .jev_route_check import TOKEN_FIELDS, check_anthropic_key, parse_events
-from .m5 import IDLE_BOUNDARY_SECONDS
+from .m5 import IDLE_BOUNDARY_SECONDS, idle_boundary
 from .proxy import ProxyServer
 
 ROOT = Path(__file__).resolve().parents[1]
 OWNER = 'claude-client'
 
 
-def hook_settings(env_python=sys.executable):
+def hook_settings(env_python=sys.executable, stop_timeout=None):
+    """The governor's hooks for an isolated settings file. stop_timeout (seconds): the Stop hook's settings timeout,
+    set above a declared suite's so the client doesn't kill the hook (and the suite with it) first."""
     # Absolute module path works wherever the client starts the hook.
     bootstrap = f'import sys; sys.path.insert(0, {str(ROOT)!r}); from modelpilot.hooks import main; main()'
     hooks = {}
@@ -40,8 +42,28 @@ def hook_settings(env_python=sys.executable):
         entry = {'hooks': [{'type': 'command', 'command': f'{shlex.quote(env_python)} -c {shlex.quote(bootstrap)} {event}'}]}
         if event.startswith('PostToolUse'):
             entry['matcher'] = '*'
+        if event == 'Stop' and stop_timeout:
+            entry['hooks'][0]['timeout'] = stop_timeout
         hooks[event] = [entry]
     return {'hooks': hooks}
+
+
+# A Stop hook waits for the declared suite; its timeout leaves this much beyond the suite's own.
+SUITE_HOOK_MARGIN_SECONDS = 30
+
+
+def suite_options(spec):
+    """(hooks environment, Stop hook timeout) for a declared suite (suite_adapter.load_spec), or ({}, None) without."""
+    if not spec:
+        return {}, None
+    return {SUITE: json.dumps(spec)}, int(spec['timeout_seconds']) + SUITE_HOOK_MARGIN_SECONDS
+
+
+def suite_outcome(journal):
+    """What the declared suite did at each turn's end: results landed and refusals, from the journal."""
+    return {'results': [{k: e['payload'].get(k) for k in ('suite', 'outcome', 'failures', 'tests', 'reason')}
+                        for e in journal if e['kind'] == 'suite_result'],
+            'refused': [e['payload'].get('refusal') for e in journal if e['kind'] == 'suite_refused']}
 
 
 def client_env(base, key, dirs, cli, binding):
@@ -54,6 +76,47 @@ def client_env(base, key, dirs, cli, binding):
                DISABLE_AUTOUPDATER='1', CLAUDE_CODE_MAX_RETRIES='0', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1')
     env.update(binding)
     return env
+
+
+def subscription_login(env, token):
+    """A client environment logged in with a Claude subscription token (`claude setup-token`) instead of an API key:
+    the client's own login path, shared with bench's --subscription-arms. The token is a secret and goes only here."""
+    env.pop('ANTHROPIC_API_KEY', None)
+    env['CLAUDE_CODE_OAUTH_TOKEN'] = token
+    return env
+
+
+def subscription_token(prompt=None):
+    """The subscription token from CLAUDE_CODE_OAUTH_TOKEN or a hidden prompt, never echoed, printed or logged; a
+    missing or malformed one stops before anything is sent."""
+    token = (os.environ.get('CLAUDE_CODE_OAUTH_TOKEN') or
+             (prompt or getpass.getpass)('Claude subscription token from `claude setup-token` (hidden): ').strip())
+    if not token or any(c.isspace() for c in token):
+        raise SystemExit('Missing or malformed subscription token. No requests sent.')
+    return token
+
+
+def redacted(text, *secrets):
+    for secret in secrets:
+        if secret and len(secret) >= 8:
+            text = text.replace(secret, '[REDACTED]')
+    return text
+
+
+def subscription_pricing(rows, rates):
+    """A subscription session's dollars as sent and as an API key would have been billed: the subscription client asks
+    for 1h cache writes, which bench_report.api_key_equivalent moves to the 5m rate. Either total is None when a
+    request is unpriced."""
+    from .bench_report import api_key_equivalent
+    messages = [r for r in rows if r.get('kind') == 'messages']
+    equivalent = api_key_equivalent(messages, rates)
+
+    def total(chosen):
+        costs = [r.get('cost_usd') for r in chosen]
+        return sum(costs) if costs and None not in costs else None
+    return {'as_sent_usd': total(messages), 'api_key_equivalent_usd': total(equivalent),
+            'repriced_1h_write_tokens': sum(r.get('repriced_1h_write_tokens') or 0 for r in equivalent),
+            'basis': '1h cache writes (subscription client) priced at the 5m rate an API-key client gets; as sent kept'}
 
 
 def correct_after_first_tool(db, session, limit, task, correction, done, record, when=None):
@@ -76,9 +139,12 @@ def correct_after_first_tool(db, session, limit, task, correction, done, record,
 
 def run_session(run, cli, key, upstream, rates, *, prompt, instruction, correction=None, files=None,
                 model='claude-sonnet-4-6', effort='low', tools='Read', limit_usd=5, budget_usd=.5,
-                max_turns=6, expect=(), forbid=(), timeout=300, policy_upstream=None, correct_when=None):
+                max_turns=6, expect=(), forbid=(), timeout=300, policy_upstream=None, correct_when=None,
+                suite=None, oauth_token=None):
     """policy_upstream: the owned fixtures.FixtureServer, to apply ladder escalations offline.
-    correct_when: a callable; the correction is issued once it returns true instead of after the first tool."""
+    correct_when: a callable; the correction is issued once it returns true instead of after the first tool.
+    suite: a declared test suite (suite_adapter.load_spec) the Stop hook runs at each turn's end (October 15; off by
+    default). oauth_token: log the client in with a Claude subscription token instead of the API key (key unused)."""
     run = Path(run)
     run.mkdir(mode=0o700, parents=True)
     dirs = {name: run/name for name in ('workspace', 'home', 'tmp', 'config')}
@@ -100,11 +166,15 @@ def run_session(run, cli, key, upstream, rates, *, prompt, instruction, correcti
                         governor={'db': db, 'session': session, 'limit_usd': limit_usd, 'task': task}, policy=policy)
     proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
     proxy_thread.start()
+    suite_env, stop_timeout = suite_options(suite)
     settings = run/'settings.json'
-    settings.write_text(json.dumps(hook_settings(), indent=2))
+    settings.write_text(json.dumps(hook_settings(stop_timeout=stop_timeout), indent=2))
     binding = {'MODELPILOT_DB': str(db), 'MODELPILOT_SESSION': session, 'MODELPILOT_LIMIT_USD': str(limit_usd),
-               'MODELPILOT_TASK': task, 'MODELPILOT_OWNER': OWNER, 'MODELPILOT_HOOK_ERRORS': str(run/'hook-errors.jsonl')}
-    env = client_env(os.environ, key, dirs, cli, binding)
+               'MODELPILOT_TASK': task, 'MODELPILOT_OWNER': OWNER, 'MODELPILOT_HOOK_ERRORS': str(run/'hook-errors.jsonl'),
+               **suite_env}
+    env = client_env(os.environ, key or '', dirs, cli, binding)
+    if oauth_token:
+        subscription_login(env, oauth_token)
     env['ANTHROPIC_BASE_URL'] = f'http://127.0.0.1:{proxy.server_port}'
     done, correction_record = threading.Event(), {'issued': False, 'channel_code': code}
     coordinator = None
@@ -120,6 +190,8 @@ def run_session(run, cli, key, upstream, rates, *, prompt, instruction, correcti
                '--settings', str(settings), '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
                '--tools', tools, '--allowedTools', tools]
     report = {'status': 'running', 'mode': 'dry-run' if policy is None else 'fixture-policy', 'model': model, 'effort': effort, 'task_revision_start': revision,
+              'auth': 'subscription' if oauth_token else 'api_key',
+              'suite': {k: suite[k] for k in ('name', 'command', 'timeout_seconds')} if suite else None,
               'limits': f'client stop threshold ${budget_usd:.2f}, max {max_turns} turns; governor limit ${limit_usd} '
                         '(dry-run, never enforced); not a billing cap'}
     stdout = stderr = ''
@@ -138,10 +210,18 @@ def run_session(run, cli, key, upstream, rates, *, prompt, instruction, correcti
         proxy.shutdown()
         proxy_thread.join()
         proxy.server_close()
-        (run/'client.stdout.jsonl').write_text(stdout.replace(key, '[REDACTED]'))
-        (run/'client.stderr.txt').write_text(stderr.replace(key, '[REDACTED]'))
+        (run/'client.stdout.jsonl').write_text(redacted(stdout, key, oauth_token))
+        (run/'client.stderr.txt').write_text(redacted(stderr, key, oauth_token))
         report.update(summarize(run, db, session, limit_usd, task, stdout, correction_record, expect, forbid,
                                 policy is not None))
+        if suite:
+            gov = Governor(db, session, limit_usd)
+            try:
+                report['suite'].update(suite_outcome(gov.journal()))
+            finally:
+                gov.close()
+        if oauth_token:
+            report['pricing'] = subscription_pricing(read_log(run), rates)
         if report['status'] == 'running':
             report['status'] = 'passed' if passed(report, correction, policy is not None) else 'failed'
         with (run/'summary.json').open('x') as f:
@@ -290,14 +370,17 @@ def rebuild_scenario():
 
 def run_rebuild_session(run, cli, key, upstream, rates, *, prompt, instruction, correction, follow_up, final_prompt,
                         files=None, expect=(), forbid=(), model='claude-sonnet-5-5', effort='low', target_effort='medium',
-                        tools='Read', limit_usd=5, budget_usd=.5, max_turns=6, timeout=300, idle=None):
+                        tools='Read', limit_usd=5, budget_usd=.5, max_turns=6, timeout=300, idle=None,
+                        suite=None, oauth_token=None, idle_seconds=REBUILD_IDLE_SECONDS):
     """Four invocations of one isolated session through the governed proxy (dry-run; nothing is applied):
     1. task: the task, corrected during the turn's last model call (correct_at_turn_end);
     then the coordinator queues an effort change and a compaction, and the session idles past 330 s (idle(db, session,
     limit), wait_idle_gap by default);
     2. follow_up: --resume at the same setting; UserPromptSubmit plans the rebuild and shows it to the user;
     3. compact: '/compact', as the plan says; the SessionStart hook reports it;
-    4. rebuilt: --resume at the planned effort; the proxy sees it and the plan is acknowledged as observed."""
+    4. rebuilt: --resume at the planned effort; the proxy sees it and the plan is acknowledged as observed.
+    suite and oauth_token as run_session's. idle_seconds: the wait after the task turn (a subscription session writes
+    1h entries, whose boundary is m5.idle_boundary('1h'))."""
     run = Path(run)
     run.mkdir(mode=0o700, parents=True)
     dirs = {name: run/name for name in ('workspace', 'home', 'tmp', 'config')}
@@ -315,13 +398,16 @@ def run_rebuild_session(run, cli, key, upstream, rates, *, prompt, instruction, 
                         governor={'db': db, 'session': session, 'limit_usd': limit_usd, 'task': task})
     proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
     proxy_thread.start()
+    suite_env, stop_timeout = suite_options(suite)
     settings = run/'settings.json'
-    settings.write_text(json.dumps(hook_settings(), indent=2))
+    settings.write_text(json.dumps(hook_settings(stop_timeout=stop_timeout), indent=2))
     binding = {'MODELPILOT_DB': str(db), 'MODELPILOT_SESSION': session, 'MODELPILOT_LIMIT_USD': str(limit_usd),
                'MODELPILOT_TASK': task, 'MODELPILOT_OWNER': OWNER, 'MODELPILOT_HOOK_ERRORS': str(run/'hook-errors.jsonl'),
                # The scenario tests delivery and observation; on its few thousand tokens compaction never pays.
-               COMPACTION_CHECK: 'off'}
-    env = client_env(os.environ, key, dirs, cli, binding)
+               COMPACTION_CHECK: 'off', **suite_env}
+    env = client_env(os.environ, key or '', dirs, cli, binding)
+    if oauth_token:
+        subscription_login(env, oauth_token)
     env['ANTHROPIC_BASE_URL'] = f'http://127.0.0.1:{proxy.server_port}'
     client_session = str(uuid.uuid4())  # persisted only in this run's own config directory, so it can be resumed
     done, record = threading.Event(), {'issued': False, 'channel_code': code}
@@ -330,6 +416,8 @@ def run_rebuild_session(run, cli, key, upstream, rates, *, prompt, instruction, 
     prompts = {'task': f'{channel_declaration(task, code)}\n\nTask instruction: {instruction}\n\n{prompt}',
                'follow_up': follow_up, 'compact': '/compact', 'rebuilt': final_prompt}
     report = {'status': 'running', 'scenario': 'turn-end-rebuild', 'mode': 'dry-run', 'model': model, 'effort': effort,
+              'auth': 'subscription' if oauth_token else 'api_key', 'idle_seconds': idle_seconds,
+              'suite': {k: suite[k] for k in ('name', 'command', 'timeout_seconds')} if suite else None,
               'target_effort': target_effort, 'compaction_check': binding[COMPACTION_CHECK],
               'task_revision_start': revision, 'invocations': [],
               'limits': f'client stop threshold ${budget_usd:.2f} per invocation, max {max_turns} turns; governor limit '
@@ -349,7 +437,7 @@ def run_rebuild_session(run, cli, key, upstream, rates, *, prompt, instruction, 
                 finally:
                     gov.close()
                 started = time.time()
-                (idle or wait_idle_gap)(db, session, limit_usd)
+                (idle or (lambda *a: wait_idle_gap(*a, seconds=idle_seconds)))(db, session, limit_usd)
                 report['idle_wait_seconds'] = round(time.time() - started, 3)
             command = [str(cli), '-p', prompts[step], '--model', model,
                        '--effort', target_effort if step == 'rebuilt' else effort,
@@ -364,8 +452,8 @@ def run_rebuild_session(run, cli, key, upstream, rates, *, prompt, instruction, 
                                         timeout=timeout, stdin=subprocess.DEVNULL)
                 entry['returncode'] = result.returncode
                 stdouts[step] = result.stdout
-                (run/f'client.{index + 1}-{step}.stdout.jsonl').write_text(result.stdout.replace(key, '[REDACTED]'))
-                (run/f'client.{index + 1}-{step}.stderr.txt').write_text(result.stderr.replace(key, '[REDACTED]'))
+                (run/f'client.{index + 1}-{step}.stdout.jsonl').write_text(redacted(result.stdout, key, oauth_token))
+                (run/f'client.{index + 1}-{step}.stderr.txt').write_text(redacted(result.stderr, key, oauth_token))
             except subprocess.TimeoutExpired:
                 entry['returncode'] = None
                 report['status'] = 'timeout'
@@ -387,6 +475,14 @@ def run_rebuild_session(run, cli, key, upstream, rates, *, prompt, instruction, 
         proxy.server_close()
         report.update(summarize_rebuild(run, db, session, limit_usd, task, report, stdouts, record, expect, forbid,
                                         target_effort))
+        if suite:
+            gov = Governor(db, session, limit_usd)
+            try:
+                report['suite'].update(suite_outcome(gov.journal()))
+            finally:
+                gov.close()
+        if oauth_token:
+            report['pricing'] = subscription_pricing(read_log(run), rates)
         if report['status'] == 'running':
             report['status'] = rebuild_status(report)
         with (run/'summary.json').open('x') as f:
@@ -536,32 +632,74 @@ def main():
     parser.add_argument('--target-effort', default='medium', help='turn-end-rebuild: the effort the rebuild plan moves to')
     parser.add_argument('--budget', type=float, default=.5, help='Client stop threshold, not a billing cap')
     parser.add_argument('--limit-usd', type=float, default=5, help='Dry-run governor limit (never enforced)')
+    parser.add_argument('--suite', type=Path, help='A declared test suite (suite_adapter JSON) the Stop hook runs at '
+                        'each turn\'s end and records as a ledger observation (off unless given)')
+    parser.add_argument('--subscription', action='store_true', help='Log the client in with a Claude subscription '
+                        'token (CLAUDE_CODE_OAUTH_TOKEN, else a hidden prompt with --live) instead of the API key')
     args = parser.parse_args()
     cli = args.claude or Path(shutil.which('claude') or '')
     if not cli.name or not cli.exists():
         raise SystemExit('Claude Code CLI not found; pass --claude.')
+    args.suite_spec = load_suite(args.suite)
     if args.scenario == 'turn-end-rebuild':
         return main_rebuild(args, cli)
     args.model = args.model or 'claude-sonnet-4-6'
     if not args.live:
         print(f'Prepared one governed {args.model}/{args.effort} session: read two files, one mid-flight ledger '
               f'correction delivered by hook, every request reserved/settled in a dry-run governor. Client stop '
-              f'threshold ${args.budget:.2f} (not a hard cap), max 6 turns, no retries, isolated HOME/config. Add --live.')
+              f'threshold ${args.budget:.2f} (not a hard cap), max 6 turns, no retries, isolated HOME/config. '
+              + options_plan(args) + ' Add --live.')
         return
+    config = json.loads((ROOT/'configs/m0.json').read_text())
+    if args.model not in config['rates']:
+        raise SystemExit('Model needs configured rates in configs/m0.json.')
+    key, token = credentials(args)
+    run = ROOT/'runs'/('governed-session-' + time.strftime('%Y%m%d-%H%M%S'))
+    print(f'Running a billable governed session; results: {run}', flush=True)
+    report = run_session(run, cli, key, 'https://api.anthropic.com', config['rates'], model=args.model,
+                         effort=args.effort, budget_usd=args.budget, limit_usd=args.limit_usd,
+                         suite=args.suite_spec, oauth_token=token, **live_scenario())
+    print(json.dumps(report, indent=2))
+    if report['status'] != 'passed':
+        raise SystemExit(1)
+
+
+def load_suite(path):
+    """The --suite declaration, validated before anything runs, or None."""
+    if path is None:
+        return None
+    from .suite_adapter import load_spec
+    try:
+        return load_spec(Path(path).read_text())
+    except (OSError, ValueError) as error:
+        raise SystemExit(f'--suite {path}: {error}. Nothing sent.')
+
+
+def options_plan(args, idle_seconds=None):
+    """The plan's words for --suite and --subscription. The token itself is never read here."""
+    spec = getattr(args, 'suite_spec', None)
+    words = [f"Declared suite {spec['name']!r} ({' '.join(spec['command'])}, at most {spec['timeout_seconds']:g} s) "
+             'run by the Stop hook at each turn\'s end, recorded as a ledger observation, never a block; the hook '
+             f"timeout is {spec['timeout_seconds'] + SUITE_HOOK_MARGIN_SECONDS:g} s." if spec else 'No declared suite.']
+    if args.subscription:
+        words.append('Subscription: the client logs in with a claude setup-token token (CLAUDE_CODE_OAUTH_TOKEN, '
+                     'else a hidden prompt with --live), never in argv, logs or this plan, and asks for 1h cache '
+                     'writes; dollars are reported API-key equivalent (1h writes at the 5m rate), as sent alongside.'
+                     + (f' The idle gap follows the 1h lifetime: {idle_seconds} s.' if idle_seconds else ''))
+    else:
+        words.append('API key (ANTHROPIC_API_KEY, else a hidden prompt with --live).')
+    return ' '.join(words)
+
+
+def credentials(args):
+    """(API key, subscription token) for a live run, one of them None; checked before anything billable is sent."""
+    if args.subscription:
+        return None, subscription_token()
     key = os.environ.get('ANTHROPIC_API_KEY') or getpass.getpass('Anthropic API key (hidden): ').strip()
     problem = check_anthropic_key(key)
     if problem:
         raise SystemExit(problem + ' No billable requests sent.')
-    config = json.loads((ROOT/'configs/m0.json').read_text())
-    if args.model not in config['rates']:
-        raise SystemExit('Model needs configured rates in configs/m0.json.')
-    run = ROOT/'runs'/('governed-session-' + time.strftime('%Y%m%d-%H%M%S'))
-    print(f'Running a billable governed session; results: {run}', flush=True)
-    report = run_session(run, cli, key, 'https://api.anthropic.com', config['rates'], model=args.model,
-                         effort=args.effort, budget_usd=args.budget, limit_usd=args.limit_usd, **live_scenario())
-    print(json.dumps(report, indent=2))
-    if report['status'] != 'passed':
-        raise SystemExit(1)
+    return key, None
 
 
 def main_rebuild(args, cli):
@@ -573,27 +711,29 @@ def main_rebuild(args, cli):
     version = resolve_client(cli)[1]
     problem = client_problem(version)
     steps = len(REBUILD_STEPS)
+    # A subscription session writes 1h entries: the hook's idle boundary is then the hour's (m5.idle_boundary).
+    idle_seconds = idle_boundary('1h') + 5 if args.subscription else REBUILD_IDLE_SECONDS
+    minutes = round(idle_seconds / 60) + 2 if args.subscription else 7
     if not args.live:
-        print(f'Prepared one governed {model} session of {steps} invocations (dry-run governor, API key, isolated '
+        print(f'Prepared one governed {model} session of {steps} invocations (dry-run governor, isolated '
               f'HOME/config, no retries): (1) a two-token read at effort {args.effort}, the ledger correction issued '
               'during the turn\'s last model call, so only the blocked Stop can deliver it; (2) after an idle gap of '
-              f'{REBUILD_IDLE_SECONDS} s, a resumed prompt whose hook shows the queued rebuild ({args.target_effort} '
+              f'{idle_seconds} s, a resumed prompt whose hook shows the queued rebuild ({args.target_effort} '
               f'effort, /compact); (3) /compact; (4) a resumed prompt at effort {args.target_effort}, which the proxy '
               f'should see and acknowledge. Client stop threshold ${args.budget:.2f} per invocation (at most '
               f'${args.budget * steps:.2f} if every invocation reached it; not a hard cap), max 6 turns each. Expected '
-              'about $0.10-0.30 and 7 minutes, most of it the idle gap.' + (f' Client: {problem}' if problem else '')
-              + ' Add --live.')
+              f'about $0.10-0.30 and {minutes} minutes, most of it the idle gap. '
+              + options_plan(args, idle_seconds if args.subscription else None)
+              + (f' Client: {problem}' if problem else '') + ' Add --live.')
         return
     if problem:
         raise SystemExit(problem + ' No billable requests sent.')
-    key = os.environ.get('ANTHROPIC_API_KEY') or getpass.getpass('Anthropic API key (hidden): ').strip()
-    problem = check_anthropic_key(key)
-    if problem:
-        raise SystemExit(problem + ' No billable requests sent.')
+    key, token = credentials(args)
     run = ROOT/'runs'/('governed-rebuild-' + time.strftime('%Y%m%d-%H%M%S'))
-    print(f'Running a billable governed session ({steps} invocations, about 7 minutes); results: {run}', flush=True)
+    print(f'Running a billable governed session ({steps} invocations, about {minutes} minutes); results: {run}', flush=True)
     report = run_rebuild_session(run, cli, key, 'https://api.anthropic.com', table, model=model, effort=args.effort,
                                  target_effort=args.target_effort, budget_usd=args.budget, limit_usd=args.limit_usd,
+                                 suite=args.suite_spec, oauth_token=token, idle_seconds=idle_seconds,
                                  **rebuild_scenario())
     print(json.dumps(report, indent=2))
     if report['status'] != 'passed':

@@ -9,7 +9,8 @@ fixture (jev_compat, thinking_probe's capture-shape) or runs tests on the host i
 plans: argv lists for a plan-only run of a paid module (no --live), which sends nothing; tests/test_paid_guards.py runs
 each with every outbound path trapped. Placeholders: {root} the repository, {tmp} a new empty directory and {claude} a
 Claude Code executable, all the caller's. late_fix's plan reads a prepared directory: {tmp}/late-fix must hold a
-plan.json (`late_fix prepare` writes one; an empty item list will do for a plan).
+plan.json (`late_fix prepare` writes one; an empty item list will do for a plan); governed_session's --suite plan reads a
+suite declaration at {tmp}/suite.json (suite_adapter.load_spec).
 needs: the stop threshold a --live run refuses to start without (checked before anything is sent).
 refusals: messages a plan-only run may stop with instead of a plan, before anything is sent (a missing client).
 """
@@ -43,7 +44,9 @@ COMMANDS = (
     command('explorer_replay', 'Plan item 14: would a Haiku 5.5 read/search explorer pay, on recorded trials ($0)'),
     command('exposure', "Plan item 7: how exposed a change is should it turn out wrong ($0)"),
     command('governed_session', 'One isolated Claude Code session under the dry-run governor', paid=True,
-            plans=[['--claude', '{claude}'], ['--claude', '{claude}', '--scenario', 'turn-end-rebuild']]),
+            plans=[['--claude', '{claude}'], ['--claude', '{claude}', '--scenario', 'turn-end-rebuild'],
+                   ['--claude', '{claude}', '--subscription', '--suite', '{tmp}/suite.json'],
+                   ['--claude', '{claude}', '--scenario', 'turn-end-rebuild', '--subscription']]),
     command('governor', 'The dry-run governor: a demo report of admit, settle, review and rebase ($0)'),
     command('hooks', 'Claude Code hooks for the dry-run governor, and its coordinator commands ($0)'),
     command('jev_check', 'Pinned Jev router-only credential preflight (TypeSafe)', paid=True, plans=[[]]),
