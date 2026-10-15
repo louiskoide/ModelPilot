@@ -150,3 +150,37 @@ Overnight item 7, branch `claude/fuzz`: `tests/test_fuzz.py`, standard library o
 **Streams (default set):** no finding. Bytes were identical every time, there was one row per request, the server kept serving, and no known stream cost disagreed once the reference let an event a little over 1 MiB be priced. Rows carry what the proxy parsed.
 
 **Long run:** two parts, seeds as above. **Usage:** `FUZZ_ITERATIONS=1500000`, 1.5 million dicts in about 2 minutes, no disagreement after the fixes (`runs/cloud-overnight-fuzz-long.log`; the same command's stream part hit the 30-minute limit: the test then read the whole log back after every request, a quadratic cost, fixed to read it as it grows). **Streams:** `FUZZ_ITERATIONS=600000`, 30,000 replies in 422 s. That run found a fifth bug: **a `message_delta` whose usage was `[]` (or a list of pairs) passed `dict.update`**, so the reply was priced on `message_start`'s placeholder output count (125 replies; `runs/cloud-overnight-fuzz-long-streams.log`). `UsageObserver.merge` now takes anything but an object as unreadable usage (`unparseable_event`), with a test that fails on the old code. Rerun on the fix: 30,000 replies in 413 s, nothing found (`runs/cloud-overnight-fuzz-long-streams-2.log`).
+
+## Client compatibility matrix — October 15, 2026 (overnight cloud run, $0, a report only)
+
+Overnight item 9, branch `claude/client-matrix`: `python3 -m modelpilot.client_matrix --versions 2.1.284,2.1.289,2.1.299,2.1.300,2.1.301 --out runs/cloud-overnight-client-matrix`. That is the pin, the version that "retries refused requests", and the newest three on npm on October 15 (2.1.301 was published that day).
+
+Each version is installed into the ignored `work/claude-client-<version>` with an exact npm install, no login and nothing global. It is then driven only against loopback fixtures through the proxy, with an empty `HOME`, a fake key, no inherited environment and `CLAUDE_CODE_MAX_RETRIES=0`. The run takes about 2 minutes. JSON per version is in the cloud run's `runs/cloud-overnight-client-matrix/`; a first run without the permission probe is in `runs/cloud-overnight-client-matrix-first/`. **The pin stays 2.1.284.**
+
+| | 2.1.284 (pin) | 2.1.289 | 2.1.299 | 2.1.300 | 2.1.301 |
+| --- | --- | --- | --- | --- | --- |
+| Request shape against `claude-2.1.284-shape.json` (both models captured; keys, roles, effort, context management) | same | same | same | same | same |
+| Trailing system message (after the prompt and after tool results) | yes | yes | yes | yes | yes |
+| Betas added | — | `afk-mode-2026-01-31`, `dangerous-tool-use-2026-09-03`, `mid-conversation-tool-changes-2026-07-01`, `thinking-display-updates-2026-08-18` | the same four | the same four | the same four |
+| Betas removed | — | — | `mid-conversation-system-2026-04-07` | the same | the same |
+| Cache lifetimes the breakpoints ask for (API key) | 5m | 5m | 5m | 5m | 5m |
+| `/compact` flagged by the proxy (`COMPACTION_MARKER`) | yes | yes | yes | yes | yes |
+| Proxy tokens equal the client's | yes | yes | yes | yes | yes |
+| Hook payloads against `hooks-2.1.280/` (Read, Write, SessionStart, UserPromptSubmit, Stop) | same fields | same fields | same fields | same fields | same fields |
+| `PostToolUseFailure` for a failing Bash | fired | **not fired: the Bash call was refused** (next row) | the same | the same | the same |
+| Permission mode in `-p` with `--allowedTools Bash` | `default` | **`auto`** | `auto` | `auto` | `auto` |
+| One Bash call | runs; 2 requests | **refused; 10 extra non-streamed requests to `claude-sonnet-5`** (the fixture can't answer them) | the same | the same | the same |
+| HTTP 400 on the first request | sent once, exit 1 | **sent again**, then succeeded (exit 0) | the same | the same | the same |
+| HTTP 429 / 529 | sent once, exit 1 | the same | the same | the same | the same |
+| A stream cut after `message_start` | **re-sent without streaming**, succeeded | the same | the same | the same | the same |
+| A stream left idle past the proxy's timeout (2 s here) | **re-sent without streaming**, succeeded | the same | the same | the same | the same |
+
+**What the table shows:**
+- **From 2.1.289 the client starts in `auto` permission mode.** Before a Bash command it asks a classifier on another model, `claude-sonnet-5`: 10 non-streamed requests in a row, despite `CLAUDE_CODE_MAX_RETRIES=0`.
+  - The fixture's reply isn't a verdict, so the command was refused ("Auto mode could not evaluate this action"). Against the real API the classifier would presumably answer; what that costs per Bash call, and how often it refuses, is unmeasured.
+  - With `--permission-mode default` (checked offline on 2.1.289 and 2.1.301) the command runs and nothing extra is sent, as on 2.1.284. Neither bench nor `governed_session` passes `--permission-mode` today.
+- **"2.1.289 retries refused requests" holds offline on every newer version:** a 400 is sent a second time. A 429 or 529 is not.
+- **The hidden non-streaming re-send of a cut or idle stream** is in all five versions, the pin included.
+- Every version still sends the trailing system message the per-message effort and Jev's compat patch rely on, but from 2.1.299 without the `mid-conversation-system-2026-04-07` beta. Whether the API then still accepts mid-conversation system messages is untested.
+- Not covered: the interactive UI, a subscription login, Haiku 5.5's shape, and anything a real API answer would change.
+
