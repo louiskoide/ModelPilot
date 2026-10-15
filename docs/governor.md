@@ -25,6 +25,27 @@ This is item 2 of the work order (`docs/changelog.md`, "Next work, in order"). I
 
 A reservation still pending after its `ttl` is **orphaned**. The governor cannot tell whether that request was billed, for example after a coordinator crash, so accounting becomes incomplete and admission halts. A later `settle(request_id, measured)` reconciles it, for example from the proxy's usage log, and new work resumes. `settle(request_id, None)` leaves it unknown. Orphans are never assigned zero cost. Keep `ttl` above the longest legitimate request (the proxy's upstream timeout is 120 s).
 
+### Crash and kill recovery (October 15, overnight cloud run)
+
+`tests/test_crash_recovery.py` kills processes with SIGKILL at the worst points and checks what is left. $0, loopback only, about 5 s.
+
+- **The proxy, mid-stream.** The client has already received `message_start`, and the proxy hasn't logged the row. Afterwards:
+  - the ledger passes `PRAGMA integrity_check`, the log has no row, and the reservation is pending;
+  - once its ttl passes it is orphaned with unknown cost, and admission halts (`cost_unknown`);
+  - `reconcile_log` finds no row for it, so it stays unknown;
+  - once a row with measured cost for that request ID appears (evidence from elsewhere, such as the provider's console), `reconcile_log` settles it and admission resumes.
+- **Between `admit` and `settle`.** Within its ttl the reservation is pending and counted as reserved. After the ttl it is orphaned with unknown cost, and the policy halts. Measured evidence settles it once (`reconciled` 1); the same value again is idempotent, and a conflicting one is refused. The journal has exactly one settle for it.
+- **A writer inside an M2 transaction.** Nothing it wrote survives, the database passes its check, and the next writer gets the lock.
+- **Hooks killed at random.** 24 real `PostToolUse` hook processes, each killed at a random 0–250 ms (seed 15) or left to finish; both outcomes happened. Afterwards the database passes its check, every event and journal payload parses, the task's revision and acknowledgement are unchanged, and the finished hooks' observations are there.
+- **Four processes racing on one ledger,** one killed mid-loop:
+  - the database passes its check;
+  - no reservation is settled twice: one settle entry per settled request, and `spent_usd` equals the settled sum;
+  - at most one orphan (the killed process's request in flight), with unknown cost, and the policy is complete only without it.
+- **A cut last line in a proxy log.** A proxy killed while writing a row leaves its last line cut.
+  - **Bug, fixed:** every reader raised `JSONDecodeError` on it: `bench.read_rows`, `bench_report.load_run`, `long_session.load_run`, `midtask_compaction.load_run` and `reconcile_log`, shown on the old code.
+  - They now read logs through `proxy.read_log`, where a line that doesn't parse is a Messages row of unknown cost (`status: unreadable_log_row`). The trial's total turns unknown instead of the request vanishing, and nothing counts it $0. `exploration`, `explorer_replay`, `governed_session`, `modelpilot_adapter` and `report` use it too.
+  - Not switched: the live harnesses' own one-shot readers of a log they just wrote (`claude_check`, `jev_compat`, `jev_route_check`, `cache_replication`).
+
 ## Wiring
 
 ### Proxy settlement
