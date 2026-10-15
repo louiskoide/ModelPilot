@@ -2,6 +2,24 @@
 
 Newest first. Each working session adds one dated entry: what changed, what it cost, what it showed, and its run directory or test log. Evidence rows go to `docs/evidence.md`; `CLAUDE.md` holds only the current state and plan.
 
+## October 14, 2026 (cloud batch): idle plans, options for making one free (DRAFT, for the user's decision)
+
+$0, offline, branch `claude/governor-idle-options` (cloud batch item 6). Nothing built. Details: `docs/governor.md`, "Idle plans: options for making one free".
+
+- **The saving at stake:** following a dry-run idle plan pays the prefix's rewrite twice. Riding on the boundary's request saves one rewrite at the old setting's rate: $0.010–0.033 per boundary for the October 12 session's 4,158 tokens, up to $0.24–0.76 at the compaction check's 95,000-token threshold (Sonnet 5.5 or Opus 5.5, 5m or 1h). An effort-only plan saves less.
+- **Options:**
+  - **(a)** a conditional plan at turn end, shown to the user only: 3–4 h, no rule change.
+  - **(b)** `UserPromptSubmit` holds the prompt at the boundary: 4–6 h, an enforcement change.
+  - **(c)** active mode sets the boundary request's setting in the proxy: 12–20 h plus a live check; gated on the integrated arm's evidence, a rule change.
+  - **(d)** leave it.
+- **Checked offline with the pinned 2.1.284 client** (new `tests/test_hook_outputs.py`, 3 tests, real client against the fixture):
+  - `additionalContext` reaches the model;
+  - a `systemMessage` from `UserPromptSubmit` or `Stop` goes to the user only, as a stream-json `informational` event, never into any request, a resumed turn included;
+  - a `UserPromptSubmit` block sends no request and shows the user the reason and the unsent prompt (`-p` mode ends with $0).
+
+  The interactive UI's display is unverified.
+- **Tests:** all 814 offline tests pass on Python 3.12 with the pinned 2.1.284 client, 3 expected failures (the proxy shapes, fixed on `claude/proxy-shape-fixes`), no skips (`runs/cloud-governor-idle-options-regression-py312.log`). New: `tests/test_hook_outputs.py` (3, real client; skips without node or the pinned client; it also passes on Python 3.10.20).
+
 ## October 14, 2026: the Haiku explorer doesn't pay (plan item 14, step 1 result); step 2 not built
 
 $0, the user's run on the main machine of `python3 -m modelpilot.explorer_replay` (branch `codex/haiku-explorer`): `runs/explorer-replay-20261014-111951.json`. Details: `docs/m6-modelpilot-policy.md`, "Helper role: a read/search explorer, step 1", Result.

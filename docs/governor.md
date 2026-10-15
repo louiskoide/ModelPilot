@@ -103,6 +103,57 @@ A rebuild the governor triggers (idle, cache expired, a justified switch) keeps 
 - **Dry-run plans come one prompt late.** `UserPromptSubmit` shows the plan while the prompt that found the boundary goes out. That prompt rewrites the expired entry at the old setting before the user can act, and following the plan then rewrites it again at the new one. So in dry-run an idle boundary never makes a rebuild free: following a plan costs a rewrite at the new setting whenever it's done, and the lifetime-aware boundary only makes the plan's `idle` trigger mean what it says. A rebuild is free only if the change rides on that first request after the expiry. In active mode the proxy could set the model and effort on it, as the benchmark arm's policy does at turn starts; compaction is the client's own request and can't be.
 - **Why the compaction check prices `/compact` on a warm entry.** In this flow it always follows the triggering turn. If it came first after an expiry on a 1h session, it would rewrite the prefix at its own 5m rate, not the hour's: the client marks it 5m whatever the session's lifetime (`proxy.cache_ttls`). Compaction would then pay from about 30,000 tokens. No wired flow does that, so the check doesn't credit it.
 
+#### Idle plans: options for making one free (DRAFT, October 14 cloud batch; for the user's decision, nothing built)
+
+"Cache lifetime" above found that a dry-run idle plan comes one prompt late. The prompt that finds the boundary rewrites the expired entry at the old setting, and following the plan then rewrites it again at the new one. Below are the ways to fix it. None is built; each needs the user's go.
+
+**What one idle boundary costs.** A prefix of P tokens. Today, following the plan pays P at the old setting's write rate *and* P at the new one's. If the change rode on the boundary's own request, only the second would be paid. So a fix saves **P × the old setting's write rate** per idle boundary where the plan is followed.
+- An effort-only plan saves less: the tools and system written at the old effort are read at the new one (2,713 tokens in the October 12 session).
+- A compaction can't ride: it is the client's own request.
+
+Rates: Sonnet 5.5 writes $2.50 (5m) and $4 (1h) per MTok, Opus 5.5 $5 and $8. Prefix sizes are this doc's own figures: the October 12 session (4,158 tokens), the compaction check's 8,000-token base, and its threshold prefix (about 95,000, 5m).
+
+| Old setting, lifetime | P = 4,158 | P = 8,000 | P = 95,000 |
+| --- | --- | --- | --- |
+| Sonnet 5.5, 5m | $0.010 | $0.020 | $0.238 |
+| Sonnet 5.5, 1h | $0.017 | $0.032 | $0.380 |
+| Opus 5.5, 5m | $0.021 | $0.040 | $0.475 |
+| Opus 5.5, 1h | $0.033 | $0.064 | $0.760 |
+
+A 1h boundary saves more each time but comes only after 3,630 s idle, so far less often.
+
+**What the pinned 2.1.284 client shows whom** (checked offline, `tests/test_hook_outputs.py`: the real client in `-p` mode against the fixture, hooks printing fixed JSON):
+- `additionalContext` from `UserPromptSubmit` reaches the model (it is in the request).
+- `systemMessage` from `UserPromptSubmit` or `Stop` goes to the user only. It shows as a stream-json `system`/`informational` event, "`<Event> says: <message>`", level `notice`. It is in no request, including a resumed later turn's.
+- `UserPromptSubmit` returning `decision: block` with a `reason` sends **no request at all**. The user gets a `warning`: "UserPromptSubmit operation blocked by hook:", the reason, and "Original prompt: …", with `prevent_continuation`. `-p` mode then ends as a success with 0 turns and $0.
+- `Stop`'s `decision: block` reason reaches the model, twice (above, "Not done"; the governed-session tests).
+- **Unverified:** how the interactive UI displays a `systemMessage`, and whether a blocked prompt stays in the input box to resend (`-p` mode can't show either).
+
+**The options:**
+
+- **(a) A conditional plan at turn end, shown to the user only.**
+  - **What it changes:** when a change is queued, `Stop` adds a `systemMessage`: "if you'll be away more than 5 minutes (1 hour on a subscription), switch now with `/model …` `/effort …`; the next prompt rewrites the cache anyway". Nothing reaches the model, nothing is blocked, and `observe_setting` acknowledges the plan when the proxy sees the new setting.
+  - **Saves:** the table's figure each time the user steps away past the lifetime and switches. If they switch and come back within it, the switch throws away a warm entry and pays P at the new rate early. On cost alone, switching pays when the chance of a long pause exceeds new rate / (old + new): 50% for an effort-only change, 33% for Opus → Sonnet, 67% for Sonnet → Opus.
+  - **Build:** 3–4 h.
+  - **Risks:** notice noise; it relies on the user's own judgement of the pause; compaction still can't ride.
+  - **Tests:** hook tests (the notice only with a queued change, through `systemMessage`, never `additionalContext`); observed acknowledgement on the next request; the fixture check above.
+  - **Rule change:** none: a suggestion to the user, as today.
+- **(b) `UserPromptSubmit` holds the prompt at the boundary and asks the user to switch and resend.**
+  - **What it changes:** **an enforcement change**. At a known boundary (a lifetime from the proxy's context note, never the 3,630 s default) with a ready plan, the hook returns `decision: block`, its reason giving the plan's steps. The checked client sends nothing, so no old-setting rewrite happens.
+  - **Saves:** the table's figure per boundary, for a resend.
+  - **Build:** 4–6 h, plus an interactive check of the resend.
+  - **Risks:** a wrong boundary blocks a user at a warm entry; it costs the user a resend each time; and whether the prompt survives in the interactive UI is unverified.
+  - **Tests:** hook tests (blocks only with a ready plan and a proxy-known lifetime, once per boundary); the fixture check above; an interactive check.
+  - **Rule change:** yes. Hooks never block the user today, and the governor is dry-run outside the benchmark arm.
+- **(c) Active mode sets the model and effort on the boundary request in the proxy,** as the benchmark arm's policy does at turn starts.
+  - **What it changes:** at the first main-loop request after the boundary, the proxy rewrites the request to the plan's setting (`policy_actions.transform_request`). The client's prompt is unchanged.
+  - **Saves:** the table's figure per boundary, with no user action.
+  - **Build:** 12–20 h, plus a paid live check.
+  - **Risks:** the client shows and accounts for a model it isn't running (the proxy's accounting already handles that for the arm). A thinking-history change is allowed only for verified pairs (`THINKING_HISTORY_VERIFIED`: Sonnet 5.5 ↔ Opus 5.5 and ↔ Haiku 5.5). Compaction can't ride.
+  - **Tests:** proxy tests (rewrite only past the journaled lifetime and only to the plan, the thinking gate, settlement and observation); a real-client fixture run; a live check.
+  - **Rule change:** yes. Active mode is approved for the benchmark arm only. It is gated on evidence: `CLAUDE.md` keeps routing off "until integration has explicit evidence", and "Enforcement" above waits on the integrated arm's measured results (work items 3–4), not yet run. The ModelPilot arm's own evidence so far is that it never left low concise on the 29 tuning tasks.
+- **(d) Leave it as is.** $0 and no build. Every followed idle plan keeps paying the table's figure extra, and an unfollowed plan is just a notice.
+
 ### Fallback execution
 
 `execute_fallback` acts only when the caller passes `allow_calls=True` and the review returned an affordable `would_escalate`. It works in five steps:
@@ -168,5 +219,5 @@ Known interaction: a refused call inside `Worker.dispatch` also sets that worker
 - **Broader live evidence.** The declared channel has two passing live sessions, synthetic Read-only tasks on Sonnet 4.6/low (a tool hook delivered) and Sonnet 5.5/low (the blocked `Stop` delivered). Live observation of writes and failures and an Opus session have not been run. The fallback has one synthetic live pass (October 12, above), on the defer path.
 - **Turn-end delivery and observed rebuilds beyond one session.** Each has one live pass (October 12, above). Claude Code 2.1.284 puts a blocked stop's reason into the next request twice: as a system reminder that begins `Stop hook blocking error from command: <hook command line>` and as `Stop hook feedback:`. Both carry the declared marker, and the model also sees the hook's command line (local paths, no credentials). One live Sonnet 5.5 session accepted a correction framed this way. Rebuild observation relies on the proxy; a hooks-only setup would confirm only compaction. 2.1.284's hook payloads carry no model and only the client's own `effort.level` (on `PreToolUse`, `PostToolUse` and `Stop`), so the wire is used instead.
 - **Test-suite observations.** Only file hashes and failure text are observed. `suite`/`failures` need an explicit test adapter, as M3 has, rather than parsing arbitrary output.
-- **Rebuilds at the boundary.** Dry-run plans reach the user with the prompt that already paid for the expired entry ("Cache lifetime"), so idle plans can't save a rewrite until a change rides on that request.
+- **Rebuilds at the boundary.** Dry-run plans reach the user with the prompt that already paid for the expired entry ("Cache lifetime"), so idle plans can't save a rewrite until a change rides on that request. Four options, with their costs, await the user's decision ("Idle plans: options", DRAFT, October 14).
 - **Enforcement.** Active mode is deliberately unavailable until the integrated arm has measured evidence (work items 3–4, `docs/changelog.md`). The proxy never blocks, and hooks never change the model, effort or context.
