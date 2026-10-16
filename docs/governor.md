@@ -172,6 +172,46 @@ A 1h boundary saves more each time but comes only after 3,630 s idle, so far les
 - **Tests:** `tests/test_suite_adapter.py`, offline on a tiny suite the test controls. Cases: a pass, a failure, a timeout, the other unknowns, the exit-status mode, a stale result after an edit, a revision fenced out by a correction, a task with an undelivered correction, an unchanged tree, declaration checks, the Stop hook (off by default, observes only, a blocked stop runs nothing), the coordinator command and M2's new fields.
 - **Not done.** No live session has run it. Failure text from the suite isn't observed: only counts, as M3 has no parser either. The dev tasks' own suites take seconds to minutes, so a turn's end would wait that long; whether that's acceptable is the user's call before it's turned on anywhere.
 
+### Offline end-to-end check (October 15, overnight cloud run)
+
+`tests/test_e2e_dry_run.py` runs M2 through M5 in one session, all of it dry-run. The pinned 2.1.284 client talks to a recording TCP relay, which feeds `ProxyServer` with the governor flags, which feeds a second recording relay in front of the scripted `FixtureServer`. The hooks come from `governed_session.hook_settings` in an isolated settings file, and `m2_mcp` is the session's MCP server. Everything runs on one ledger and one governor session, with a fake key, an empty `HOME` and loopback only, so it costs $0. It takes about 4.5 s and skips without node or the pinned client. It is test glue only: no production code changed.
+
+**The session**, two invocations of the real client:
+1. **Task turn** at effort low. The model reads `a.txt`, then calls `mcp__modelpilot__expand_output` on an output stored in M2. The page comes back through the MCP server as a tool result, and its marker reaches the next request. Then it writes `notes.txt`. The coordinator corrects the task after the first `PostToolUse`, and the next `PostToolUse` delivers and acknowledges the correction. The model answers with the second token.
+   - The request sent between the correction and its delivery was fenced `stale_task` in the run checked; this depends on timing, so the test doesn't require it.
+2. **Follow-up** (`--resume`) at effort medium. The proxy sees the planned effort on the main loop, and the plan is acknowledged as observed.
+
+**Beside the session, in the same governor:**
+- **M3:** a `file_search` worker's draft, from a fixture transport through `governed_transport`. It is admitted and settled.
+- **M4:** the exact-span verifier accepts that draft and escalates a second one that has no span (`source_span_not_verified`). The escalated draft gets one opt-in `execute_fallback`, which is admitted (enforced, fenced on the reviewed revision), settled and re-verified as accepted.
+- **M5, the idle boundary:** effort `high` then `medium` is queued and coalesced to `medium`, along with a compaction.
+  - On an injected clock (`Governor(clock=)`, no sleep), 300 s after the turn's end defers, and 400 s plans an idle rebuild at the 5m lifetime's 330 s boundary.
+  - `compaction_check` reads the proxy's `context` notes, finds that compaction doesn't pay, and leaves it queued (`deferred_changes`).
+  - The plan stays outstanding until the follow-up's request at effort medium.
+- **M5, the budget halt:** one request through the proxy gets a reply with no usage, which settles as unknown. After it the governor halts: `admit` refuses with `cost_unknown`, review defers, and `execute_fallback` sends nothing.
+
+**What the test asserts:**
+- **Bytes, both ways:** every request body the client sent is the body the fixture received, and every reply body the fixture sent is the one the client got, status included. The relays' bytes are compared after de-framing (the fixture replies chunked, the proxy close-delimited).
+- **Totals:** the proxy rows' tokens equal the client's cumulative `modelUsage` after the resume. The governor's settled spend equals the proxy rows' cost plus the three side calls' cost, worked out by hand from the rates.
+- **Reservations:** none is left pending, and an orphan would have no price. There is one reservation per proxy row and per side call; the refused admission reserved nothing. `reconcile_log` finds exactly one unknown, the no-usage row.
+- **The journal:** sequence numbers only increase, every settle follows its admit, every delivery carries the corrected revision, no entry has `applied: true` and there are no hook errors.
+- **Acknowledgement by observation:** the plan is acknowledged only after `observe_setting(effort, medium)` from the proxy, which comes after the plan in journal order. The effort is drained and the compaction stays queued.
+- **No stale result:**
+  - after the correction, a draft reviewed at the old revision is `reject_stale`;
+  - an observation of the old revision is refused;
+  - M2 recorded no observation of the old revision after its `corrected` event.
+
+**Found:**
+- **The pinned client sends `HEAD /api/hello` at the start of each invocation.** It does so even with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, as a connectivity check. The proxy has no `HEAD` handler, so it answers 501 itself, never forwards it and never logs it, and the client goes on. It is not billable and the accounting is unaffected, but a proxy log never shows it.
+- The injected clock writes its `plan_rebase` entry 400 s ahead of the wall clock, so `created` is out of order for that one entry. Order is checked by `seq`.
+
+**Not wired here (each needs a change or a decision first):**
+- The client never consults M3 or M4. The worker, the verifier and the fallback share the session's ledger and budget, but the coordinator calls them, and their transports are in-process fixtures, so they never appear in the proxy log. Only the governor accounts for them.
+- The hooks' idle boundary runs on wall time. The injected clock drives the coordinator's call to `plan_rebase`, which is the hook's rule. The hook's own path across a real gap is covered by `test_governed_session.py`, with the journaled turn end moved back.
+- Compaction is deferred here, because it doesn't pay on this context. An observed `/compact` is covered by the turn-end-rebuild test.
+- In dry-run the halt stops admission, but the proxy still forwards the client's requests, journaling `would_refuse: cost_unknown`. Only active mode would refuse them, and that is approved for the benchmark arm only.
+- The test adapter (`MODELPILOT_SUITE`) is off, as its default is.
+
 ### Fallback execution
 
 `execute_fallback` acts only when the caller passes `allow_calls=True` and the review returned an affordable `would_escalate`. It works in five steps:
@@ -238,4 +278,5 @@ Known interaction: a refused call inside `Worker.dispatch` also sets that worker
 - **Turn-end delivery and observed rebuilds beyond one session.** Each has one live pass (October 12, above). Claude Code 2.1.284 puts a blocked stop's reason into the next request twice: as a system reminder that begins `Stop hook blocking error from command: <hook command line>` and as `Stop hook feedback:`. Both carry the declared marker, and the model also sees the hook's command line (local paths, no credentials). One live Sonnet 5.5 session accepted a correction framed this way. Rebuild observation relies on the proxy; a hooks-only setup would confirm only compaction. 2.1.284's hook payloads carry no model and only the client's own `effort.level` (on `PreToolUse`, `PostToolUse` and `Stop`), so the wire is used instead.
 - **Test-suite observations.** Built offline October 14 ("Test adapter", above), off by default: a declared suite run by the host at a turn's end. No live session has run it, and the hook waits for the suite.
 - **Rebuilds at the boundary.** Dry-run plans reach the user with the prompt that already paid for the expired entry ("Cache lifetime"), so idle plans can't save a rewrite until a change rides on that request. Four options, with their costs, await the user's decision ("Idle plans: options", DRAFT, October 14).
+- **M3/M4 in a client session.** The offline end-to-end check (October 15, above) runs a worker, the verifier and a fallback beside a real-client session on the same ledger and budget; the client never consults them, and nothing routes a client's draft to them.
 - **Enforcement.** Active mode is deliberately unavailable until the integrated arm has measured evidence (work items 3–4, `docs/changelog.md`). The proxy never blocks, and hooks never change the model, effort or context.
