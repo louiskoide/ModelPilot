@@ -38,7 +38,7 @@ import tempfile
 import threading
 import time
 import uuid
-from . import bench_jev, bench_report, bench_tasks, regrade, switch_policy
+from . import bench_jev, bench_report, bench_tasks, regrade, risk_route, switch_policy
 from .governed_session import client_env, subscription_login, subscription_token
 from .cache_probe import ACCOUNT_MESSAGE
 from .jev_route_check import PATCH, TOKEN_FIELDS, check_anthropic_key, parse_events
@@ -160,6 +160,18 @@ ARMS = {
                             'policy': 'docs/m6-modelpilot-policy.md',
                             'policy_overrides': {'quality_floor': {'enabled': True,
                                                                    'baseline': 'claude-opus-5-5/medium'}}},
+    # Risk-routed, for an Opus user (October 15, after the risk predictor's pre-registered pass; modelpilot.risk_route):
+    # before its first session Haiku 5.5 rates the task as the predictor did, and the task runs as modelpilot-for-opus
+    # at or above the frozen threshold (or unrated), else as modelpilot-for-sonnet. Unflagged tasks run below an Opus
+    # user's floor on the rating's word. New tasks only: it refuses the final split and every batch known at the
+    # pre-registration. No claim until it passes on them.
+    'modelpilot-for-opus-risk': {'kind': 'risk_route', 'model': 'claude-opus-5-5',
+                                 'rater': risk_route.risk_predictor.MODEL, 'threshold': risk_route.THRESHOLD,
+                                 'routes': {'flagged': risk_route.FLAGGED, 'unflagged': risk_route.UNFLAGGED},
+                                 'append_system_prompt': 'bench/prompts/concise.md',  # both routes'
+                                 'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}
+                                                         | {risk_route.risk_predictor.MODEL}),
+                                 'policy': 'docs/m6-modelpilot-policy.md'},
 }
 RUNNABLE = ('fixed', 'jev')
 AUTHS = ('api_key', 'subscription')
@@ -994,6 +1006,41 @@ def modelpilot_manifest(arms, budget_usd, sessions):
             for a in arms if ARMS[a]['kind'] == 'modelpilot'} or None
 
 
+def final_ids(tasks):
+    """The final-split IDs among tasks; none without a splits file."""
+    if not bench_tasks.SPLITS.exists():
+        return set()
+    splits = json.loads(bench_tasks.SPLITS.read_text())
+    return {t['id'] for t in tasks if bench_tasks.split_of(t['id'], splits) == 'final'}
+
+
+def risk_route_manifest(arms, budget_usd, sessions):
+    """What each risk-routed arm ran, for the manifest: the rating as risk_predictor sends it, the frozen threshold,
+    and each route's own ModelPilot manifest; None without one."""
+    predictor = risk_route.risk_predictor
+    return {a: {'rater': {'model': predictor.MODEL, 'effort': predictor.EFFORT, 'samples': predictor.SAMPLES,
+                          'max_tokens': predictor.MAX_TOKENS, 'max_context_bytes': predictor.MAX_CONTEXT_BYTES,
+                          'system_sha256': hashlib.sha256(predictor.SYSTEM.encode()).hexdigest(),
+                          'predictor_sha256': hashlib.sha256(Path(predictor.__file__).read_bytes()).hexdigest()},
+                'threshold': ARMS[a]['threshold'], 'routes': ARMS[a]['routes'], 'unrated': ARMS[a]['routes']['flagged'],
+                'rating_cost': 'added to each trial (accounting.rating_cost_usd); unknown makes the trial unknown',
+                'routed': modelpilot_manifest(list(ARMS[a]['routes'].values()), budget_usd, sessions)}
+            for a in arms if ARMS[a]['kind'] == 'risk_route'} or None
+
+
+def risk_route_plan(arm, rating_max_usd, limit_usd):
+    """The plan's description of a risk-routed arm and both of its routes."""
+    routes = ARMS[arm]['routes']
+    lines = [f'Risk-routed arm {arm}: before its first session each trial sends {risk_route.risk_predictor.SAMPLES} '
+             f'{ARMS[arm]["rater"]} requests rating the task as risk_predictor did (at most ${rating_max_usd:.4f} for '
+             f'all of them, added to their trials); a median risk of {ARMS[arm]["threshold"]} or more, or no usable '
+             f'answer, runs it as {routes["flagged"]}, else as {routes["unflagged"]}, below an Opus user\'s floor. '
+             'New tasks only; no claim until it passes on them. Needs ANTHROPIC_API_KEY in the environment.']
+    for route in routes.values():
+        lines += ['  ' + line for line in modelpilot_plan(route, limit_usd)]
+    return lines
+
+
 def modelpilot_plan(arm, limit_usd):
     """The plan's description of one ModelPilot arm, by what it actually runs: the exploration draw, Jev's advice, or
     (every ModelPilot arm since October 11) the measured rates alone."""
@@ -1042,6 +1089,15 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
     split = shape == 'split'
     if split and any(ARMS[a]['kind'] != 'fixed' for a in arms):
         raise ValueError('The split shape runs fixed arms only')
+    risky = [a for a in arms if ARMS[a]['kind'] == 'risk_route']
+    if risky and sequences:
+        raise ValueError(f'{risky} rate one task before its first session; not supported in sequences')
+    final = final_ids(tasks) if risky else set()
+    refused = risk_route.refused(tasks, final) if risky else {}
+    if refused:
+        raise ValueError(f'{risky} run new tasks only: {refused}')
+    if risky and risk_route.predictor_changed():
+        raise ValueError(f'{risky}: risk_predictor.py is not the pre-registered module')
     if sequences:
         tasks = [t for unit in sequences for t in unit['tasks']]
         unsupported = [a for a in arms if a in long_session.UNSUPPORTED_ARMS]
@@ -1077,6 +1133,7 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
                                       'rate), as-sent alongside, and do not count toward the run budget.')
                 if subscription_arms else None,
                 'modelpilot': modelpilot_manifest(arms, limits.get('budget_usd', 1.0), sessions),
+                'risk_route': risk_route_manifest(arms, limits.get('budget_usd', 1.0), sessions),
                 'sequences': {u['id']: [t['id'] for t in u['tasks']] for u in sequences} if sequences else None,
                 'sequence_preamble': long_session.PREAMBLE if sequences else None,
                 'compact': compact if sequences else None, 'autocompact': autocompact if sequences else None,
@@ -1093,6 +1150,9 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
         json.dump(manifest, f, indent=2)
 
     def default_factory(task, arm, trial_dir, n):
+        if ARMS[arm]['kind'] == 'risk_route':  # rated first, then the routed arm's own trial in the same directory
+            return risk_route.RoutedTrial(task, arm, trial_dir, price_table,
+                                          lambda target: default_factory(task, target, trial_dir, n), final=final)
         subscription = arm in subscription_arms
         if sequences:
             count = len(long_session.plan(len(task['tasks']), gap, compact))
@@ -1211,6 +1271,15 @@ def main():
         raise SystemExit('--gap applies only to --shape followup or sequence.')
     if args.shape == 'split' and any(ARMS[a]['kind'] != 'fixed' for a in arms):
         raise SystemExit('--shape split runs fixed arms only.')
+    risky = [a for a in arms if ARMS[a]['kind'] == 'risk_route']
+    if risky and units:
+        raise SystemExit(f'Not supported in sequences: {", ".join(risky)} (each trial rates one task first).')
+    refused = risk_route.refused(tasks, final_ids(tasks)) if risky else {}
+    if refused:
+        raise SystemExit(f'{", ".join(risky)} run new tasks only; refused: '
+                         + '; '.join(f'{t} ({why})' for t, why in refused.items()) + '. No requests sent.')
+    if risky and risk_route.predictor_changed():
+        raise SystemExit(f'{", ".join(risky)}: risk_predictor.py is not the pre-registered module. No requests sent.')
     subscription_arms = [a for a in args.subscription_arms.split(',') if a]
     wrong = [a for a in subscription_arms if a not in arms or ARMS[a]['kind'] not in SUBSCRIPTION_KINDS]
     if wrong:
@@ -1225,7 +1294,7 @@ def main():
         changed = bench_tasks.check_lock(bench_tasks.load())
         if final and changed:
             raise SystemExit(f'Final task specs changed since the lock: {changed}. Not running.')
-    blocked = [a for a in arms if ARMS[a]['kind'] not in RUNNABLE + ('modelpilot',)]
+    blocked = [a for a in arms if ARMS[a]['kind'] not in RUNNABLE + ('modelpilot', 'risk_route')]
     if blocked:
         raise SystemExit(f'Not runnable yet: {", ".join(blocked)}.')
     jev_arms = [a for a in arms if ARMS[a]['kind'] == 'jev']
@@ -1245,6 +1314,9 @@ def main():
         raise SystemExit(' '.join(problems))
     if args.live and args.run_budget is None:
         raise SystemExit('--live needs --run-budget: known spend at which no further session starts.')
+    if args.live and risky and not os.environ.get('ANTHROPIC_API_KEY'):
+        raise SystemExit(f'{", ".join(risky)} send their ratings with ANTHROPIC_API_KEY from the environment; '
+                         'set it there. No requests sent.')
     python = bench_tasks.interpreter()
     print(f'Preflight: grading {len(tasks)} reference solution(s) with {python} ($0)...', flush=True)
     with tempfile.TemporaryDirectory(prefix='bench-preflight-') as scratch:
@@ -1271,12 +1343,15 @@ def main():
                  f'{args.gap:g} s apart, compaction {args.compact}'
                  + (f', autocompact window {args.autocompact}' if args.autocompact else '') if units else 'single prompt')
         ceiling = session_total * len(api_arms) * args.trials * args.budget  # API-billed sessions only
+        # A risk-routed trial's rating is sent at its first session's start, after the run threshold's check.
+        rating = {t['id']: risk_route.max_cost(t, table) for t in tasks} if risky else {}
+        ceiling += sum(rating.values()) * len(risky) * args.trials
         if args.run_budget is None:
             run_stop, worst = 'No run stop threshold yet (--live needs --run-budget).', ceiling
         else:
             # No new session starts at the run threshold, but the one running can still add its own.
             run_stop = f'Run stop threshold ${args.run_budget:.2f}: no session starts once known spend reaches it.'
-            worst = min(ceiling, args.run_budget + args.budget)
+            worst = min(ceiling, args.run_budget + args.budget + max(rating.values(), default=0.0))
         print(f'Prepared {runs} trials ({len(units or tasks)} {"sequences" if units else "tasks"} × {len(arms)} arms × '
               f'{args.trials}), {shape}, seed {args.seed}, '
               f'max {args.max_turns} turns and ${args.budget:.2f} stop threshold per session. {run_stop} Up to about '
@@ -1293,6 +1368,8 @@ def main():
                   'A usage or rate limit (HTTP 429) excludes the trial and stops the run.')
         for arm in (a for a in arms if ARMS[a]['kind'] == 'modelpilot'):
             print('\n'.join(modelpilot_plan(arm, args.budget * sessions)))
+        for arm in risky:
+            print('\n'.join(risk_route_plan(arm, sum(rating.values()) * args.trials, args.budget * sessions)))
         return
     cli, version = resolve_client(args.claude or shutil.which('claude') or 'claude')
     if client_problem(version):
