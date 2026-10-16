@@ -52,9 +52,10 @@ def loopback(address):
 
 class Traps:
     """Every outbound path, patched to record the attempt and raise before anything leaves the process. The fake
-    client's `--version` (a shell script that prints the pinned version) is the one launch let through."""
+    client's `--version` (a shell script that prints the pinned version) is the one launch let through, matched by
+    real path: bench.resolve_client launches the resolved binary, and macOS's /var is /private/var."""
     def __init__(self, fake_client):
-        self.fake = str(fake_client)
+        self.fake = os.path.realpath(fake_client)
         self.attempts, self.version_checks = [], []
 
     def block(self, what):
@@ -79,7 +80,7 @@ class Traps:
         def guarded_popen(popen, args, *rest, **kwargs):
             argv = shlex.split(args) if isinstance(args, str) else [str(a) for a in args]
             names = {Path(a).name for a in argv} if kwargs.get('shell') or isinstance(args, str) else {Path(argv[0]).name}
-            if argv and argv[0] == traps.fake and argv[1:] == ['--version']:
+            if argv and os.path.realpath(argv[0]) == traps.fake and argv[1:] == ['--version']:
                 traps.version_checks.append(argv)
             elif names & set(CLIENTS):
                 traps.block(f'launch {argv[:3]!r}')
@@ -234,6 +235,21 @@ class PaidGuardTests(unittest.TestCase):
                 os.posix_spawn(self.fake, [self.fake, '-p', 'hi'], {})
         self.assertEqual(str(blocked.exception), 'os.posix_spawn')
         self.assertEqual((traps.attempts, len(traps.version_checks)), (['os.posix_spawn'], 1))
+
+    def test_the_fake_client_passes_by_its_real_path(self):
+        """bench.resolve_client launches the client's real path. On macOS the temporary directory is under /var, a
+        symlink to /private/var, so the fake given as /var/... ran as /private/var/... and was blocked as a client
+        (October 15, the main machine's first run after #86-#100: 3 errors). A symlinked directory shows it anywhere."""
+        link = self.root/'link'
+        link.symlink_to(self.fake.parent, target_is_directory=True)
+        traps = Traps(link/'claude')
+        with traps.active():
+            for path in (os.path.realpath(link/'claude'), link/'claude'):
+                done = subprocess.run([str(path), '--version'], capture_output=True, text=True)
+                self.assertEqual(done.stdout.strip(), '2.1.284 (Claude Code)')
+            with self.assertRaises(Blocked):
+                subprocess.run([os.path.realpath(link/'claude'), '-p', 'hi'])
+        self.assertEqual((len(traps.attempts), len(traps.version_checks)), (1, 2))
 
 
 def mains():
