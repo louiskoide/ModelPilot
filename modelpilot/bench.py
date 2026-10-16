@@ -39,7 +39,7 @@ import threading
 import time
 import uuid
 from . import bench_jev, bench_report, bench_tasks, regrade, switch_policy
-from .governed_session import client_env
+from .governed_session import client_env, subscription_login, subscription_token
 from .cache_probe import ACCOUNT_MESSAGE
 from .jev_route_check import PATCH, TOKEN_FIELDS, check_anthropic_key, parse_events
 from .policy_actions import MODELS as POLICY_TIERS
@@ -666,8 +666,7 @@ class Trial:
             path.mkdir()
         env = client_env(os.environ, self.api_key or '', dirs, self.cli, {})
         if self.auth == 'subscription':  # the client's own login path for a subscription; no API key in its environment
-            env.pop('ANTHROPIC_API_KEY')
-            env['CLAUDE_CODE_OAUTH_TOKEN'] = self.oauth_token
+            subscription_login(env, self.oauth_token)
         if self.arm.get('prompt_cache_ttl'):  # the main conversation's cache lifetime, whatever the login
             env['CLAUDE_CODE_PROMPT_CACHE_TTL'] = self.arm['prompt_cache_ttl']
         # The agent's python3/pip/pytest are the grader's interpreter, not whatever the system has.
@@ -1310,10 +1309,7 @@ def main():
             raise SystemExit(problem + ' No billable requests sent.')
     oauth_token = None
     if subscription_arms:
-        oauth_token = (os.environ.get('CLAUDE_CODE_OAUTH_TOKEN') or
-                       getpass.getpass('Claude subscription token from `claude setup-token` (hidden): ').strip())
-        if not oauth_token or any(c.isspace() for c in oauth_token):
-            raise SystemExit('Missing or malformed subscription token. No requests sent.')
+        oauth_token = subscription_token()
     jev_key = None
     if jev_arms or advised:
         jev_key = (os.environ.get('JEV_API_KEY') or os.environ.get('TYPESAFE_API_KEY')

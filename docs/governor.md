@@ -70,6 +70,26 @@ Coordinator commands use the same environment or `--db/--session/--limit-usd` fl
 
 `tests/test_governed_session.py` runs this offline with the real client, a fake key and the scripted loopback fixture, at $0. It is skipped where `claude` is not installed, including CI.
 
+#### A declared suite and the subscription (October 15, overnight cloud run; both off by default)
+
+Two options for either scenario, both built and tested offline only:
+
+- **`--suite FILE`** validates a test-suite declaration (`suite_adapter.load_spec`, "Test adapter" below) before anything runs. It hands the declaration to the hooks as `MODELPILOT_SUITE`, so the `Stop` hook runs the suite at each turn's real end and lands the result as a ledger observation. Without it, nothing runs.
+  - The `Stop` hook's settings timeout becomes the suite's plus 30 s (`SUITE_HOOK_MARGIN_SECONDS`). Otherwise the client could kill the hook, and with it the suite, before the suite finishes (see "A hook past its timeout").
+  - The plan shows the suite's name, command and limit.
+  - The report adds `suite`: the declaration and every `suite_result`/`suite_refused` in the journal.
+- **`--subscription`** logs the client in with a `claude setup-token` token instead of the API key. The token comes from `CLAUDE_CODE_OAUTH_TOKEN`, else from a hidden prompt, and only with `--live`. It is the same login path as bench's `--subscription-arms`, now shared: `governed_session.subscription_token` and `subscription_login`.
+  - **The token stays secret:** it goes only into the client's environment. It is never in argv or the plan, and it is redacted from the saved client output.
+  - **Pricing:** the subscription client asks for 1h cache writes, so the report adds `pricing`, with `as_sent_usd` and `api_key_equivalent_usd` (1h writes at the 5m rate, `bench_report.api_key_equivalent`). The governor and the proxy still settle as sent.
+  - **The turn-end-rebuild scenario waits longer:** its gap is 3,635 s, the 1h lifetime's boundary (`m5.idle_boundary('1h')`) plus 5 s, because the hook's boundary follows the lifetime the proxy journals. The API-key scenario keeps its 335 s.
+- **Tests:** `tests/test_governed_session_options.py`.
+  - Plans for both scenarios, with nothing asked for and the token never shown.
+  - A bad suite, or a missing token with `--live`, stops before anything is sent.
+  - The pricing on 1h writes.
+  - Two real-client sessions against the fixture. In one the suite runs at the turn's end and lands `pass` with its 2 tests. In the other the client logs in with a fake token: every request reached the fixture with a bearer and no API key, and the token is in no file the run wrote.
+  - `tests/test_paid_guards.py` runs the new plans with every outbound path trapped.
+- **Not done:** no live run. The live commands and their estimates are in the overnight report.
+
 #### Turn-end delivery and an observed rebuild (plan item 12; built October 12, offline)
 
 `python3 -m modelpilot.governed_session --scenario turn-end-rebuild [--live]` gives both offline-only mechanisms their live test in one isolated session of four client invocations, on Sonnet 5.5 (default) with an API key, still dry-run:
