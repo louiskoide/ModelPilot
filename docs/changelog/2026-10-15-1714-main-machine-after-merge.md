@@ -1,0 +1,13 @@
+## October 15, 2026: the main machine after #86–#100: the paid-call guard test failed on macOS, and the grader venv's record was short
+
+$0, no model request, branch `main-machine-after-merge`. The overnight cloud run's 15 PRs merged in order with merge commits (`main` at `f7c401a`, whose tree equals the stack tip's). Its `runs/cloud-overnight-*` files were copied to `runs/` from `claude/overnight-20261014-runs`, which stays unmerged.
+
+- **The full suite on merged `main`, Python 3.12.14 with the pinned 2.1.284 client first on PATH:** 961 tests, 3 errors, no skips (`runs/overnight-20261014-merged-regression-py312.log`). All three were in `tests/test_paid_guards.py`: the plans of `bench` and of `governed_session --scenario turn-end-rebuild`, with and without `--subscription`.
+- **Cause, a test bug:** `bench.resolve_client` launches the client's resolved path. The test's stand-in client sat in a temporary directory under `/var`, which on macOS is a symlink to `/private/var`. It ran as `/private/var/...`, didn't match the `/var/...` path the guard let through, and was blocked as a real client. Linux has no such symlink, so the cloud run and CI passed. No module tried to send anything.
+- **Fix:** the guard matches the stand-in by real path. New `test_the_fake_client_passes_by_its_real_path` uses a symlinked directory, so it fails on the old code on any OS (shown on this Mac before the fix).
+- **`modelpilot.doctor`'s first run here** failed one check: `work/bench/py312` had nine packages that `bench/environment.json` didn't list (attrs 26.1.0, freezegun 1.5.5, hypothesis 6.140.2, pretend 1.0.9, python-dateutil 2.9.0.post0, six 1.17.0, sortedcontainers 2.4.0, tomli_w 1.2.0, typing_extensions 4.15.0).
+  - **The venv didn't change; the record was short.** The nine were installed on September 23 at 11:02, four minutes after pytest and its dependencies (10:58), the day the venv and the file were made (`093ab47`). The site-packages are read-only. Every recorded bench run since used all 14.
+  - **Fix:** the nine added to `packages` at their installed versions, read with `importlib.metadata` as `doctor` reads them. Nothing installed, no recorded result affected. Every `doctor` check passes, exit 0.
+  - **Not checked:** which task suites import which of the nine.
+- **Tests:** 962 offline tests pass on Python 3.12.14 with the pinned 2.1.284 client first on PATH, no skips (`runs/main-machine-after-merge-regression-py312.log`). Python 3.10 isn't installed here; CI runs 3.10 and 3.14.
+- **Changelog names:** the overnight run named its entries `2026-10-15-1700` to `2026-10-16-0700` to sort in stack order, not by clock time, so this entry sorts among them. Until October 16, 07:00, the newest entry isn't the last file in `ls docs/changelog`.
