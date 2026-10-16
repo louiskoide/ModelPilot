@@ -1000,6 +1000,47 @@ The user's run, $0: `runs/miss-crosscheck-20261014-112627` (`--max-peers 16`, se
 - **Descriptive p-values.** These come from many readings on the dev split: 6 checklist rules, 12 cross-check readings and 6 by peer model.
 - **Verdict: no pre-stated reading gives a rule that can pay.** Opus "all" clears the stated bar but loses to running Opus. The Haiku reading is post hoc and rests on about three tasks. Item 8's seed-8 runs (low concise, Sonnet medium, Opus) hold no Haiku trial, so testing it would need new Haiku runs on the holdout tasks. A pre-registration is drafted only on the user's go.
 
+### Turn-start risk predictor: pre-registration (October 14, before any request)
+
+Option (a) of the October 14 discussion, on the user's go: the last cheap try at a predictor, after item 8 (turn-start features) and the miss detector (post-run checks) both failed. Opus found the misses only by solving the task, not from the instruction (item 5) or by reviewing the finished work (+$0.069 a task, rescued none). So this asks whether a cheap model that also reads the code can at least rank the risky tasks. A predictor has to cost far less than the $0.19 a task between low concise and Opus 5.5: Haiku 5.5 here costs about $0.01 a task. `modelpilot/risk_predictor.py` (SHA-256 `35efe96e0e75ab089976ff36ad6afabe57e5728bce98982a4aadf201bef2bf80`) is committed with this section before any request is sent.
+
+**Question.** Can Haiku 5.5, given a task's instruction and the base commit's source it names, pick out the tasks the cheap setting misses? A pass would make it a turn-start signal for sending an Opus user's risky tasks to Opus.
+
+**Predictor (fixed).**
+- **Requests:** 3 per task to Haiku 5.5, effort low, `max_tokens` 6,000, the module's `SYSTEM` prompt, each sent once.
+- **Prompt:** the repository, the instruction, and up to 90,000 bytes of the base commit's non-test Python files that mention a code name from the instruction. Code names are dotted names' parts, calls, names with an underscore or an inner capital, and backticked text; keywords and builtins are left out. Files are ranked by the rarity of the names they mention, and included whole or as excerpts of 30 lines either side of a name.
+- **Never shown:** the reference fix, the hidden tests and the edge suite.
+- **Score:** a task's median `risk` (0–100) over its usable answers. A task with no usable answer stays in the count, never flagged.
+
+**Tasks and labels.** 66 tasks: the 29 dev tuning tasks and item 8's 38 test tasks, less `nx-generalized-petersen` (a defective spec, October 11).
+- **Labels are item 8's:** M means low concise or Sonnet 5.5 medium misses (any counted trial failed), read from the dev split's runs for dev tasks and item 8's seed-8 runs for test tasks. Y_O and Y_S are reported only.
+- **Computed at $0 before this commit:** M on 8 tasks (dev: parse, tomli, ISMAGS; test: 5), Y_O on 6, Y_S on 2. The 37 test tasks' labels match item 8's published ones (`runs/item8-prereg-score-20261011.json`).
+- **Only task-level pass/fail and cost are read;** no diff or transcript.
+
+**Test.** Flag the third of the 66 with the highest score (22; ties at the cut all flagged). k is the number of M tasks flagged, and p = P(K ≥ k) under the hypergeometric (66 tasks, 8 positives, as many draws as flagged). One rule, so no correction.
+- **Pass:** p < 0.05 and k ≥ 4, half the M tasks. With 22 flagged that takes k ≥ 6 (p 0.014; k = 5 gives 0.074).
+- **Fail:** anything else, since M has at least 3 tasks.
+- **Void:** the run doesn't use this commit's module (the plan records the commit), isn't a single `rate --live` pass, or leaves more than 6 tasks with no usable answer.
+
+**Reported, outside the verdict.**
+- Dev and test apart.
+- AUC for M and for Y_O.
+- How many Y_O and Y_S tasks are flagged.
+- For an Opus user: flagged tasks on Opus 5.5 and the rest on low concise, against each setting alone and against an oracle. Per task, at the recorded mean costs plus the rating's own cost, with the Y_O tasks left on low concise.
+
+**What each outcome commits to.**
+- **Pass:** a `modelpilot-for-opus` variant that routes flagged tasks to Opus is built offline. No claim is made until it passes on tasks it has never seen, new ones rather than these 66; the final split stays untouched.
+- **Fail:** there is no turn-start miss predictor. With item 8 and the October 13–14 detectors, the search for one on this benchmark ends. `modelpilot-for-opus` stays on Opus, and option (b), more labelled tasks at $73–146, isn't funded on this result.
+
+**Weaker than item 8, said in advance.** Every label was known when the prompt and the retrieval were written: item 8's result and the dev misses are on record, and the author had read them. The prompt names no task, repository trap or label. One change came after an offline plan, and it is generic: in a one-file repository (parse) every name had zero weight, so its three tasks got no source. A pass is a lead, not evidence; hence the requirement of fresh tasks.
+
+**Cost and commands.** The offline plan (`rate` without `--live`) has 198 requests: expected $0.62, at most $9.98 if every request used every token at the dearest tier. Sequential, about 20–30 minutes. API key, the user's run:
+
+```sh
+python3.12 -m modelpilot.risk_predictor rate --out runs/risk-predictor-<ts> --live --limit-usd 2
+python3.12 -m modelpilot.risk_predictor score runs/risk-predictor-<ts>
+```
+
 ### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
 
 User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku passes, the tests are too easy"), so harder tasks come before item 8's labels, from sqlglot (MIT; surveyed October 4, above), in stages. Stage 1 builds 8 tasks and screens them with one low concise and one Opus 5.5 trial each; a full batch follows only if the repository produces misses. sqlglot joins the tuning split; the final split and its lock are unchanged.
