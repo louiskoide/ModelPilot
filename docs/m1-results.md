@@ -214,3 +214,32 @@ Added time to the first byte (ms, median / p95) and per-request totals:
   - The first full run (preserved as `runs/cloud-overnight-proxy-overhead-first-reset.err`) stopped on a connection reset from the proxy in a 16-client case; the harness then crashed, before it counted failures instead.
   - A Claude Code session rarely has more than a few connections open at once, so this matters only if many clients share one proxy. A one-line fix (`request_queue_size = 64` on `ProxyServer`) changes shipped behaviour, so it is proposed in the overnight report, not made.
 - **Not measured:** TLS to a real upstream, real network latency, a slow or bursty upstream, and HTTP keep-alive (the proxy answers HTTP/1.0 and closes each connection).
+
+## Proxy overhead — October 16, 2026 (main machine, loopback, $0)
+
+The same command on the main machine: `python3 -m modelpilot.proxy_overhead --repeats 5 --out runs/proxy-overhead-mac-20261016.json`, 30 s. Machine: Apple M2, 8 CPUs, 8 GB, macOS (Darwin 25.3.0), Python 3.12.14, with nothing else running. Same cases and counts as above.
+
+Added time to the first byte (ms, median / p95):
+
+| Case | 1 client | 4 clients | 16 clients | 1 client, `--governor-*` | 16 clients, `--governor-*` |
+| --- | --- | --- | --- | --- | --- |
+| 1 KB body | 0.3 / 0.3 | 0.6 / 0.7 | 0.1 / 1.5 | 1.2 / 1.3 | 3.3 / 25.6 |
+| 100 KB body | 0.9 / 1.2 | 1.9 / 2.2 | 1.1 / 3.0 | 1.7 / 1.9 | 5.6 / 69.8 |
+| 1 MB body | 3.9 / 5.0 | 5.7 / 7.0 | 15.2 / 18.8 | 4.3 / 4.7 | 12.6 / 75.4 |
+| 10 MB body | 21.5 / 22.2 | 50.9 / 58.8 | not run | 22.7 / 25.5 | not run |
+| 30 MB body | 60.8 / 69.0 | 127.3 / 145.4 | not run | 61.1 / 68.9 | not run |
+| 10-event stream | 0.3 / 0.4 | 0.6 / 1.1 | 0.9 / 2.5 | 1.3 / 2.5 | 6.5 / 88.6 |
+| 1,000-event stream | 0.4 / 0.5 | 1.3 / 7.7 | 23.5 / 54.5 | 1.8 / 2.3 | 58.0 / 201.6 |
+| 10,000-event stream | 0.5 / 0.5 | 2.5 / 7.8 | 34.0 / 113.7 | 1.8 / 1.9 | 532.5 / 1,238.3 |
+
+- **Against the container:** at one client, half the container's figures or less.
+  - **Upload:** 426 MB/s for 30 MB and 372 for 10 MB at one client, 197 and 161 at four.
+  - **Per event** (µs, median): 8.4 at one client and 10,000 events, 33 at four, 129 at sixteen (95 with the governor flags).
+  - **With the governor flags** at one client, first byte gains about 1 ms (the SQLite admission).
+  - **At sixteen governed clients** the ledger's writes still queue: p95 of 26–89 ms for small requests and 1.24 s to first byte for the 10,000-event stream.
+- **No slow connects:** 0 of the 680 proxied connects in each run waited over 0.5 s, against 129 and 172 in the container. On macOS the default backlog of 5 caused no SYN retry here; the 16-client connect p95 was 31–118 ms.
+- **Whole runs:** 13.2 and 14.5 CPU seconds without and with the governor flags.
+  - Peak resident: 416,336 KiB (about 407 MiB), from the 30 MB bodies as in the container.
+  - On macOS the peak is the largest child so far, so the governed run's figure is the larger of the two runs, not its own.
+- **Every reply body matched**, with no failed request and one log row per request.
+- This is loopback on an idle machine, not proxy overhead against Anthropic: the API's first byte was 1.4–1.8 s in the 3c pilot (`bench-20260923-070044`).
