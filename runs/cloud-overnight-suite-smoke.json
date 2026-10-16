@@ -1,0 +1,1 @@
+{"name": "smoke", "command": ["python3", "-c", "import pathlib; pathlib.Path('.mp-junit.xml').write_text('<testsuites><testsuite name=\"smoke\" tests=\"1\" failures=\"0\" errors=\"0\" skipped=\"0\"/></testsuites>')"], "junit": ".mp-junit.xml", "timeout_seconds": 30, "watch": ["*.txt"]}

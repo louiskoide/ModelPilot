@@ -1,0 +1,1513 @@
+..................................................................----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 40842)
+Traceback (most recent call last):
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 498, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 464, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+........A sonnet-5 0 PASS 0.8
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.8
+..A sonnet-5 0 PASS 0.4
+C sonnet-5 0 PASS 0.4
+B sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.8
+A sonnet-5 0 PASS 0.8
+A sonnet-5 0 PASS 0.8
+............................................................----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 33516)
+Traceback (most recent call last):
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 498, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 464, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+.............................................................................................................effort/0/a/system cold error 
+........ttl/1h/0/claude-sonnet-5-5/past_5m touch_0_1h ok write
+ttl/1h/0/claude-sonnet-5-5/past_5m touch_1_1h ok write
+..effort/0/claude-sonnet-5/system cold error hit
+...........................................................................................................................................................................................................................................F..................................................................----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 53662)
+Traceback (most recent call last):
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 498, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 464, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+...........A sonnet-5 0 PASS 0.8
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.8
+..A sonnet-5 0 PASS 0.4
+C sonnet-5 0 PASS 0.4
+B sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.8
+.A sonnet-5 0 PASS 0.8
+A sonnet-5 0 PASS 0.8
+..............................................----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 58128)
+Traceback (most recent call last):
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 498, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 464, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+................A sonnet-5 0 PASS 0.8
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.8
+..A sonnet-5 0 PASS 0.4
+C sonnet-5 0 PASS 0.4
+B sonnet-5 0 PASS 0.4
+.A sonnet-5 0 PASS 0.8
+A sonnet-5 0 PASS 0.8
+A sonnet-5 0 PASS 0.8
+..............................................................----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 46392)
+Traceback (most recent call last):
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 498, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 464, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+..................................................................................................----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 42642)
+Traceback (most recent call last):
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 498, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 464, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+............................................................................................................effort/0/a/system cold error 
+........ttl/1h/0/claude-sonnet-5-5/past_5m touch_0_1h ok write
+ttl/1h/0/claude-sonnet-5-5/past_5m touch_1_1h ok write
+..effort/0/claude-sonnet-5/system cold error hit
+..................................................................................................................................................effort/0/a/system cold error 
+........ttl/1h/0/claude-sonnet-5-5/past_5m touch_0_1h ok write
+ttl/1h/0/claude-sonnet-5-5/past_5m touch_1_1h ok write
+..effort/0/claude-sonnet-5/system cold error hit
+.....................................................................................................................................EE...............................................................................................................................................................bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/1 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/3 REPAIRED 0.1
+..bench-x/parse-decimal-grouping/arm/3 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/1 REPAIRED 0.1
+.bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.3
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.3
+bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+.....................................................EE....................................................................................................................................................................................bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/1 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/3 REPAIRED 0.1
+..bench-x/parse-decimal-grouping/arm/3 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/1 REPAIRED 0.1
+.bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.3
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.3
+bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+............................................................................................................../root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 529: 'overloaded'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+.........................................................................................................../root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 529: 'overloaded'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+.........................................................................................................----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 46364)
+Traceback (most recent call last):
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 498, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 464, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+....................................................................................................................................control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched error 
+..control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched rejected 
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+control/haiku/tool_continuation/0 seed ok write
+control/haiku/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+effort_down/sonnet/tool_continuation/0 seed ok write
+effort_down/sonnet/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+effort_up/opus/tool_continuation/0 seed ok write
+effort_up/opus/tool_continuation/0 switched ok write
+to_haiku/sonnet/tool_continuation/0 seed ok write
+to_haiku/sonnet/tool_continuation/0 switched ok write
+to_haiku/opus/tool_continuation/0 seed ok write
+/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 400: 'error'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+to_haiku/opus/tool_continuation/0 switched ok write
+from_haiku/tool_continuation/0 seed ok write
+from_haiku/tool_continuation/0 switched ok write
+effort_up/haiku/tool_continuation/0 seed ok write
+effort_up/haiku/tool_continuation/0 switched ok write
+control/sonnet/new_turn/0 seed ok write
+control/sonnet/new_turn/0 switched ok write
+control/opus/new_turn/0 seed ok write
+control/opus/new_turn/0 switched ok write
+control/haiku/new_turn/0 seed ok write
+control/haiku/new_turn/0 switched ok write
+effort_up/sonnet/new_turn/0 seed ok write
+effort_up/sonnet/new_turn/0 switched ok write
+effort_down/sonnet/new_turn/0 seed ok write
+effort_down/sonnet/new_turn/0 switched ok write
+model_up/new_turn/0 seed ok write
+model_up/new_turn/0 switched ok write
+model_down/new_turn/0 seed ok write
+model_down/new_turn/0 switched ok write
+effort_up/opus/new_turn/0 seed ok write
+effort_up/opus/new_turn/0 switched ok write
+to_haiku/sonnet/new_turn/0 seed ok write
+to_haiku/sonnet/new_turn/0 switched ok write
+to_haiku/opus/new_turn/0 seed ok write
+to_haiku/opus/new_turn/0 switched ok write
+from_haiku/new_turn/0 seed ok write
+from_haiku/new_turn/0 switched ok write
+effort_up/haiku/new_turn/0 seed ok write
+effort_up/haiku/new_turn/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+control/haiku/tool_continuation/0 seed ok write
+control/haiku/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+effort_down/sonnet/tool_continuation/0 seed ok write
+effort_down/sonnet/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+effort_up/opus/tool_continuation/0 seed ok write
+effort_up/opus/tool_continuation/0 switched ok write
+to_haiku/sonnet/tool_continuation/0 seed ok write
+to_haiku/sonnet/tool_continuation/0 switched ok write
+to_haiku/opus/tool_continuation/0 seed ok write
+to_haiku/opus/tool_continuation/0 switched ok write
+from_haiku/tool_continuation/0 seed ok write
+from_haiku/tool_continuation/0 switched ok write
+effort_up/haiku/tool_continuation/0 seed ok write
+effort_up/haiku/tool_continuation/0 switched ok write
+control/sonnet/new_turn/0 seed ok write
+control/sonnet/new_turn/0 switched ok write
+control/opus/new_turn/0 seed ok write
+control/opus/new_turn/0 switched ok write
+control/haiku/new_turn/0 seed ok write
+control/haiku/new_turn/0 switched ok write
+effort_up/sonnet/new_turn/0 seed ok write
+effort_up/sonnet/new_turn/0 switched ok write
+effort_down/sonnet/new_turn/0 seed ok write
+effort_down/sonnet/new_turn/0 switched ok write
+model_up/new_turn/0 seed ok write
+model_up/new_turn/0 switched ok write
+model_down/new_turn/0 seed ok write
+model_down/new_turn/0 switched ok write
+effort_up/opus/new_turn/0 seed ok write
+effort_up/opus/new_turn/0 switched ok write
+to_haiku/sonnet/new_turn/0 seed ok write
+to_haiku/sonnet/new_turn/0 switched ok write
+to_haiku/opus/new_turn/0 seed ok write
+to_haiku/opus/new_turn/0 switched ok write
+from_haiku/new_turn/0 seed ok write
+from_haiku/new_turn/0 switched ok write
+effort_up/haiku/new_turn/0 seed ok write
+effort_up/haiku/new_turn/0 switched ok write
+.model_up/new_turn/0 seed ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+.control/sonnet/tool_continuation/0 seed error 
+.model_down/tool_continuation/0 seed ok write
+.model_up/tool_continuation/0 seed ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched rejected 
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+.model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed unpriced write
+.haiku/move_control/tool_continuation/0 seed ok write
+haiku/move_control/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/0 seed ok write
+haiku/native_medium/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/0 step2 ok partial_hit_and_write
+/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 401: 'error'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 429: 'error'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+haiku/native_medium/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 seed ok write
+haiku/move_pm/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 seed ok write
+haiku/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 seed ok write
+haiku/move_pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 seed ok write
+haiku/move_control/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 seed ok write
+haiku/native_medium/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 seed ok write
+haiku/move_pm/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 seed ok write
+haiku/native_xhigh/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 seed ok write
+haiku/move_pm_xhigh/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 step3 ok partial_hit_and_write
+...haiku/move_control/tool_continuation/0 seed ok write
+haiku/move_control/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 seed ok write
+haiku/move_top/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 seed ok write
+haiku/move_pm/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step3 ok partial_hit_and_write
+..Plan (transitions, 2 repeat(s)): 96 requests at most; admission estimates total $11.03 (a conservative upper bound, not a forecast); $8 budget; client shape 2.1.284 (Claude Code); results: /tmp/tmp5ufxn_k9/run
+Dry-run only. Add --live to send paid requests.
+..effort/control/tool_continuation/0 seed ok write
+effort/control/tool_continuation/0 step1 ok partial_hit_and_write
+effort/control/tool_continuation/0 step2 ok partial_hit_and_write
+effort/control/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 seed ok write
+effort/native_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 seed ok write
+effort/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 seed ok write
+effort/top_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 seed ok write
+effort/pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step2 rejected 
+effort/pm_high/tool_continuation/0 seed ok write
+effort/pm_high/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step2 rejected 
+effort/pm_xhigh/tool_continuation/0 seed ok write
+effort/pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step2 rejected 
+effort/pm_xhigh_after/tool_continuation/0 seed ok write
+effort/pm_xhigh_after/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 seed ok write
+effort/pm_xhigh_at_start/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step3 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 seed ok write
+effort/opus_pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step2 rejected 
+..effort/control/tool_continuation/0 seed ok write
+effort/control/tool_continuation/0 step1 ok partial_hit_and_write
+effort/control/tool_continuation/0 step2 ok partial_hit_and_write
+effort/control/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 seed ok write
+effort/native_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 seed ok write
+effort/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 seed ok write
+effort/top_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 seed ok write
+effort/pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 seed ok write
+effort/pm_high/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 seed ok write
+effort/pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 seed ok write
+effort/pm_xhigh_after/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 seed ok write
+effort/pm_xhigh_at_start/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step3 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 seed ok write
+effort/opus_pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step3 ok partial_hit_and_write
+......return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/model_near/tool_continuation/0 return ok partial_hit_and_write
+.return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_near/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 return ok partial_hit_and_write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 rejected 
+...Plan (returns, 2 repeat(s)): 44 requests at most; admission estimates total $8.87 (a conservative upper bound, not a forecast); $8 budget; client shape 2.1.284 (Claude Code); results: /tmp/tmpu_2zfsin/run
+Dry-run only. Add --live to send paid requests.
+...return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_near/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 return ok partial_hit_and_write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/model_near/tool_continuation/0 return ok partial_hit_and_write
+................../root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 401: 'PRIVATE'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+...................................
+======================================================================
+ERROR: test_crashed_process_reservation_becomes_unknown (test_governor.ProcessTests.test_crashed_process_reservation_becomes_unknown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/wt/calib/tests/test_governor.py", line 498, in test_crashed_process_reservation_becomes_unknown
+    process.start()
+    ~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/process.py", line 121, in start
+    self._popen = self._Popen(self)
+                  ~~~~~~~~~~~^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/context.py", line 294, in _Popen
+    return Popen(process_obj)
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/popen_spawn_posix.py", line 32, in __init__
+    super().__init__(process_obj)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/popen_fork.py", line 20, in __init__
+    self._launch(process_obj)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/popen_spawn_posix.py", line 42, in _launch
+    prep_data = spawn.get_preparation_data(process_obj._name)
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/spawn.py", line 164, in get_preparation_data
+    _check_not_importing_main()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/spawn.py", line 140, in _check_not_importing_main
+    raise RuntimeError('''
+    ...<16 lines>...
+    ''')
+RuntimeError: 
+        An attempt has been made to start a new process before the
+        current process has finished its bootstrapping phase.
+
+        This probably means that you are not using fork to start your
+        child processes and you have forgotten to use the proper idiom
+        in the main module:
+
+            if __name__ == '__main__':
+                freeze_support()
+                ...
+
+        The "freeze_support()" line can be omitted if the program
+        is not going to be frozen to produce an executable.
+
+        To fix this issue, refer to the "Safe importing of main module"
+        section in https://docs.python.org/3/library/multiprocessing.html
+        
+
+======================================================================
+ERROR: test_processes_cannot_oversubscribe (test_governor.ProcessTests.test_processes_cannot_oversubscribe)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/wt/calib/tests/test_governor.py", line 484, in test_processes_cannot_oversubscribe
+    with self.ctx.Manager() as manager:
+         ~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/context.py", line 57, in Manager
+    m.start()
+    ~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/managers.py", line 566, in start
+    self._process.start()
+    ~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/process.py", line 121, in start
+    self._popen = self._Popen(self)
+                  ~~~~~~~~~~~^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/context.py", line 294, in _Popen
+    return Popen(process_obj)
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/popen_spawn_posix.py", line 32, in __init__
+    super().__init__(process_obj)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/popen_fork.py", line 20, in __init__
+    self._launch(process_obj)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/popen_spawn_posix.py", line 42, in _launch
+    prep_data = spawn.get_preparation_data(process_obj._name)
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/spawn.py", line 164, in get_preparation_data
+    _check_not_importing_main()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/spawn.py", line 140, in _check_not_importing_main
+    raise RuntimeError('''
+    ...<16 lines>...
+    ''')
+RuntimeError: 
+        An attempt has been made to start a new process before the
+        current process has finished its bootstrapping phase.
+
+        This probably means that you are not using fork to start your
+        child processes and you have forgotten to use the proper idiom
+        in the main module:
+
+            if __name__ == '__main__':
+                freeze_support()
+                ...
+
+        The "freeze_support()" line can be omitted if the program
+        is not going to be frozen to produce an executable.
+
+        To fix this issue, refer to the "Safe importing of main module"
+        section in https://docs.python.org/3/library/multiprocessing.html
+        
+
+----------------------------------------------------------------------
+Ran 961 tests in 392.718s
+
+FAILED (errors=2)
+...........----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 56552)
+Traceback (most recent call last):
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 498, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 464, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+...............................................................................................control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched error 
+..control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched rejected 
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+control/haiku/tool_continuation/0 seed ok write
+control/haiku/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+effort_down/sonnet/tool_continuation/0 seed ok write
+effort_down/sonnet/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+effort_up/opus/tool_continuation/0 seed ok write
+effort_up/opus/tool_continuation/0 switched ok write
+to_haiku/sonnet/tool_continuation/0 seed ok write
+to_haiku/sonnet/tool_continuation/0 switched ok write
+to_haiku/opus/tool_continuation/0 seed ok write
+/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 400: 'error'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+to_haiku/opus/tool_continuation/0 switched ok write
+from_haiku/tool_continuation/0 seed ok write
+from_haiku/tool_continuation/0 switched ok write
+effort_up/haiku/tool_continuation/0 seed ok write
+effort_up/haiku/tool_continuation/0 switched ok write
+control/sonnet/new_turn/0 seed ok write
+control/sonnet/new_turn/0 switched ok write
+control/opus/new_turn/0 seed ok write
+control/opus/new_turn/0 switched ok write
+control/haiku/new_turn/0 seed ok write
+control/haiku/new_turn/0 switched ok write
+effort_up/sonnet/new_turn/0 seed ok write
+effort_up/sonnet/new_turn/0 switched ok write
+effort_down/sonnet/new_turn/0 seed ok write
+effort_down/sonnet/new_turn/0 switched ok write
+model_up/new_turn/0 seed ok write
+model_up/new_turn/0 switched ok write
+model_down/new_turn/0 seed ok write
+model_down/new_turn/0 switched ok write
+effort_up/opus/new_turn/0 seed ok write
+effort_up/opus/new_turn/0 switched ok write
+to_haiku/sonnet/new_turn/0 seed ok write
+to_haiku/sonnet/new_turn/0 switched ok write
+to_haiku/opus/new_turn/0 seed ok write
+to_haiku/opus/new_turn/0 switched ok write
+from_haiku/new_turn/0 seed ok write
+from_haiku/new_turn/0 switched ok write
+effort_up/haiku/new_turn/0 seed ok write
+effort_up/haiku/new_turn/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+control/haiku/tool_continuation/0 seed ok write
+control/haiku/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+effort_down/sonnet/tool_continuation/0 seed ok write
+effort_down/sonnet/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+effort_up/opus/tool_continuation/0 seed ok write
+effort_up/opus/tool_continuation/0 switched ok write
+to_haiku/sonnet/tool_continuation/0 seed ok write
+to_haiku/sonnet/tool_continuation/0 switched ok write
+to_haiku/opus/tool_continuation/0 seed ok write
+to_haiku/opus/tool_continuation/0 switched ok write
+from_haiku/tool_continuation/0 seed ok write
+from_haiku/tool_continuation/0 switched ok write
+effort_up/haiku/tool_continuation/0 seed ok write
+effort_up/haiku/tool_continuation/0 switched ok write
+control/sonnet/new_turn/0 seed ok write
+control/sonnet/new_turn/0 switched ok write
+control/opus/new_turn/0 seed ok write
+control/opus/new_turn/0 switched ok write
+control/haiku/new_turn/0 seed ok write
+control/haiku/new_turn/0 switched ok write
+effort_up/sonnet/new_turn/0 seed ok write
+effort_up/sonnet/new_turn/0 switched ok write
+effort_down/sonnet/new_turn/0 seed ok write
+effort_down/sonnet/new_turn/0 switched ok write
+model_up/new_turn/0 seed ok write
+model_up/new_turn/0 switched ok write
+model_down/new_turn/0 seed ok write
+model_down/new_turn/0 switched ok write
+effort_up/opus/new_turn/0 seed ok write
+effort_up/opus/new_turn/0 switched ok write
+to_haiku/sonnet/new_turn/0 seed ok write
+to_haiku/sonnet/new_turn/0 switched ok write
+to_haiku/opus/new_turn/0 seed ok write
+to_haiku/opus/new_turn/0 switched ok write
+from_haiku/new_turn/0 seed ok write
+from_haiku/new_turn/0 switched ok write
+effort_up/haiku/new_turn/0 seed ok write
+effort_up/haiku/new_turn/0 switched ok write
+.model_up/new_turn/0 seed ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+.control/sonnet/tool_continuation/0 seed error 
+.model_down/tool_continuation/0 seed ok write
+.model_up/tool_continuation/0 seed ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched rejected 
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+.model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed unpriced write
+.haiku/move_control/tool_continuation/0 seed ok write
+haiku/move_control/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/0 seed ok write
+haiku/native_medium/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/0 step2 ok partial_hit_and_write
+/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 401: 'error'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 429: 'error'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+haiku/native_medium/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 seed ok write
+haiku/move_pm/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 seed ok write
+haiku/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 seed ok write
+haiku/move_pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 seed ok write
+haiku/move_control/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 seed ok write
+haiku/native_medium/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 seed ok write
+haiku/move_pm/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 seed ok write
+haiku/native_xhigh/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 seed ok write
+haiku/move_pm_xhigh/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 step3 ok partial_hit_and_write
+...haiku/move_control/tool_continuation/0 seed ok write
+haiku/move_control/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 seed ok write
+haiku/move_top/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 seed ok write
+haiku/move_pm/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step3 ok partial_hit_and_write
+..Plan (transitions, 2 repeat(s)): 96 requests at most; admission estimates total $11.03 (a conservative upper bound, not a forecast); $8 budget; client shape 2.1.284 (Claude Code); results: /tmp/tmpi146071j/run
+Dry-run only. Add --live to send paid requests.
+..effort/control/tool_continuation/0 seed ok write
+effort/control/tool_continuation/0 step1 ok partial_hit_and_write
+effort/control/tool_continuation/0 step2 ok partial_hit_and_write
+effort/control/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 seed ok write
+effort/native_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 seed ok write
+effort/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 seed ok write
+effort/top_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 seed ok write
+effort/pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step2 rejected 
+effort/pm_high/tool_continuation/0 seed ok write
+effort/pm_high/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step2 rejected 
+effort/pm_xhigh/tool_continuation/0 seed ok write
+effort/pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step2 rejected 
+effort/pm_xhigh_after/tool_continuation/0 seed ok write
+effort/pm_xhigh_after/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 seed ok write
+effort/pm_xhigh_at_start/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step3 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 seed ok write
+effort/opus_pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step2 rejected 
+..effort/control/tool_continuation/0 seed ok write
+effort/control/tool_continuation/0 step1 ok partial_hit_and_write
+effort/control/tool_continuation/0 step2 ok partial_hit_and_write
+effort/control/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 seed ok write
+effort/native_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 seed ok write
+effort/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 seed ok write
+effort/top_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 seed ok write
+effort/pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 seed ok write
+effort/pm_high/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 seed ok write
+effort/pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 seed ok write
+effort/pm_xhigh_after/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 seed ok write
+effort/pm_xhigh_at_start/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step3 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 seed ok write
+effort/opus_pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step3 ok partial_hit_and_write
+......return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/model_near/tool_continuation/0 return ok partial_hit_and_write
+.return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_near/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 return ok partial_hit_and_write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 rejected 
+...Plan (returns, 2 repeat(s)): 44 requests at most; admission estimates total $8.87 (a conservative upper bound, not a forecast); $8 budget; client shape 2.1.284 (Claude Code); results: /tmp/tmpvd6ya633/run
+Dry-run only. Add --live to send paid requests.
+...return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_near/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 return ok partial_hit_and_write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/model_near/tool_continuation/0 return ok partial_hit_and_write
+................./root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 401: 'PRIVATE'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+...................................
+======================================================================
+ERROR: test_crashed_process_reservation_becomes_unknown (test_governor.ProcessTests.test_crashed_process_reservation_becomes_unknown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/wt/calib/tests/test_governor.py", line 498, in test_crashed_process_reservation_becomes_unknown
+    process.start()
+    ~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/process.py", line 121, in start
+    self._popen = self._Popen(self)
+                  ~~~~~~~~~~~^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/context.py", line 294, in _Popen
+    return Popen(process_obj)
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/popen_spawn_posix.py", line 32, in __init__
+    super().__init__(process_obj)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/popen_fork.py", line 20, in __init__
+    self._launch(process_obj)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/popen_spawn_posix.py", line 42, in _launch
+    prep_data = spawn.get_preparation_data(process_obj._name)
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/spawn.py", line 164, in get_preparation_data
+    _check_not_importing_main()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/spawn.py", line 140, in _check_not_importing_main
+    raise RuntimeError('''
+    ...<16 lines>...
+    ''')
+RuntimeError: 
+        An attempt has been made to start a new process before the
+        current process has finished its bootstrapping phase.
+
+        This probably means that you are not using fork to start your
+        child processes and you have forgotten to use the proper idiom
+        in the main module:
+
+            if __name__ == '__main__':
+                freeze_support()
+                ...
+
+        The "freeze_support()" line can be omitted if the program
+        is not going to be frozen to produce an executable.
+
+        To fix this issue, refer to the "Safe importing of main module"
+        section in https://docs.python.org/3/library/multiprocessing.html
+        
+
+======================================================================
+ERROR: test_processes_cannot_oversubscribe (test_governor.ProcessTests.test_processes_cannot_oversubscribe)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/wt/calib/tests/test_governor.py", line 484, in test_processes_cannot_oversubscribe
+    with self.ctx.Manager() as manager:
+         ~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/context.py", line 57, in Manager
+    m.start()
+    ~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/managers.py", line 566, in start
+    self._process.start()
+    ~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/process.py", line 121, in start
+    self._popen = self._Popen(self)
+                  ~~~~~~~~~~~^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/context.py", line 294, in _Popen
+    return Popen(process_obj)
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/popen_spawn_posix.py", line 32, in __init__
+    super().__init__(process_obj)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/popen_fork.py", line 20, in __init__
+    self._launch(process_obj)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/popen_spawn_posix.py", line 42, in _launch
+    prep_data = spawn.get_preparation_data(process_obj._name)
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/spawn.py", line 164, in get_preparation_data
+    _check_not_importing_main()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/spawn.py", line 140, in _check_not_importing_main
+    raise RuntimeError('''
+    ...<16 lines>...
+    ''')
+RuntimeError: 
+        An attempt has been made to start a new process before the
+        current process has finished its bootstrapping phase.
+
+        This probably means that you are not using fork to start your
+        child processes and you have forgotten to use the proper idiom
+        in the main module:
+
+            if __name__ == '__main__':
+                freeze_support()
+                ...
+
+        The "freeze_support()" line can be omitted if the program
+        is not going to be frozen to produce an executable.
+
+        To fix this issue, refer to the "Safe importing of main module"
+        section in https://docs.python.org/3/library/multiprocessing.html
+        
+
+----------------------------------------------------------------------
+Ran 961 tests in 391.275s
+
+FAILED (errors=2)
+E.......................................................................................................................bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/1 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/3 REPAIRED 0.1
+..bench-x/parse-decimal-grouping/arm/3 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+bench-x/parse-decimal-grouping/arm/1 REPAIRED 0.1
+.bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.3
+bench-x/parse-decimal-grouping/arm/0 REPAIRED 0.3
+bench-x/parse-decimal-grouping/arm/2 REPAIRED 0.1
+............................................................................................................./root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 529: 'overloaded'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+................................................................................................................----------------------------------------
+Exception occurred during processing of request from ('127.0.0.1', 38666)
+Traceback (most recent call last):
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 697, in process_request_thread
+    self.finish_request(request, client_address)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 362, in finish_request
+    self.RequestHandlerClass(request, client_address, self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socketserver.py", line 766, in __init__
+    self.handle()
+    ~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 498, in handle
+    self.handle_one_request()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/http/server.py", line 464, in handle_one_request
+    self.raw_requestline = self.rfile.readline(65537)
+                           ~~~~~~~~~~~~~~~~~~~^^^^^^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/socket.py", line 729, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+----------------------------------------
+...............................................................................................control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched error 
+..control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched rejected 
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+control/haiku/tool_continuation/0 seed ok write
+control/haiku/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+effort_down/sonnet/tool_continuation/0 seed ok write
+effort_down/sonnet/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+effort_up/opus/tool_continuation/0 seed ok write
+effort_up/opus/tool_continuation/0 switched ok write
+to_haiku/sonnet/tool_continuation/0 seed ok write
+to_haiku/sonnet/tool_continuation/0 switched ok write
+to_haiku/opus/tool_continuation/0 seed ok write
+/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 400: 'error'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+to_haiku/opus/tool_continuation/0 switched ok write
+from_haiku/tool_continuation/0 seed ok write
+from_haiku/tool_continuation/0 switched ok write
+effort_up/haiku/tool_continuation/0 seed ok write
+effort_up/haiku/tool_continuation/0 switched ok write
+control/sonnet/new_turn/0 seed ok write
+control/sonnet/new_turn/0 switched ok write
+control/opus/new_turn/0 seed ok write
+control/opus/new_turn/0 switched ok write
+control/haiku/new_turn/0 seed ok write
+control/haiku/new_turn/0 switched ok write
+effort_up/sonnet/new_turn/0 seed ok write
+effort_up/sonnet/new_turn/0 switched ok write
+effort_down/sonnet/new_turn/0 seed ok write
+effort_down/sonnet/new_turn/0 switched ok write
+model_up/new_turn/0 seed ok write
+model_up/new_turn/0 switched ok write
+model_down/new_turn/0 seed ok write
+model_down/new_turn/0 switched ok write
+effort_up/opus/new_turn/0 seed ok write
+effort_up/opus/new_turn/0 switched ok write
+to_haiku/sonnet/new_turn/0 seed ok write
+to_haiku/sonnet/new_turn/0 switched ok write
+to_haiku/opus/new_turn/0 seed ok write
+to_haiku/opus/new_turn/0 switched ok write
+from_haiku/new_turn/0 seed ok write
+from_haiku/new_turn/0 switched ok write
+effort_up/haiku/new_turn/0 seed ok write
+effort_up/haiku/new_turn/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+control/haiku/tool_continuation/0 seed ok write
+control/haiku/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+effort_down/sonnet/tool_continuation/0 seed ok write
+effort_down/sonnet/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+effort_up/opus/tool_continuation/0 seed ok write
+effort_up/opus/tool_continuation/0 switched ok write
+to_haiku/sonnet/tool_continuation/0 seed ok write
+to_haiku/sonnet/tool_continuation/0 switched ok write
+to_haiku/opus/tool_continuation/0 seed ok write
+to_haiku/opus/tool_continuation/0 switched ok write
+from_haiku/tool_continuation/0 seed ok write
+from_haiku/tool_continuation/0 switched ok write
+effort_up/haiku/tool_continuation/0 seed ok write
+effort_up/haiku/tool_continuation/0 switched ok write
+control/sonnet/new_turn/0 seed ok write
+control/sonnet/new_turn/0 switched ok write
+control/opus/new_turn/0 seed ok write
+control/opus/new_turn/0 switched ok write
+control/haiku/new_turn/0 seed ok write
+control/haiku/new_turn/0 switched ok write
+effort_up/sonnet/new_turn/0 seed ok write
+effort_up/sonnet/new_turn/0 switched ok write
+effort_down/sonnet/new_turn/0 seed ok write
+effort_down/sonnet/new_turn/0 switched ok write
+model_up/new_turn/0 seed ok write
+model_up/new_turn/0 switched ok write
+model_down/new_turn/0 seed ok write
+model_down/new_turn/0 switched ok write
+effort_up/opus/new_turn/0 seed ok write
+effort_up/opus/new_turn/0 switched ok write
+to_haiku/sonnet/new_turn/0 seed ok write
+to_haiku/sonnet/new_turn/0 switched ok write
+to_haiku/opus/new_turn/0 seed ok write
+to_haiku/opus/new_turn/0 switched ok write
+from_haiku/new_turn/0 seed ok write
+from_haiku/new_turn/0 switched ok write
+effort_up/haiku/new_turn/0 seed ok write
+effort_up/haiku/new_turn/0 switched ok write
+.model_up/new_turn/0 seed ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched error 
+.control/sonnet/tool_continuation/0 seed error 
+.model_down/tool_continuation/0 seed ok write
+.model_up/tool_continuation/0 seed ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+control/opus/tool_continuation/0 seed ok write
+control/opus/tool_continuation/0 switched ok write
+model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched rejected 
+model_down/tool_continuation/0 seed ok write
+model_down/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+control/sonnet/tool_continuation/0 seed ok write
+control/sonnet/tool_continuation/0 switched ok write
+effort_up/sonnet/tool_continuation/0 seed ok write
+effort_up/sonnet/tool_continuation/0 switched ok write
+.model_up/tool_continuation/0 seed ok write
+model_up/tool_continuation/0 switched ok write
+.control/sonnet/tool_continuation/0 seed unpriced write
+.haiku/move_control/tool_continuation/0 seed ok write
+haiku/move_control/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/0 seed ok write
+haiku/native_medium/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/0 step2 ok partial_hit_and_write
+/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 401: 'error'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 429: 'error'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+haiku/native_medium/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 seed ok write
+haiku/move_pm/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 seed ok write
+haiku/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 seed ok write
+haiku/move_pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 seed ok write
+haiku/move_control/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 seed ok write
+haiku/native_medium/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/native_medium/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 seed ok write
+haiku/move_pm/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 seed ok write
+haiku/native_xhigh/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/native_xhigh/tool_continuation/1 step3 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 seed ok write
+haiku/move_pm_xhigh/tool_continuation/1 step1 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 step2 ok partial_hit_and_write
+haiku/move_pm_xhigh/tool_continuation/1 step3 ok partial_hit_and_write
+...haiku/move_control/tool_continuation/0 seed ok write
+haiku/move_control/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_control/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 seed ok write
+haiku/move_top/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_top/tool_continuation/0 step3 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 seed ok write
+haiku/move_pm/tool_continuation/0 step1 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step2 ok partial_hit_and_write
+haiku/move_pm/tool_continuation/0 step3 ok partial_hit_and_write
+..Plan (transitions, 2 repeat(s)): 96 requests at most; admission estimates total $11.03 (a conservative upper bound, not a forecast); $8 budget; client shape 2.1.284 (Claude Code); results: /tmp/tmp2byzw0kv/run
+Dry-run only. Add --live to send paid requests.
+..effort/control/tool_continuation/0 seed ok write
+effort/control/tool_continuation/0 step1 ok partial_hit_and_write
+effort/control/tool_continuation/0 step2 ok partial_hit_and_write
+effort/control/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 seed ok write
+effort/native_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 seed ok write
+effort/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 seed ok write
+effort/top_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 seed ok write
+effort/pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step2 rejected 
+effort/pm_high/tool_continuation/0 seed ok write
+effort/pm_high/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step2 rejected 
+effort/pm_xhigh/tool_continuation/0 seed ok write
+effort/pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step2 rejected 
+effort/pm_xhigh_after/tool_continuation/0 seed ok write
+effort/pm_xhigh_after/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 seed ok write
+effort/pm_xhigh_at_start/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step3 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 seed ok write
+effort/opus_pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step2 rejected 
+..effort/control/tool_continuation/0 seed ok write
+effort/control/tool_continuation/0 step1 ok partial_hit_and_write
+effort/control/tool_continuation/0 step2 ok partial_hit_and_write
+effort/control/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 seed ok write
+effort/native_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 seed ok write
+effort/native_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/native_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 seed ok write
+effort/top_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/top_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 seed ok write
+effort/pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_low/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 seed ok write
+effort/pm_high/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_high/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 seed ok write
+effort/pm_xhigh/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 seed ok write
+effort/pm_xhigh_after/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_after/tool_continuation/0 step3 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 seed ok write
+effort/pm_xhigh_at_start/tool_continuation/0 step1 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step2 ok partial_hit_and_write
+effort/pm_xhigh_at_start/tool_continuation/0 step3 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 seed ok write
+effort/opus_pm_low/tool_continuation/0 step1 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step2 ok partial_hit_and_write
+effort/opus_pm_low/tool_continuation/0 step3 ok partial_hit_and_write
+......return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/model_near/tool_continuation/0 return ok partial_hit_and_write
+.return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_near/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 return ok partial_hit_and_write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 rejected 
+...Plan (returns, 2 repeat(s)): 44 requests at most; admission estimates total $8.87 (a conservative upper bound, not a forecast); $8 budget; client shape 2.1.284 (Claude Code); results: /tmp/tmpytrpzdmp/run
+Dry-run only. Add --live to send paid requests.
+...return/effort_near/tool_continuation/0 seed ok write
+return/effort_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_near/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far/tool_continuation/0 seed ok write
+return/effort_far/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far/tool_continuation/0 return ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 seed ok write
+return/effort_far_anchored/tool_continuation/0 away1 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away2 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away3 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away4 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away5 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 away6 ok partial_hit_and_write
+return/effort_far_anchored/tool_continuation/0 return ok partial_hit_and_write
+return/model_near/tool_continuation/0 seed ok write
+return/model_near/tool_continuation/0 away1 ok partial_hit_and_write
+return/model_near/tool_continuation/0 return ok partial_hit_and_write
+................./root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 401: 'PRIVATE'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+...................................
+======================================================================
+ERROR: test_processes_cannot_oversubscribe (test_governor.ProcessTests.test_processes_cannot_oversubscribe)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/wt/calib/tests/test_governor.py", line 484, in test_processes_cannot_oversubscribe
+    with self.ctx.Manager() as manager:
+         ~~~~~~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/context.py", line 57, in Manager
+    m.start()
+    ~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/managers.py", line 570, in start
+    self._address = reader.recv()
+                    ~~~~~~~~~~~^^
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/connection.py", line 260, in recv
+    buf = self._recv_bytes()
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/connection.py", line 451, in _recv_bytes
+    buf = self._recv(4)
+  File "/root/.local/share/uv/python/cpython-3.14.6-linux-x86_64-gnu/lib/python3.14/multiprocessing/connection.py", line 420, in _recv
+    raise EOFError
+EOFError
+
+======================================================================
+FAIL: test_crashed_process_reservation_becomes_unknown (test_governor.ProcessTests.test_crashed_process_reservation_becomes_unknown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/wt/calib/tests/test_governor.py", line 500, in test_crashed_process_reservation_becomes_unknown
+    self.assertEqual(process.exitcode, 1)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+AssertionError: None != 1
+
+----------------------------------------------------------------------
+Ran 961 tests in 812.963s
+
+FAILED (failures=1, errors=1)

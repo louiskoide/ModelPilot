@@ -1,0 +1,16 @@
+## October 14, 2026: a turn-start risk predictor, pre-registered before any request (Haiku 5.5 reads the instruction and the code)
+
+$0, offline, user request (option (a) of the October 14 discussion: "lets try a first then"). Branch `risk-predictor`, stacked on `miss-detector-results`. New `modelpilot/risk_predictor.py`; the pre-registration is `docs/m6-benchmark-plan.md`, "Turn-start risk predictor: pre-registration", committed with the module (SHA-256 recorded there) before any request.
+
+- **What it asks:** whether Haiku 5.5, given a task's instruction and the base commit's source it names, picks out the tasks low concise or Sonnet 5.5 medium misses (item 8's M). It would be a turn-start signal for routing an Opus user's risky tasks to Opus. Item 8's features and the post-run detectors failed; Opus finds the misses only by solving.
+- **Fixed in advance:**
+  - Tasks: 66, the 29 dev tasks and item 8's 38 less petersen.
+  - Labels: M on 8 tasks, matching item 8's published labels.
+  - Requests: 3 to Haiku low per task; each task's score is the median risk.
+  - Test: the top third flagged and tested with the hypergeometric. A pass needs 6 of the 8 caught (p 0.014). On a fail, the search for a miss predictor on this benchmark ends.
+- **Said in advance:** the labels were known when the prompt was written, so a pass is a lead that must hold on new tasks, not evidence.
+- **Plan** (offline, nothing sent): 198 requests, expected $0.62, at most $9.98. Every task gets source, 2–90 KB (median 86 KB), after one generic fix found in the plan: a one-file repository (parse) ranked every name at zero.
+- **To run** (API key, the user's call): `python3.12 -m modelpilot.risk_predictor rate --out runs/risk-predictor-<ts> --live --limit-usd 2`, then `score runs/risk-predictor-<ts>`.
+- **Tests:** all 820 offline tests pass on Python 3.12 with the pinned 2.1.284 client, the 3 proxy expected failures among them (`runs/risk-predictor-regression-py312.log`). New: `tests/test_risk_predictor.py` (9: the base commit's source only, never the fix or tests; excerpts within the budget; one request per sample, no retry; the top-third test and verdicts).
+- **Merged with `main` through #85 (October 15):** this entry moved here from `docs/changelog.md`, which takes no new ones. `risk_predictor.py` is unchanged (its SHA-256 is still the pre-registered `35efe96e…`), and so are the modules and specs its prompts come from (`bench_tasks`, `bench`, `miss_detector`, `bench/`). The offline plan gives the same 66 tasks, 198 requests, $0.6163 expected and $9.98 at most (`runs/risk-predictor-plan-merge-20261015`, nothing sent). One dependency changed: `miss_checklist.send_all` now has the October 14 review's stop rule. Once the next request would pass the limit it stops for good, and an error counts at its maximum cost. At `--limit-usd 2` against $0.62 expected, the rule only matters if many requests fail, and a run like that is void anyway. A run from `main` records `main`'s commit, not this branch's. For the void rule, check `git show <plan's commit>:modelpilot/risk_predictor.py | shasum -a 256` against the pre-registered hash.
+- **Tests after the merge:** all 868 offline tests pass on Python 3.12 with the pinned 2.1.284 client, no skips or expected failures (`runs/risk-predictor-merge-main-regression-py312.log`).

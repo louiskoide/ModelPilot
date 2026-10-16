@@ -1,0 +1,48 @@
+{
+ "config_sha256": "c174adbb78aafa03a932aad10eb358a826a95f99cf556d446dc65d334cbeb698",
+ "level": 0.95,
+ "method": "equal-tailed Beta(passed + 1, failed + 1): the posterior whose mean measured_ok reads",
+ "rates": {
+  "claude-haiku-5-5/low": {
+   "passed": 25,
+   "trials": 29,
+   "rate": 0.8387096774193549,
+   "low": 0.6927816497238728,
+   "high": 0.9435783035319285
+  },
+  "claude-haiku-5-5/medium": {
+   "passed": 56,
+   "trials": 58,
+   "rate": 0.95,
+   "low": 0.8828515361116074,
+   "high": 0.98938871967612
+  },
+  "claude-sonnet-5-5/low": {
+   "passed": 27,
+   "trials": 29,
+   "rate": 0.9032258064516129,
+   "low": 0.7792645984770381,
+   "high": 0.9788828629702775
+  },
+  "claude-sonnet-5-5/medium": {
+   "passed": 48,
+   "trials": 52,
+   "rate": 0.9074074074074074,
+   "low": 0.8178921636151397,
+   "high": 0.968653194271347
+  },
+  "claude-opus-5-5/medium": {
+   "passed": 29,
+   "trials": 29,
+   "rate": 0.967741935483871,
+   "low": 0.8842966917779718,
+   "high": 0.9991564290733694
+  }
+ },
+ "arms": {
+  "modelpilot": "same outcomes as the config",
+  "modelpilot-for-sonnet": "same outcomes as the config",
+  "modelpilot-for-opus": "same outcomes as the config"
+ },
+ "note": "$0, computed from configs/modelpilot-policy.json in the cloud container. Which recorded decisions any value within these intervals would change needs the recorded runs: policy_replay --intervals on the main machine."
+}

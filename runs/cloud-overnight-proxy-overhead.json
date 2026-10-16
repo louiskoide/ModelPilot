@@ -1,0 +1,1988 @@
+{
+ "machine": {
+  "system": "Linux",
+  "release": "6.18.44-fc-v114",
+  "cpus": 4,
+  "python": "3.12.3"
+ },
+ "repeats": 5,
+ "runs": [
+  {
+   "governed": false,
+   "cases": [
+    {
+     "name": "body_1KB",
+     "body": 1000,
+     "clients": 1,
+     "governed": false,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.0011009149984602118,
+      "p95": 0.0011657360009849072
+     },
+     "added_total_seconds": {
+      "median": 0.0012356089991953922,
+      "p95": 0.0014190600013535004
+     },
+     "direct_total_seconds": {
+      "median": 0.0012203189999127062,
+      "p95": 0.002378215000135242
+     },
+     "proxied_total_seconds": {
+      "median": 0.0023366330005956115,
+      "p95": 0.00335369099957461
+     },
+     "direct_connect_seconds": {
+      "median": 0.0001340849994448945,
+      "p95": 0.00036196499968355056
+     },
+     "proxied_connect_seconds": {
+      "median": 0.00014068800010136329,
+      "p95": 0.00017116399976657704
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 0.4279662230847114,
+      "p95": 0.4597811073734989
+     }
+    },
+    {
+     "name": "body_1KB",
+     "body": 1000,
+     "clients": 4,
+     "governed": false,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.002625216000524233,
+      "p95": 0.005511426001248765
+     },
+     "added_total_seconds": {
+      "median": 0.0028641644994422677,
+      "p95": 0.0042448820004210575
+     },
+     "direct_total_seconds": {
+      "median": 0.0036761259998456808,
+      "p95": 0.006078644999433891
+     },
+     "proxied_total_seconds": {
+      "median": 0.006184484000186785,
+      "p95": 0.007821568000508705
+     },
+     "direct_connect_seconds": {
+      "median": 0.0015049560006445972,
+      "p95": 0.0023974480009201216
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0005675464990417822,
+      "p95": 0.0009273270006815437
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 0.16169590982472656,
+      "p95": 0.20485179181134544
+     }
+    },
+    {
+     "name": "body_1KB",
+     "body": 1000,
+     "clients": 16,
+     "governed": false,
+     "requests": 80,
+     "added_first_byte_seconds": {
+      "median": 0.004003810000540398,
+      "p95": 0.010542510000959737
+     },
+     "added_total_seconds": {
+      "median": 0.004837108001083834,
+      "p95": 0.012705859000561759
+     },
+     "direct_total_seconds": {
+      "median": 0.0076011374994777725,
+      "p95": 0.013526349999665399
+     },
+     "proxied_total_seconds": {
+      "median": 0.012139877499066642,
+      "p95": 0.021044436000011046
+     },
+     "direct_connect_seconds": {
+      "median": 0.0023080464998201933,
+      "p95": 0.006182609000461525
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0013070960012555588,
+      "p95": 1.0284638590001123
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 18
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 0.08237989994471623,
+      "p95": 0.29501057467597086
+     }
+    },
+    {
+     "name": "body_100KB",
+     "body": 100000,
+     "clients": 1,
+     "governed": false,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.001451411000743974,
+      "p95": 0.0027934380013903137
+     },
+     "added_total_seconds": {
+      "median": 0.0015608119992975844,
+      "p95": 0.003122047999568167
+     },
+     "direct_total_seconds": {
+      "median": 0.0007726179992459947,
+      "p95": 0.0009801800006243866
+     },
+     "proxied_total_seconds": {
+      "median": 0.002540991999921971,
+      "p95": 0.0037880079999013105
+     },
+     "direct_connect_seconds": {
+      "median": 9.448300079384353e-05,
+      "p95": 0.00014044999988982454
+     },
+     "proxied_connect_seconds": {
+      "median": 0.00010087800001201686,
+      "p95": 0.0001257189996977104
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 39.354708713396505,
+      "p95": 46.40468130099946
+     }
+    },
+    {
+     "name": "body_100KB",
+     "body": 100000,
+     "clients": 4,
+     "governed": false,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.0037656079994121683,
+      "p95": 0.005034886000430561
+     },
+     "added_total_seconds": {
+      "median": 0.0041440665008849464,
+      "p95": 0.0048724039988883305
+     },
+     "direct_total_seconds": {
+      "median": 0.002287055499436974,
+      "p95": 0.003106584001216106
+     },
+     "proxied_total_seconds": {
+      "median": 0.006401400500180898,
+      "p95": 0.007050141000945587
+     },
+     "direct_connect_seconds": {
+      "median": 0.0006702500004394096,
+      "p95": 0.0012732979994325433
+     },
+     "proxied_connect_seconds": {
+      "median": 0.00033176499982801033,
+      "p95": 0.0004677819997596089
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 15.622282780874219,
+      "p95": 17.88704296941532
+     }
+    },
+    {
+     "name": "body_100KB",
+     "body": 100000,
+     "clients": 16,
+     "governed": false,
+     "requests": 80,
+     "added_first_byte_seconds": {
+      "median": 0.005268413499834423,
+      "p95": 0.018379790999460965
+     },
+     "added_total_seconds": {
+      "median": 0.007073006499922485,
+      "p95": 0.019421372999204323
+     },
+     "direct_total_seconds": {
+      "median": 0.006839929499619757,
+      "p95": 0.009761250999872573
+     },
+     "proxied_total_seconds": {
+      "median": 0.013203247500314319,
+      "p95": 0.025725503999638022
+     },
+     "direct_connect_seconds": {
+      "median": 0.001438992999283073,
+      "p95": 0.0028796349997719517
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0008976484996310319,
+      "p95": 1.0269749500002945
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 24
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 7.577068236258098,
+      "p95": 20.384662666218833
+     }
+    },
+    {
+     "name": "body_1MB",
+     "body": 1000000,
+     "clients": 1,
+     "governed": false,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.005274267998174764,
+      "p95": 0.007278099999894039
+     },
+     "added_total_seconds": {
+      "median": 0.005442512998342863,
+      "p95": 0.007568666998849949
+     },
+     "direct_total_seconds": {
+      "median": 0.001036708999890834,
+      "p95": 0.0018700079999689478
+     },
+     "proxied_total_seconds": {
+      "median": 0.00679001599928597,
+      "p95": 0.008605375998740783
+     },
+     "direct_connect_seconds": {
+      "median": 8.202000026358292e-05,
+      "p95": 0.00013960399883217178
+     },
+     "proxied_connect_seconds": {
+      "median": 7.875200026319362e-05,
+      "p95": 9.60790002864087e-05
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 147.2750579829501,
+      "p95": 161.15061537526512
+     }
+    },
+    {
+     "name": "body_1MB",
+     "body": 1000000,
+     "clients": 4,
+     "governed": false,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.013792760999422171,
+      "p95": 0.016790882000350393
+     },
+     "added_total_seconds": {
+      "median": 0.013774101498711389,
+      "p95": 0.022605813999689417
+     },
+     "direct_total_seconds": {
+      "median": 0.003319886000099359,
+      "p95": 0.0065508589996170485
+     },
+     "proxied_total_seconds": {
+      "median": 0.018215216999124095,
+      "p95": 0.025747315999979037
+     },
+     "direct_connect_seconds": {
+      "median": 0.000801249000687676,
+      "p95": 0.0017475900003773859
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0004247934994054958,
+      "p95": 0.0007581019999634009
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 54.899766127940225,
+      "p95": 63.0311119687527
+     }
+    },
+    {
+     "name": "body_1MB",
+     "body": 1000000,
+     "clients": 16,
+     "governed": false,
+     "requests": 80,
+     "added_first_byte_seconds": {
+      "median": 0.028271772499465442,
+      "p95": 0.050785359999281354
+     },
+     "added_total_seconds": {
+      "median": 0.030944303999604017,
+      "p95": 0.051980517999254516
+     },
+     "direct_total_seconds": {
+      "median": 0.009863554500043392,
+      "p95": 0.013511368999388651
+     },
+     "proxied_total_seconds": {
+      "median": 0.04087550850090338,
+      "p95": 0.06136361199969542
+     },
+     "direct_connect_seconds": {
+      "median": 0.001701695500742062,
+      "p95": 0.004030768001030083
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0012714750000668573,
+      "p95": 1.0155336600000737
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 24
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 24.464534982825604,
+      "p95": 53.84109071602826
+     }
+    },
+    {
+     "name": "body_10MB",
+     "body": 10000000,
+     "clients": 1,
+     "governed": false,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.04667055500067363,
+      "p95": 0.05220829299832985
+     },
+     "added_total_seconds": {
+      "median": 0.046891693000361556,
+      "p95": 0.05248354399918753
+     },
+     "direct_total_seconds": {
+      "median": 0.0069683229994552676,
+      "p95": 0.009372334001454874
+     },
+     "proxied_total_seconds": {
+      "median": 0.053908231000605156,
+      "p95": 0.059109181000167155
+     },
+     "direct_connect_seconds": {
+      "median": 0.00012738400073430967,
+      "p95": 0.00021399099932750687
+     },
+     "proxied_connect_seconds": {
+      "median": 8.922699998947792e-05,
+      "p95": 0.00010010400001192465
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 185.50042942213673,
+      "p95": 189.51398285688003
+     }
+    },
+    {
+     "name": "body_10MB",
+     "body": 10000000,
+     "clients": 4,
+     "governed": false,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.11024321649983904,
+      "p95": 0.12516045600023062
+     },
+     "added_total_seconds": {
+      "median": 0.11212719099967217,
+      "p95": 0.12733518200184335
+     },
+     "direct_total_seconds": {
+      "median": 0.013418110001111927,
+      "p95": 0.04053306500100007
+     },
+     "proxied_total_seconds": {
+      "median": 0.1274232949999714,
+      "p95": 0.13964453000153298
+     },
+     "direct_connect_seconds": {
+      "median": 0.003232631500395655,
+      "p95": 0.00821059299960325
+     },
+     "proxied_connect_seconds": {
+      "median": 0.002103050499499659,
+      "p95": 0.0049820430012914585
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 78.47858594671008,
+      "p95": 85.81362086415592
+     }
+    },
+    {
+     "name": "body_30MB",
+     "body": 30000000,
+     "clients": 1,
+     "governed": false,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.13806863799982239,
+      "p95": 0.3798115890003828
+     },
+     "added_total_seconds": {
+      "median": 0.13937958799942862,
+      "p95": 0.38091991399960534
+     },
+     "direct_total_seconds": {
+      "median": 0.018236976000480354,
+      "p95": 0.026211551999949734
+     },
+     "proxied_total_seconds": {
+      "median": 0.15761656399990898,
+      "p95": 0.3947144379999372
+     },
+     "direct_connect_seconds": {
+      "median": 0.00013968500024930108,
+      "p95": 0.00020072699953743722
+     },
+     "proxied_connect_seconds": {
+      "median": 0.00013606699940282851,
+      "p95": 0.00014000900046085007
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 190.33532541679645,
+      "p95": 202.15079279271498
+     }
+    },
+    {
+     "name": "body_30MB",
+     "body": 30000000,
+     "clients": 4,
+     "governed": false,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.35317239400137623,
+      "p95": 0.7920702350002102
+     },
+     "added_total_seconds": {
+      "median": 0.35422896000090986,
+      "p95": 0.794335164999211
+     },
+     "direct_total_seconds": {
+      "median": 0.03817107750091964,
+      "p95": 0.0689661430005799
+     },
+     "proxied_total_seconds": {
+      "median": 0.3864078499991592,
+      "p95": 0.839416512999378
+     },
+     "direct_connect_seconds": {
+      "median": 0.006025040999702469,
+      "p95": 0.020280765998904826
+     },
+     "proxied_connect_seconds": {
+      "median": 0.008558195499063004,
+      "p95": 0.019055889000810566
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 77.63817548627506,
+      "p95": 101.91658036199694
+     }
+    },
+    {
+     "name": "stream_10",
+     "body": 1000,
+     "events": 10,
+     "clients": 1,
+     "governed": false,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.0007845410000300035,
+      "p95": 0.0009280649992433609
+     },
+     "added_total_seconds": {
+      "median": 0.0010131489998457255,
+      "p95": 0.0012747519995173207
+     },
+     "direct_total_seconds": {
+      "median": 0.0005822210005135275,
+      "p95": 0.0007245640008477494
+     },
+     "proxied_total_seconds": {
+      "median": 0.001674205999734113,
+      "p95": 0.00199931600036507
+     },
+     "direct_connect_seconds": {
+      "median": 8.981800056062639e-05,
+      "p95": 0.0001612189989828039
+     },
+     "proxied_connect_seconds": {
+      "median": 8.172400157491211e-05,
+      "p95": 0.00013424000098893885
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 0.00010131489998457254,
+      "p95": 0.00012747519995173206
+     }
+    },
+    {
+     "name": "stream_10",
+     "body": 1000,
+     "events": 10,
+     "clients": 4,
+     "governed": false,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.001972144500541617,
+      "p95": 0.003442147999521694
+     },
+     "added_total_seconds": {
+      "median": 0.00245100249958341,
+      "p95": 0.003382594999493449
+     },
+     "direct_total_seconds": {
+      "median": 0.0019294034991617082,
+      "p95": 0.0025347670016344637
+     },
+     "proxied_total_seconds": {
+      "median": 0.004374470999209734,
+      "p95": 0.005071216000942513
+     },
+     "direct_connect_seconds": {
+      "median": 0.0008588004993725917,
+      "p95": 0.0014739010002813302
+     },
+     "proxied_connect_seconds": {
+      "median": 0.00039927250054461183,
+      "p95": 0.0007490689986298094
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 0.000245100249958341,
+      "p95": 0.0003382594999493449
+     }
+    },
+    {
+     "name": "stream_10",
+     "body": 1000,
+     "events": 10,
+     "clients": 16,
+     "governed": false,
+     "requests": 80,
+     "added_first_byte_seconds": {
+      "median": 0.002845569500095735,
+      "p95": 0.00846190599804686
+     },
+     "added_total_seconds": {
+      "median": 0.004522540500147443,
+      "p95": 0.009671007999713765
+     },
+     "direct_total_seconds": {
+      "median": 0.0061903855012133135,
+      "p95": 0.008751707999181235
+     },
+     "proxied_total_seconds": {
+      "median": 0.009644129500884446,
+      "p95": 0.016225280000071507
+     },
+     "direct_connect_seconds": {
+      "median": 0.0015311590004785103,
+      "p95": 0.00307104399871605
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0007435689994963468,
+      "p95": 1.0319280910007365
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 18
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 0.00045225405001474427,
+      "p95": 0.0009671007999713765
+     }
+    },
+    {
+     "name": "stream_1000",
+     "body": 1000,
+     "events": 1000,
+     "clients": 1,
+     "governed": false,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.0007339109997701598,
+      "p95": 0.0009002940005302662
+     },
+     "added_total_seconds": {
+      "median": 0.008998706998681882,
+      "p95": 0.012581406001118012
+     },
+     "direct_total_seconds": {
+      "median": 0.0007160940003814176,
+      "p95": 0.0008102319989120588
+     },
+     "proxied_total_seconds": {
+      "median": 0.0097148009990633,
+      "p95": 0.013287097001011716
+     },
+     "direct_connect_seconds": {
+      "median": 0.00010624500100675505,
+      "p95": 0.00015546199938398786
+     },
+     "proxied_connect_seconds": {
+      "median": 9.340799988422077e-05,
+      "p95": 0.00012982999942323659
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 8.998706998681883e-06,
+      "p95": 1.2581406001118012e-05
+     }
+    },
+    {
+     "name": "stream_1000",
+     "body": 1000,
+     "events": 1000,
+     "clients": 4,
+     "governed": false,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.0035414549993220135,
+      "p95": 0.01770649099853472
+     },
+     "added_total_seconds": {
+      "median": 0.03458045099796436,
+      "p95": 0.04716011800155684
+     },
+     "direct_total_seconds": {
+      "median": 0.002507179999156506,
+      "p95": 0.0033633149996603606
+     },
+     "proxied_total_seconds": {
+      "median": 0.03681779399903462,
+      "p95": 0.049750910000511794
+     },
+     "direct_connect_seconds": {
+      "median": 0.0008208589997593663,
+      "p95": 0.0016335879990947433
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0003037394999410026,
+      "p95": 0.00046328500138770323
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 3.458045099796436e-05,
+      "p95": 4.716011800155684e-05
+     }
+    },
+    {
+     "name": "stream_1000",
+     "body": 1000,
+     "events": 1000,
+     "clients": 16,
+     "governed": false,
+     "requests": 80,
+     "added_first_byte_seconds": {
+      "median": 0.011111859998891305,
+      "p95": 0.106406828001127
+     },
+     "added_total_seconds": {
+      "median": 0.08397453250017861,
+      "p95": 0.14704886300023645
+     },
+     "direct_total_seconds": {
+      "median": 0.006499310000435798,
+      "p95": 0.011072391000197968
+     },
+     "proxied_total_seconds": {
+      "median": 0.08788598249975621,
+      "p95": 0.15277627000068605
+     },
+     "direct_connect_seconds": {
+      "median": 0.0015135189996726695,
+      "p95": 0.0036926769989804598
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0014455154996539932,
+      "p95": 1.020511720000286
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 21
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 8.397453250017861e-05,
+      "p95": 0.00014704886300023645
+     }
+    },
+    {
+     "name": "stream_10000",
+     "body": 1000,
+     "events": 10000,
+     "clients": 1,
+     "governed": false,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.0010758679982245667,
+      "p95": 0.0012497070001700195
+     },
+     "added_total_seconds": {
+      "median": 0.09441533000062918,
+      "p95": 0.10037026800091553
+     },
+     "direct_total_seconds": {
+      "median": 0.0018148919989471324,
+      "p95": 0.004529494000962586
+     },
+     "proxied_total_seconds": {
+      "median": 0.09604971500084503,
+      "p95": 0.10333733200059214
+     },
+     "direct_connect_seconds": {
+      "median": 0.00014723499953106511,
+      "p95": 0.00016014200082281604
+     },
+     "proxied_connect_seconds": {
+      "median": 0.00010387399925093632,
+      "p95": 0.00013718199988943525
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 9.441533000062919e-06,
+      "p95": 1.0037026800091554e-05
+     }
+    },
+    {
+     "name": "stream_10000",
+     "body": 1000,
+     "events": 10000,
+     "clients": 4,
+     "governed": false,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.002007476998187485,
+      "p95": 0.013054861999989953
+     },
+     "added_total_seconds": {
+      "median": 0.3348241749999943,
+      "p95": 0.3878470239997114
+     },
+     "direct_total_seconds": {
+      "median": 0.005475877999742806,
+      "p95": 0.008421865000855178
+     },
+     "proxied_total_seconds": {
+      "median": 0.34246564349996333,
+      "p95": 0.3939486550007132
+     },
+     "direct_connect_seconds": {
+      "median": 0.0009717284992802888,
+      "p95": 0.002561474999311031
+     },
+     "proxied_connect_seconds": {
+      "median": 0.00031991000105335843,
+      "p95": 0.0007592679994559148
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 3.348241749999943e-05,
+      "p95": 3.878470239997114e-05
+     }
+    },
+    {
+     "name": "stream_10000",
+     "body": 1000,
+     "events": 10000,
+     "clients": 16,
+     "governed": false,
+     "requests": 80,
+     "added_first_byte_seconds": {
+      "median": 0.012662148499657633,
+      "p95": 0.1621556900008727
+     },
+     "added_total_seconds": {
+      "median": 0.8546359224992557,
+      "p95": 1.2540217370005848
+     },
+     "direct_total_seconds": {
+      "median": 0.013758846001110214,
+      "p95": 0.029618754999319208
+     },
+     "proxied_total_seconds": {
+      "median": 0.8684434054994199,
+      "p95": 1.2648191950011096
+     },
+     "direct_connect_seconds": {
+      "median": 0.002201426999818068,
+      "p95": 0.005509757000254467
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0008141664993672748,
+      "p95": 1.0311306169987802
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 24
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 8.546359224992557e-05,
+      "p95": 0.00012540217370005848
+     }
+    }
+   ],
+   "proxy_cpu_seconds": 18.498,
+   "proxy_peak_kib": 375644,
+   "log_rows": 680,
+   "requests": 680,
+   "failed_proxied_requests": 0,
+   "slow_proxied_connects": 129
+  },
+  {
+   "governed": true,
+   "cases": [
+    {
+     "name": "body_1KB",
+     "body": 1000,
+     "clients": 1,
+     "governed": true,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.0035310900002514245,
+      "p95": 0.0046069250001892215
+     },
+     "added_total_seconds": {
+      "median": 0.006898024999827612,
+      "p95": 0.006958526000744314
+     },
+     "direct_total_seconds": {
+      "median": 0.0006825720010965597,
+      "p95": 0.0008435159998043673
+     },
+     "proxied_total_seconds": {
+      "median": 0.007557920998806367,
+      "p95": 0.007785436000631307
+     },
+     "direct_connect_seconds": {
+      "median": 0.00010576500062597916,
+      "p95": 0.00018891500076279044
+     },
+     "proxied_connect_seconds": {
+      "median": 8.941600026446395e-05,
+      "p95": 0.00013719699927605689
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 0.13231151796346263,
+      "p95": 0.17256803324369177
+     }
+    },
+    {
+     "name": "body_1KB",
+     "body": 1000,
+     "clients": 4,
+     "governed": true,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.01751935000083904,
+      "p95": 0.04027209000014409
+     },
+     "added_total_seconds": {
+      "median": 0.01944220900077198,
+      "p95": 0.04310575899944524
+     },
+     "direct_total_seconds": {
+      "median": 0.0017699410000204807,
+      "p95": 0.0027256320008746115
+     },
+     "proxied_total_seconds": {
+      "median": 0.021367021000514796,
+      "p95": 0.04452040899923304
+     },
+     "direct_connect_seconds": {
+      "median": 0.0007609570002387045,
+      "p95": 0.001738836999720661
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0003793579999182839,
+      "p95": 0.0006275409996305825
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 0.04909328954702451,
+      "p95": 0.133016558824373
+     }
+    },
+    {
+     "name": "body_1KB",
+     "body": 1000,
+     "clients": 16,
+     "governed": true,
+     "requests": 80,
+     "added_first_byte_seconds": {
+      "median": 0.0229256524999073,
+      "p95": 0.1103980389998469
+     },
+     "added_total_seconds": {
+      "median": 0.02695445049994305,
+      "p95": 0.11181448300158081
+     },
+     "direct_total_seconds": {
+      "median": 0.0060869045000799815,
+      "p95": 0.009420280999620445
+     },
+     "proxied_total_seconds": {
+      "median": 0.031467015000089305,
+      "p95": 0.11683840100158704
+     },
+     "direct_connect_seconds": {
+      "median": 0.0012180780004200642,
+      "p95": 0.0031402539989358047
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0008353309995072777,
+      "p95": 1.0246605900010763
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 28
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 0.031779360517735514,
+      "p95": 0.07173634082893728
+     }
+    },
+    {
+     "name": "body_100KB",
+     "body": 100000,
+     "clients": 1,
+     "governed": true,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.004530996000539744,
+      "p95": 0.005066053998234565
+     },
+     "added_total_seconds": {
+      "median": 0.007725746001597145,
+      "p95": 0.008557315999496495
+     },
+     "direct_total_seconds": {
+      "median": 0.0006711899986839853,
+      "p95": 0.000831477000247105
+     },
+     "proxied_total_seconds": {
+      "median": 0.00839693600028113,
+      "p95": 0.0093887929997436
+     },
+     "direct_connect_seconds": {
+      "median": 0.00010387200018158183,
+      "p95": 0.00018606400044518523
+     },
+     "proxied_connect_seconds": {
+      "median": 9.288000001106411e-05,
+      "p95": 0.00012138099918956868
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 11.909105892512697,
+      "p95": 12.682557486562766
+     }
+    },
+    {
+     "name": "body_100KB",
+     "body": 100000,
+     "clients": 4,
+     "governed": true,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.013397711999459716,
+      "p95": 0.027340010998159414
+     },
+     "added_total_seconds": {
+      "median": 0.014672709999103972,
+      "p95": 0.029878093999286648
+     },
+     "direct_total_seconds": {
+      "median": 0.0023360185005003586,
+      "p95": 0.002765311999610276
+     },
+     "proxied_total_seconds": {
+      "median": 0.017124354500083427,
+      "p95": 0.03219425700081047
+     },
+     "direct_connect_seconds": {
+      "median": 0.0009840070006248425,
+      "p95": 0.0016382369994971668
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0003845609999189037,
+      "p95": 0.0006543710005644243
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 5.8416891493513265,
+      "p95": 10.4595234753372
+     }
+    },
+    {
+     "name": "body_100KB",
+     "body": 100000,
+     "clients": 16,
+     "governed": true,
+     "requests": 80,
+     "added_first_byte_seconds": {
+      "median": 0.0236530934998882,
+      "p95": 0.11213258799944015
+     },
+     "added_total_seconds": {
+      "median": 0.0304464464998091,
+      "p95": 0.11113904599915259
+     },
+     "direct_total_seconds": {
+      "median": 0.007492046499464777,
+      "p95": 0.01243923000038194
+     },
+     "proxied_total_seconds": {
+      "median": 0.03621409299921652,
+      "p95": 0.12191977899965423
+     },
+     "direct_connect_seconds": {
+      "median": 0.0014640544995927485,
+      "p95": 0.0032399049996456597
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0008853154995449586,
+      "p95": 1.0253827440010355
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 30
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 2.761538315730768,
+      "p95": 5.927269440570053
+     }
+    },
+    {
+     "name": "body_1MB",
+     "body": 1000000,
+     "clients": 1,
+     "governed": true,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.009569842999553657,
+      "p95": 0.010642250999808311
+     },
+     "added_total_seconds": {
+      "median": 0.012741884000206483,
+      "p95": 0.014303300000392483
+     },
+     "direct_total_seconds": {
+      "median": 0.0011256219986535143,
+      "p95": 0.0011471899997559376
+     },
+     "proxied_total_seconds": {
+      "median": 0.013870205999410246,
+      "p95": 0.015360560000772239
+     },
+     "direct_connect_seconds": {
+      "median": 9.242700070899446e-05,
+      "p95": 0.0001512870003352873
+     },
+     "proxied_connect_seconds": {
+      "median": 8.578300003136974e-05,
+      "p95": 0.00010300400026608258
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 72.0969825568935,
+      "p95": 90.08563450475837
+     }
+    },
+    {
+     "name": "body_1MB",
+     "body": 1000000,
+     "clients": 4,
+     "governed": true,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.019698623501426482,
+      "p95": 0.037953476999973645
+     },
+     "added_total_seconds": {
+      "median": 0.024655039500430576,
+      "p95": 0.04077765799956978
+     },
+     "direct_total_seconds": {
+      "median": 0.0032948985008260934,
+      "p95": 0.004333750001023873
+     },
+     "proxied_total_seconds": {
+      "median": 0.02814262950050761,
+      "p95": 0.043930750998697476
+     },
+     "direct_connect_seconds": {
+      "median": 0.0011238194992984063,
+      "p95": 0.0019955919997300953
+     },
+     "proxied_connect_seconds": {
+      "median": 0.00045221550044516334,
+      "p95": 0.000791081998613663
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 35.55314288848848,
+      "p95": 46.659845621454245
+     }
+    },
+    {
+     "name": "body_1MB",
+     "body": 1000000,
+     "clients": 16,
+     "governed": true,
+     "requests": 80,
+     "added_first_byte_seconds": {
+      "median": 0.05456405600125436,
+      "p95": 0.11696615500113694
+     },
+     "added_total_seconds": {
+      "median": 0.06433003149959404,
+      "p95": 0.12954609300140874
+     },
+     "direct_total_seconds": {
+      "median": 0.009994570999879215,
+      "p95": 0.014576667001165333
+     },
+     "proxied_total_seconds": {
+      "median": 0.0733819470005983,
+      "p95": 0.1426941200006695
+     },
+     "direct_connect_seconds": {
+      "median": 0.001901639000607247,
+      "p95": 0.004065444998559542
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0014567494990842533,
+      "p95": 1.0189690949991927
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 22
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 13.631222008680211,
+      "p95": 42.88864640681762
+     }
+    },
+    {
+     "name": "body_10MB",
+     "body": 10000000,
+     "clients": 1,
+     "governed": true,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.047938843999872915,
+      "p95": 0.055291538998062606
+     },
+     "added_total_seconds": {
+      "median": 0.05095885300033842,
+      "p95": 0.05919431799884478
+     },
+     "direct_total_seconds": {
+      "median": 0.00848089200007962,
+      "p95": 0.012141905999669689
+     },
+     "proxied_total_seconds": {
+      "median": 0.06106854300014675,
+      "p95": 0.06605390400000033
+     },
+     "direct_connect_seconds": {
+      "median": 0.00013520500033337157,
+      "p95": 0.00023111900009098463
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0001427019997208845,
+      "p95": 0.00014701500003866386
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 163.75042712212687,
+      "p95": 170.81293428225138
+     }
+    },
+    {
+     "name": "body_10MB",
+     "body": 10000000,
+     "clients": 4,
+     "governed": true,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.11318155800017848,
+      "p95": 0.12948152199896867
+     },
+     "added_total_seconds": {
+      "median": 0.11875280749973172,
+      "p95": 0.13261387899910915
+     },
+     "direct_total_seconds": {
+      "median": 0.014534717000060482,
+      "p95": 0.019227298000259907
+     },
+     "proxied_total_seconds": {
+      "median": 0.13239483249981276,
+      "p95": 0.1459026759985136
+     },
+     "direct_connect_seconds": {
+      "median": 0.002476372500495927,
+      "p95": 0.005360716999348369
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0025656165007603704,
+      "p95": 0.007315163000384928
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 75.53167501336753,
+      "p95": 81.26099446004538
+     }
+    },
+    {
+     "name": "body_30MB",
+     "body": 30000000,
+     "clients": 1,
+     "governed": true,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.14554025800134696,
+      "p95": 0.505417677000878
+     },
+     "added_total_seconds": {
+      "median": 0.15010921800057986,
+      "p95": 0.5106104429996776
+     },
+     "direct_total_seconds": {
+      "median": 0.01699498699963442,
+      "p95": 0.026574604000416002
+     },
+     "proxied_total_seconds": {
+      "median": 0.16710420500021428,
+      "p95": 0.5283173629995872
+     },
+     "direct_connect_seconds": {
+      "median": 0.00011217000064789318,
+      "p95": 0.00027186899933440145
+     },
+     "proxied_connect_seconds": {
+      "median": 0.00010287900113326032,
+      "p95": 0.00015639400044165086
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 179.52869588148025,
+      "p95": 192.54790692963726
+     }
+    },
+    {
+     "name": "body_30MB",
+     "body": 30000000,
+     "clients": 4,
+     "governed": true,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.35599156899934314,
+      "p95": 0.7028164530001959
+     },
+     "added_total_seconds": {
+      "median": 0.37653417700039427,
+      "p95": 0.706167872000151
+     },
+     "direct_total_seconds": {
+      "median": 0.03427522249876347,
+      "p95": 0.06322804299998097
+     },
+     "proxied_total_seconds": {
+      "median": 0.4101462429998719,
+      "p95": 0.7489075119992776
+     },
+     "direct_connect_seconds": {
+      "median": 0.01103351300025679,
+      "p95": 0.03173763199993118
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0067726805009442614,
+      "p95": 0.016145806999702472
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "proxied_upload_mb_per_s": {
+      "median": 73.16573231346368,
+      "p95": 86.66325028534665
+     }
+    },
+    {
+     "name": "stream_10",
+     "body": 1000,
+     "events": 10,
+     "clients": 1,
+     "governed": true,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.004682405000494327,
+      "p95": 0.005108623998239636
+     },
+     "added_total_seconds": {
+      "median": 0.00848323900027026,
+      "p95": 0.01030182800059265
+     },
+     "direct_total_seconds": {
+      "median": 0.0006736830000590999,
+      "p95": 0.0008040789998631226
+     },
+     "proxied_total_seconds": {
+      "median": 0.00915692200032936,
+      "p95": 0.010859407000680221
+     },
+     "direct_connect_seconds": {
+      "median": 0.00010402599946246482,
+      "p95": 0.0001717830000416143
+     },
+     "proxied_connect_seconds": {
+      "median": 8.747699939704034e-05,
+      "p95": 0.00010374699922977015
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 0.000848323900027026,
+      "p95": 0.001030182800059265
+     }
+    },
+    {
+     "name": "stream_10",
+     "body": 1000,
+     "events": 10,
+     "clients": 4,
+     "governed": true,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.013563686499765026,
+      "p95": 0.061460102997443755
+     },
+     "added_total_seconds": {
+      "median": 0.016568173999985447,
+      "p95": 0.06534188399928098
+     },
+     "direct_total_seconds": {
+      "median": 0.0019944169998780126,
+      "p95": 0.0034972619996551657
+     },
+     "proxied_total_seconds": {
+      "median": 0.018883103999542072,
+      "p95": 0.06715262399848143
+     },
+     "direct_connect_seconds": {
+      "median": 0.0007437339991156477,
+      "p95": 0.0028991910003242083
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0004056350007886067,
+      "p95": 0.0007735519993730122
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 0.0016568173999985448,
+      "p95": 0.006534188399928098
+     }
+    },
+    {
+     "name": "stream_10",
+     "body": 1000,
+     "events": 10,
+     "clients": 16,
+     "governed": true,
+     "requests": 80,
+     "added_first_byte_seconds": {
+      "median": 0.029610279000735318,
+      "p95": 0.11352793399964867
+     },
+     "added_total_seconds": {
+      "median": 0.03369033750004746,
+      "p95": 0.11619212600089668
+     },
+     "direct_total_seconds": {
+      "median": 0.006178790000376466,
+      "p95": 0.009287108998250915
+     },
+     "proxied_total_seconds": {
+      "median": 0.03885525750047236,
+      "p95": 0.12431851600013033
+     },
+     "direct_connect_seconds": {
+      "median": 0.0015537090002908371,
+      "p95": 0.00451079199956439
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0010094184999616118,
+      "p95": 1.02536543899987
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 28
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 0.0033690337500047463,
+      "p95": 0.011619212600089667
+     }
+    },
+    {
+     "name": "stream_1000",
+     "body": 1000,
+     "events": 1000,
+     "clients": 1,
+     "governed": true,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.003941769000448403,
+      "p95": 0.005722717001845012
+     },
+     "added_total_seconds": {
+      "median": 0.014474510999207268,
+      "p95": 0.02141283899982227
+     },
+     "direct_total_seconds": {
+      "median": 0.0008185679998859996,
+      "p95": 0.000952389998928993
+     },
+     "proxied_total_seconds": {
+      "median": 0.015240517999700387,
+      "p95": 0.02221424399976968
+     },
+     "direct_connect_seconds": {
+      "median": 0.0001110459998017177,
+      "p95": 0.00014579900016542524
+     },
+     "proxied_connect_seconds": {
+      "median": 9.754299935593735e-05,
+      "p95": 0.0001205019998451462
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 1.4474510999207269e-05,
+      "p95": 2.141283899982227e-05
+     }
+    },
+    {
+     "name": "stream_1000",
+     "body": 1000,
+     "events": 1000,
+     "clients": 4,
+     "governed": true,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.026160112499383104,
+      "p95": 0.060582919999433216
+     },
+     "added_total_seconds": {
+      "median": 0.0396705019984438,
+      "p95": 0.07443535199854523
+     },
+     "direct_total_seconds": {
+      "median": 0.0025651480009400984,
+      "p95": 0.0055349440008285455
+     },
+     "proxied_total_seconds": {
+      "median": 0.04181452449938661,
+      "p95": 0.07843246000084036
+     },
+     "direct_connect_seconds": {
+      "median": 0.000911855999220279,
+      "p95": 0.002925974000390852
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0003530575004333514,
+      "p95": 0.0005940110004303278
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 3.9670501998443795e-05,
+      "p95": 7.443535199854524e-05
+     }
+    },
+    {
+     "name": "stream_1000",
+     "body": 1000,
+     "events": 1000,
+     "clients": 16,
+     "governed": true,
+     "requests": 80,
+     "added_first_byte_seconds": {
+      "median": 0.062473649999446934,
+      "p95": 0.1894293010009278
+     },
+     "added_total_seconds": {
+      "median": 0.07676982650082209,
+      "p95": 0.2024887139978091
+     },
+     "direct_total_seconds": {
+      "median": 0.006912650999765901,
+      "p95": 0.009754054000950418
+     },
+     "proxied_total_seconds": {
+      "median": 0.08380920350100496,
+      "p95": 0.2075784439985
+     },
+     "direct_connect_seconds": {
+      "median": 0.001455495999834966,
+      "p95": 0.002953093999167322
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0011387145004846388,
+      "p95": 1.0276492180000787
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 33
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 7.67698265008221e-05,
+      "p95": 0.0002024887139978091
+     }
+    },
+    {
+     "name": "stream_10000",
+     "body": 1000,
+     "events": 10000,
+     "clients": 1,
+     "governed": true,
+     "requests": 5,
+     "added_first_byte_seconds": {
+      "median": 0.0053358169989223825,
+      "p95": 0.005936624998867046
+     },
+     "added_total_seconds": {
+      "median": 0.08766975400067167,
+      "p95": 0.09658934499930183
+     },
+     "direct_total_seconds": {
+      "median": 0.0016532139998162165,
+      "p95": 0.0019074990013905335
+     },
+     "proxied_total_seconds": {
+      "median": 0.08923006199984229,
+      "p95": 0.0983760210001492
+     },
+     "direct_connect_seconds": {
+      "median": 0.00016436599980806932,
+      "p95": 0.00019312800031912047
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0001131349999923259,
+      "p95": 0.00012854700071329717
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 8.766975400067167e-06,
+      "p95": 9.658934499930183e-06
+     }
+    },
+    {
+     "name": "stream_10000",
+     "body": 1000,
+     "events": 10000,
+     "clients": 4,
+     "governed": true,
+     "requests": 20,
+     "added_first_byte_seconds": {
+      "median": 0.11364476249946165,
+      "p95": 0.3002385130002949
+     },
+     "added_total_seconds": {
+      "median": 0.3147532795001098,
+      "p95": 0.4216793779996806
+     },
+     "direct_total_seconds": {
+      "median": 0.004962771498867369,
+      "p95": 0.0072097419997589896
+     },
+     "proxied_total_seconds": {
+      "median": 0.31747474399981,
+      "p95": 0.42731047099914576
+     },
+     "direct_connect_seconds": {
+      "median": 0.0010457155003678054,
+      "p95": 0.0020420370001374977
+     },
+     "proxied_connect_seconds": {
+      "median": 0.00035811899942927994,
+      "p95": 0.0007453270009136759
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 0
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 3.147532795001098e-05,
+      "p95": 4.216793779996806e-05
+     }
+    },
+    {
+     "name": "stream_10000",
+     "body": 1000,
+     "events": 10000,
+     "clients": 16,
+     "governed": true,
+     "requests": 80,
+     "added_first_byte_seconds": {
+      "median": 0.3649234370004706,
+      "p95": 0.9278091140004108
+     },
+     "added_total_seconds": {
+      "median": 0.5298232305003694,
+      "p95": 1.0040581320008641
+     },
+     "direct_total_seconds": {
+      "median": 0.01731072999882599,
+      "p95": 0.02498444899902097
+     },
+     "proxied_total_seconds": {
+      "median": 0.5380350129998988,
+      "p95": 1.0194277640002838
+     },
+     "direct_connect_seconds": {
+      "median": 0.002229959000032977,
+      "p95": 0.007714786001088214
+     },
+     "proxied_connect_seconds": {
+      "median": 0.0008643270002721692,
+      "p95": 1.0319688350009528
+     },
+     "slow_connects": {
+      "direct": 0,
+      "proxied": 31
+     },
+     "failed": {
+      "direct": [],
+      "proxied": []
+     },
+     "reply_bodies_match": true,
+     "added_seconds_per_event": {
+      "median": 5.2982323050036946e-05,
+      "p95": 0.00010040581320008641
+     }
+    }
+   ],
+   "proxy_cpu_seconds": 20.842,
+   "proxy_peak_kib": 386300,
+   "log_rows": 680,
+   "requests": 680,
+   "failed_proxied_requests": 0,
+   "slow_proxied_connects": 172
+  }
+ ],
+ "scope": "loopback only: the proxy against an in-process upstream that answers at once; $0"
+}

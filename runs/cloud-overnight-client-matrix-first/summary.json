@@ -1,0 +1,279 @@
+{
+ "scope": "loopback fixtures only, $0; a report, not a pin change",
+ "rows": [
+  {
+   "version": "2.1.284",
+   "probed": true,
+   "shape_captured": true,
+   "trailing_system_message": true,
+   "betas_added": [],
+   "betas_removed": [],
+   "compaction_flagged": 1,
+   "cache_lifetimes": [
+    "5m"
+   ],
+   "tokens_match": true,
+   "hook_fields_added": [],
+   "hook_fields_removed": [],
+   "hook_events_missing": [],
+   "failures": {
+    "http_400": {
+     "exit_code": 1,
+     "result": "success",
+     "main_requests": 1,
+     "resent_without_streaming": false
+    },
+    "http_429": {
+     "exit_code": 1,
+     "result": "success",
+     "main_requests": 1,
+     "resent_without_streaming": false
+    },
+    "http_529": {
+     "exit_code": 1,
+     "result": "success",
+     "main_requests": 1,
+     "resent_without_streaming": false
+    },
+    "cut_stream": {
+     "exit_code": 0,
+     "result": "success",
+     "main_requests": 2,
+     "resent_without_streaming": true
+    },
+    "idle_stream": {
+     "exit_code": 0,
+     "result": "success",
+     "main_requests": 2,
+     "resent_without_streaming": true
+    }
+   }
+  },
+  {
+   "version": "2.1.289",
+   "probed": true,
+   "shape_captured": true,
+   "trailing_system_message": true,
+   "betas_added": [
+    "afk-mode-2026-01-31",
+    "dangerous-tool-use-2026-09-03",
+    "mid-conversation-tool-changes-2026-07-01",
+    "thinking-display-updates-2026-08-18"
+   ],
+   "betas_removed": [],
+   "compaction_flagged": 1,
+   "cache_lifetimes": [
+    "5m"
+   ],
+   "tokens_match": true,
+   "hook_fields_added": [],
+   "hook_fields_removed": [],
+   "hook_events_missing": [
+    "PostToolUseFailure"
+   ],
+   "failures": {
+    "http_400": {
+     "exit_code": 0,
+     "result": "success",
+     "main_requests": 2,
+     "resent_without_streaming": false
+    },
+    "http_429": {
+     "exit_code": 1,
+     "result": "success",
+     "main_requests": 1,
+     "resent_without_streaming": false
+    },
+    "http_529": {
+     "exit_code": 1,
+     "result": "success",
+     "main_requests": 1,
+     "resent_without_streaming": false
+    },
+    "cut_stream": {
+     "exit_code": 0,
+     "result": "success",
+     "main_requests": 2,
+     "resent_without_streaming": true
+    },
+    "idle_stream": {
+     "exit_code": 0,
+     "result": "success",
+     "main_requests": 2,
+     "resent_without_streaming": true
+    }
+   }
+  },
+  {
+   "version": "2.1.299",
+   "probed": true,
+   "shape_captured": true,
+   "trailing_system_message": true,
+   "betas_added": [
+    "afk-mode-2026-01-31",
+    "dangerous-tool-use-2026-09-03",
+    "mid-conversation-tool-changes-2026-07-01",
+    "thinking-display-updates-2026-08-18"
+   ],
+   "betas_removed": [
+    "mid-conversation-system-2026-04-07"
+   ],
+   "compaction_flagged": 1,
+   "cache_lifetimes": [
+    "5m"
+   ],
+   "tokens_match": true,
+   "hook_fields_added": [],
+   "hook_fields_removed": [],
+   "hook_events_missing": [
+    "PostToolUseFailure"
+   ],
+   "failures": {
+    "http_400": {
+     "exit_code": 0,
+     "result": "success",
+     "main_requests": 2,
+     "resent_without_streaming": false
+    },
+    "http_429": {
+     "exit_code": 1,
+     "result": "success",
+     "main_requests": 1,
+     "resent_without_streaming": false
+    },
+    "http_529": {
+     "exit_code": 1,
+     "result": "success",
+     "main_requests": 1,
+     "resent_without_streaming": false
+    },
+    "cut_stream": {
+     "exit_code": 0,
+     "result": "success",
+     "main_requests": 2,
+     "resent_without_streaming": true
+    },
+    "idle_stream": {
+     "exit_code": 0,
+     "result": "success",
+     "main_requests": 2,
+     "resent_without_streaming": true
+    }
+   }
+  },
+  {
+   "version": "2.1.300",
+   "probed": true,
+   "shape_captured": true,
+   "trailing_system_message": true,
+   "betas_added": [
+    "afk-mode-2026-01-31",
+    "dangerous-tool-use-2026-09-03",
+    "mid-conversation-tool-changes-2026-07-01",
+    "thinking-display-updates-2026-08-18"
+   ],
+   "betas_removed": [
+    "mid-conversation-system-2026-04-07"
+   ],
+   "compaction_flagged": 1,
+   "cache_lifetimes": [
+    "5m"
+   ],
+   "tokens_match": true,
+   "hook_fields_added": [],
+   "hook_fields_removed": [],
+   "hook_events_missing": [
+    "PostToolUseFailure"
+   ],
+   "failures": {
+    "http_400": {
+     "exit_code": 0,
+     "result": "success",
+     "main_requests": 2,
+     "resent_without_streaming": false
+    },
+    "http_429": {
+     "exit_code": 1,
+     "result": "success",
+     "main_requests": 1,
+     "resent_without_streaming": false
+    },
+    "http_529": {
+     "exit_code": 1,
+     "result": "success",
+     "main_requests": 1,
+     "resent_without_streaming": false
+    },
+    "cut_stream": {
+     "exit_code": 0,
+     "result": "success",
+     "main_requests": 2,
+     "resent_without_streaming": true
+    },
+    "idle_stream": {
+     "exit_code": 0,
+     "result": "success",
+     "main_requests": 2,
+     "resent_without_streaming": true
+    }
+   }
+  },
+  {
+   "version": "2.1.301",
+   "probed": true,
+   "shape_captured": true,
+   "trailing_system_message": true,
+   "betas_added": [
+    "afk-mode-2026-01-31",
+    "dangerous-tool-use-2026-09-03",
+    "mid-conversation-tool-changes-2026-07-01",
+    "thinking-display-updates-2026-08-18"
+   ],
+   "betas_removed": [
+    "mid-conversation-system-2026-04-07"
+   ],
+   "compaction_flagged": 1,
+   "cache_lifetimes": [
+    "5m"
+   ],
+   "tokens_match": true,
+   "hook_fields_added": [],
+   "hook_fields_removed": [],
+   "hook_events_missing": [
+    "PostToolUseFailure"
+   ],
+   "failures": {
+    "http_400": {
+     "exit_code": 0,
+     "result": "success",
+     "main_requests": 2,
+     "resent_without_streaming": false
+    },
+    "http_429": {
+     "exit_code": 1,
+     "result": "success",
+     "main_requests": 1,
+     "resent_without_streaming": false
+    },
+    "http_529": {
+     "exit_code": 1,
+     "result": "success",
+     "main_requests": 1,
+     "resent_without_streaming": false
+    },
+    "cut_stream": {
+     "exit_code": 0,
+     "result": "success",
+     "main_requests": 2,
+     "resent_without_streaming": true
+    },
+    "idle_stream": {
+     "exit_code": 0,
+     "result": "success",
+     "main_requests": 2,
+     "resent_without_streaming": true
+    }
+   }
+  }
+ ]
+}

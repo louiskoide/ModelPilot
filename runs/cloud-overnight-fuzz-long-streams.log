@@ -1,0 +1,26 @@
+test_streams_pass_byte_for_byte_and_are_priced_as_the_reference_or_unknown (tests.test_fuzz.StreamFuzzTests.test_streams_pass_byte_for_byte_and_are_priced_as_the_reference_or_unknown) ... FAIL
+
+======================================================================
+FAIL: test_streams_pass_byte_for_byte_and_are_priced_as_the_reference_or_unknown (tests.test_fuzz.StreamFuzzTests.test_streams_pass_byte_for_byte_and_are_priced_as_the_reference_or_unknown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/user/wt/fuzz/tests/test_fuzz.py", line 361, in test_streams_pass_byte_for_byte_and_are_priced_as_the_reference_or_unknown
+    self.assertEqual(found[:5], [], f'{len(found)} findings')
+AssertionError: Lists differ: [(625, 'cost', 2.67e-05, None, None), (105[159 chars]one)] != []
+
+First list contains 5 additional elements.
+First extra element 0:
+(625, 'cost', 2.67e-05, None, None)
+
++ []
+- [(625, 'cost', 2.67e-05, None, None),
+-  (1055, 'cost', 0.016785150000000002, None, None),
+-  (1435, 'cost', 0.0147774, None, None),
+-  (1587, 'cost', 0.01327875, None, None),
+-  (1912, 'cost', 0.00322155, None, None)] : 125 findings
+
+----------------------------------------------------------------------
+Ran 1 test in 421.848s
+
+FAILED (failures=1)
+exit 1 seconds 422
