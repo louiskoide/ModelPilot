@@ -143,14 +143,22 @@ class UsageObserver:
         self.invalid = True
         self.problem = self.problem or problem
 
+    def merge(self, usage):
+        """An event's usage over what came before. Anything but an object is unreadable usage (October 15 fuzz: an
+        empty list, or a list of pairs, passed dict.update and the stream was priced on message_start's counts)."""
+        if isinstance(usage, dict):
+            self.usage.update(usage)
+        else:
+            self.fail('unparseable_event')
+
     def event(self, obj):
         kind = obj.get('type')
         if kind == 'message_start':
-            self.usage.update(obj.get('message', {}).get('usage', {}))
+            self.merge(obj.get('message', {}).get('usage', {}))
             self.model = obj.get('message', {}).get('model')
         elif kind == 'message_delta':
             # Stream deltas contain cumulative counters, not increments.
-            self.usage.update(obj.get('usage', {}))
+            self.merge(obj.get('usage', {}))
         elif kind == 'message_stop':
             self.complete = True
         elif kind == 'error':
