@@ -1041,6 +1041,46 @@ python3.12 -m modelpilot.risk_predictor rate --out runs/risk-predictor-<ts> --li
 python3.12 -m modelpilot.risk_predictor score runs/risk-predictor-<ts>
 ```
 
+### Turn-start risk predictor: result (October 15; $0.63 known, one request's cost unknown)
+
+The user ran the pre-registered command once, from `main` at `806b8ea` (`runs/risk-predictor-20261015-174922`, 17:49 to about 18:13 PDT), then `score`.
+
+**Verdict: pass, by one task.** Haiku 5.5 flagged 6 of the 8 M tasks, p 0.045.
+- **Not void.** The plan records `806b8ea` with no uncommitted changes, and that commit's `risk_predictor.py` has the pre-registered SHA-256 `35efe96e…`. It was one `rate --live` pass. Every task got a usable answer (the limit was 6 without one).
+- **Requests:** 198 sent. 175 were rated, 22 replies were unusable, and 1 failed (`SSLError`, cost unknown). 21 tasks rest on 2 answers; `nx-ismags-monomorphism` and `tomli-key-parts-limit` on 1.
+- **Cost:** $0.6266 known. The stop counter's $0.6863 counts the failed request at its maximum. Expected: $0.62.
+- **Labels as pre-registered:** M on 8 tasks; the test tasks match item 8's published labels.
+- **The test:** the cut was 55. Six tasks tie there, so 27 were flagged, not 22. k = 6 of 8 (p 0.0446 < 0.05, and k ≥ 4).
+  - Caught: `nx-ismags-monomorphism` 85, `sqlglot-duckdb-macro-overloads` 72, `tomli-decode-error-attrs` 62, and `nx-edge-betweenness-k-scaling`, `nx-floyd-warshall-negative-cycle`, `nx-tree-centroid` at 55.
+  - Missed: `parse-decimal-grouping` 45 and `mi-subfactorial` 35.
+
+**Reported, outside the verdict.**
+- **Dev:** 2 of 3 caught, 12 of 29 flagged, AUC 0.718.
+- **Test:** 4 of 5 caught, 15 of 37 flagged, AUC 0.647.
+- **All:** AUC 0.673 for M and 0.662 for Y_O. Y_O flagged 4 of 6, Y_S 2 of 2.
+- **For an Opus user** (65 tasks with both settings' costs; per task, the rating's $0.0104 included):
+
+  | Setting | $/task |
+  | --- | --- |
+  | All low concise | 0.0744 |
+  | Oracle | 0.0961 |
+  | Routed | 0.1887 |
+  | All Opus 5.5 | 0.2395 |
+
+  The two missed tasks are both Y_O: Opus solves them, and the routing leaves them on low concise.
+
+**Why the pass is thin.**
+- **The tie decides it.** Three of the six catches sit exactly on the cut. With 22 flagged, 6 caught would have given p 0.014; with 27 flagged it gives 0.045, and 5 caught would give 0.173, a fail. Without the tied tasks (21 flagged, 3 caught) p is 0.50. The tie rule was pre-registered, so the verdict stands, but its margin is one task.
+- **The labels were known** when the prompt was written, as said in advance.
+- **Discrimination is modest:** AUC 0.67.
+- **The routing falls below an Opus user's floor.** It saves $0.051 a task (21%) against all Opus, but of the 65 tasks it fails 2 that Opus 5.5 passes. The floor allows no such loss.
+
+**Robustness, outside the pre-registration** (`runs/risk-predictor-lenient-20261015.py` → `.json`, $0). All 22 unusable replies are ```json blocks with a numeric `risk`, refused because the JSON is invalid elsewhere in the block (20 "Expecting ':' delimiter", 2 "Expecting ',' delimiter"). Read by a regex instead, they change no flag: still 27 flagged and 6 caught, p 0.045. The parser stays as tested.
+
+**What the pass committed to, done offline ($0):** the arm `modelpilot-for-opus-risk` (`modelpilot/risk_route.py`; `docs/m6-modelpilot-policy.md`, "Risk-routed arm"). It rates each task with this predictor, unchanged, and runs a task at or above 55 as `modelpilot-for-opus` and the rest as `modelpilot-for-sonnet`. Replayed over this run, the frozen threshold reproduces all 27 flags (`runs/risk-route-replay-20261015.json`). It refuses every task in the benchmark today, so it can't run until new tasks exist.
+
+**Not done; the user's call.** A claim needs new labelled tasks. At the 66's rate (8 misses in 66 tasks), each miss to catch takes about 8 new tasks, plus labelling trials on low concise, Sonnet 5.5 medium and Opus 5.5. Option (b) of October 14 put more labelled tasks at $73–146. The floor gap above argues against it: on these tasks the routing already fails 2 that Opus passes.
+
 ### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
 
 User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku passes, the tests are too easy"), so harder tasks come before item 8's labels, from sqlglot (MIT; surveyed October 4, above), in stages. Stage 1 builds 8 tasks and screens them with one low concise and one Opus 5.5 trial each; a full batch follows only if the repository produces misses. sqlglot joins the tuning split; the final split and its lock are unchanged.

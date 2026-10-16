@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Updated October 14, 2026. History: `docs/changelog.md`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
+Updated October 15, 2026. History: `docs/changelog/`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
 
 ## Objective
 
@@ -26,7 +26,7 @@ The project is a tested set of components and bounded harnesses, not an operatio
 
 Files are under `runs/`; the full table, failures included: `docs/evidence.md`.
 
-- Cheapest at equal quality: `sonnet-5.5-low-concise`, $0.0689 a task, $0.0180 below Sonnet 5.5 medium on 23 tuning tasks (`paired-low-concise-23-20261004.json`); $0.107 against $0.140 on networkx.
+- Cheapest at equal quality: `sonnet-5.5-low-concise`, $0.0689 a task, $0.0180 below Sonnet 5.5 medium on 23 tuning tasks (`paired-low-concise-23-20261004.json`).
 - Sonnet 5.5 falls short (strict) on `parse-decimal-grouping` (medium 1/6, Opus 4/4), `tomli-decode-error-attrs` (0/10, 2/4) and `nx-ismags-monomorphism` (5/8, 4/4). Every Sonnet/Opus failure reported success; a redo costs about $0.25 a task (`redo-cost-20261004.json`).
 - The ModelPilot arm never left low concise on the 29 tuning tasks (`bench-20261006-134508`): +$0.0045 a task against it, no difference shown; a third of Opus 5.5's cost, 0.915 against 0.981 strict (`opus-vs-modelpilot-20261006.json`). `jev_weight` 0.03 (maximum likelihood 0): Jev doesn't predict the misses.
 - Item 8: no turn-start rule finds misses (38 tasks; strict low concise 95.5%, Sonnet medium 93.2%, Opus 100%; `item8-prereg-score-20261011.json`).
@@ -64,7 +64,7 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 - Latest test count and log: the newest `docs/changelog/` entry; record counts there.
 - Put the pinned client 2.1.284 (`work/claude-client/node_modules/.bin`) first on PATH: 2.1.289 retries refused requests.
 - Real-client, bench and Jev tests need `work/` and node; CI (3.10, 3.14) skips them.
-- Paid, all behind `--live` (inspect each plan first): `cache_probe`, `claude_check`, `worker_check`, `cascade_check`, `evaluate`, `jev_check`, `jev_route_check`, `governed_session`, `bench`, `thinking_probe`. Limits are stopping thresholds, not billing caps.
+- Paid, all behind `--live` (inspect each plan first): `cache_probe`, `claude_check`, `worker_check`, `cascade_check`, `evaluate`, `jev_check`, `jev_route_check`, `governed_session`, `bench`, `thinking_probe`, `risk_predictor`. Limits are stopping thresholds, not billing caps.
 
 ## Code map (`modelpilot/`; detail in `docs/code-map.md`)
 
@@ -79,8 +79,8 @@ Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 fou
 5. Dropped for the quality floor (user decision, Oct 8).
 6. Mid-task compaction: no loss shown (Oct 13), not on Haiku. Long sessions await approval.
 7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
-8. Done Oct 11: fail. Post-run miss detectors: none shown to pay (Oct 14).
-9. Caveman: parked (user decision); its $0 pass found at most 1%, all lossy.
+8. Fail (Oct 11); post-run checks don't pay (Oct 14). Haiku risk rating: thin pass below Opus's floor; `-for-opus-risk` awaits new tasks (Oct 15).
+9. Caveman: parked (user decision).
 10. Dropped (8 failed); Jev's advisor role too (Oct 11).
 11. 4b held (user decision; its trial-count rule gives n=1).
 12. Governor: live checks passed (Oct 12); idle plans wait out the cache TTL, a prompt late; compact if it pays (Oct 13).
