@@ -27,16 +27,32 @@ the quality floor skips Jev by design and moves on measured pass rates alone; ga
 (decisions, and how many moved).
 
 With the quality floor on (an arm's overrides), each replayed decision carries the floor's verdict (quality_floor).
+
+--intervals (October 15, overnight cloud run; a report, off by default) asks how firmly the measured pass rates hold
+each decision. Each rate calibration uses is (passed + 1) / (trials + 2), the mean of a uniform prior's Beta(passed + 1,
+failed + 1) posterior; the output gives that posterior's equal-tailed 95% interval for each. Every replayable decision is
+then decided again with the rates moved within their intervals: each rate alone at 9 points across its interval (the
+others at their point values), all at their low ends, all at their high ends, and 64 seeded joint draws (each rate
+uniform within its interval). A row's interval_flips names what would change it. That is a search, not a proof: a
+flip strictly inside an interval, between grid points and missed by the draws, is possible. Nothing here changes a
+decision, the config or its rates.
 """
 import argparse
 from collections import Counter
+import copy
 import hashlib
 import json
+import math
 from pathlib import Path
+import random
 import sqlite3
 from . import switch_policy
 
 RECORDED_BYTES_PER_TOKEN = 4  # configs/modelpilot-policy.json at every recorded run before October 3
+INTERVAL_LEVEL = .95
+INTERVAL_GRID = 9  # points across each rate's interval, its ends included
+JOINT_SAMPLES = 64  # seeded draws of every rate at once
+JOINT_SEED = 20261015
 
 
 def _parameters(record):
@@ -77,6 +93,105 @@ def replay(payload, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_TOKE
     return decision
 
 
+def _beta_fraction(a, b, x):
+    """The continued fraction of the regularized incomplete beta function (modified Lentz)."""
+    tiny = 1e-300
+    c, d = 1.0, 1 - (a + b) * x / (a + 1)
+    d = 1 / (d if abs(d) > tiny else tiny)
+    h = d
+    for m in range(1, 500):
+        for numerator in (m * (b - m) * x / ((a + 2 * m - 1) * (a + 2 * m)),
+                          -(a + m) * (a + b + m) * x / ((a + 2 * m) * (a + 2 * m + 1))):
+            d = 1 + numerator * d
+            d = 1 / (d if abs(d) > tiny else tiny)
+            c = 1 + numerator / c
+            c = c if abs(c) > tiny else tiny
+            h *= d * c
+        if abs(d * c - 1) < 1e-15:
+            break
+    return h
+
+
+def beta_cdf(x, a, b):
+    """Beta(a, b)'s distribution function: the regularized incomplete beta function I_x(a, b)."""
+    if x <= 0:
+        return 0.0
+    if x >= 1:
+        return 1.0
+    front = math.exp(math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log1p(-x))
+    if x < (a + 1) / (a + b + 2):
+        return front * _beta_fraction(a, b, x) / a
+    return 1 - front * _beta_fraction(b, a, 1 - x) / b
+
+
+def beta_quantile(q, a, b):
+    """Beta(a, b)'s q-quantile, by bisection."""
+    low, high = 0.0, 1.0
+    for _ in range(100):
+        mid = (low + high) / 2
+        low, high = (mid, high) if beta_cdf(mid, a, b) < q else (low, mid)
+    return (low + high) / 2
+
+
+def calibration_intervals(cfg, level=INTERVAL_LEVEL):
+    """Each measured setting's pass rate as the policy reads it (switch_policy.measured_ok: (passed + 1) / (trials + 2),
+    the mean of a uniform prior's Beta(passed + 1, failed + 1) posterior) and that posterior's equal-tailed interval."""
+    tail = (1 - level) / 2
+    out = {}
+    for key, o in cfg['calibration']['outcomes'].items():
+        a, b = o['passed'] + 1, o['trials'] - o['passed'] + 1
+        out[key] = {'passed': o['passed'], 'trials': o['trials'], 'rate': a / (a + b),
+                    'low': beta_quantile(tail, a, b), 'high': beta_quantile(1 - tail, a, b)}
+    return out
+
+
+def with_rates(cfg, values):
+    """A copy of cfg whose calibration reads values ({setting: pass rate}) as its measured rates: passed becomes
+    rate x (trials + 2) - 1, which measured_ok reads back as the rate. For sensitivity only: not a config to save or load."""
+    new = copy.deepcopy(cfg)
+    for key, rate in values.items():
+        o = new['calibration']['outcomes'][key]
+        o['passed'] = rate * (o['trials'] + 2) - 1
+    return new
+
+
+def interval_variants(cfg, intervals, grid=INTERVAL_GRID, samples=JOINT_SAMPLES, seed=JOINT_SEED):
+    """(label, config) pairs to decide again with: each rate alone at grid points across its interval, all at their low
+    ends, all at their high ends, and seeded joint draws (each rate uniform within its interval)."""
+    variants = []
+    for key, i in intervals.items():
+        for n in range(grid):
+            rate = i['low'] + (i['high'] - i['low']) * n / (grid - 1)
+            variants.append(({'kind': 'one', 'outcome': key, 'rate': rate}, with_rates(cfg, {key: rate})))
+    for end in ('low', 'high'):
+        values = {k: i[end] for k, i in intervals.items()}
+        variants.append(({'kind': f'all_{end}'}, with_rates(cfg, values)))
+    draw = random.Random(seed)
+    for _ in range(samples):
+        values = {k: draw.uniform(i['low'], i['high']) for k, i in intervals.items()}
+        variants.append(({'kind': 'joint'}, with_rates(cfg, values)))
+    return variants
+
+
+def interval_flips(payload, variants, rates, per_token, current, decision):
+    """What within the intervals would change a replayed decision: the one-at-a-time rates that do (each with the
+    decision it gives), the decision at either corner if it differs, and how many joint draws differ."""
+    flips = {'one_at_a_time': [], 'all_low': None, 'all_high': None, 'joint_draws': 0}
+    for label, variant in variants:
+        new = replay(payload, variant, rates, per_token, current=current)
+        if new is None or (new['action'], _setting(new)) == (decision['action'], _setting(decision)):
+            continue
+        if label['kind'] == 'one':
+            flips['one_at_a_time'].append({'outcome': label['outcome'], 'rate': round(label['rate'], 4),
+                                           'action': new['action'], 'target': _setting(new)})
+        elif label['kind'] == 'joint':
+            flips['joint_draws'] += 1
+        else:
+            flips[label['kind']] = {'action': new['action'], 'target': _setting(new)}
+    flips['any'] = bool(flips['one_at_a_time'] or flips['all_low'] or flips['all_high'] or flips['joint_draws'])
+    return flips
+
+
 def _setting(decision):
     return '/'.join(str(x) for x in decision['target'])
 
@@ -91,10 +206,10 @@ def recorded_start(record, payloads):
     return tuple(start or (payloads[0].get('current') if payloads else None) or ())
 
 
-def replay_run(run_dir, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_TOKEN, start=None):
+def replay_run(run_dir, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_TOKEN, start=None, variants=None):
     """One row per journaled decision of every ModelPilot trial in a run. recorded_bytes_per_token: for trials that
     don't record their own. start: replay from this setting while a trial is still on the start it recorded (see the
-    module docstring)."""
+    module docstring). variants (interval_variants): each replayable row also gets its interval_flips."""
     from .bench_report import cold_cost, load_run
     _, records = load_run(run_dir, rates)
     outcome = {(r['task'], r['arm'], r.get('trial', 0)): r for r in records}
@@ -136,6 +251,8 @@ def replay_run(run_dir, cfg, rates, recorded_bytes_per_token=RECORDED_BYTES_PER_
                 changed = (new['action'], _setting(new)) != (baseline['action'], baseline['target'])
                 row['status'] = 'path_diverged' if diverged else 'changed' if changed else 'same'
                 diverged = diverged or changed
+                if variants:
+                    row['interval_flips'] = interval_flips(payload, variants, rates, per_token, current, new)
             rows.append(row)
     return rows
 
@@ -153,8 +270,15 @@ def summarize(rows):
             'below_floor': {'decisions': len(floor), 'moved': sum(r['replayed']['action'] != 'stay' for r in floor)},
             'closest_skipped_usd': max((r['replayed']['gate'].get('closest_usd') for r in gated if r['replayed']['gate']['skip']
                                         and r['replayed']['gate'].get('closest_usd') is not None), default=None)}
+    checked = [r['interval_flips'] for r in rows if r.get('interval_flips')]
+    intervals = {'decisions': len(checked), 'flippable': sum(f['any'] for f in checked),
+                 'by_outcome': dict(Counter(o for f in checked for o in sorted({x['outcome'] for x in f['one_at_a_time']}))),
+                 'at_all_low': sum(f['all_low'] is not None for f in checked),
+                 'at_all_high': sum(f['all_high'] is not None for f in checked),
+                 'by_joint_draws': sum(f['joint_draws'] > 0 for f in checked)}
     return {'decisions': len(rows), 'status': dict(Counter(r['status'] for r in rows)),
             **({'gate': gate} if gated else {}),
+            **({'interval_sensitivity': intervals} if checked else {}),
             'by_trigger': {t: dict(Counter(r['status'] for r in rows if r['trigger'] == t))
                            for t in sorted({r['trigger'] for r in rows if r['trigger']})},
             'rebased': sum('baseline' in r for r in rows),
@@ -176,21 +300,31 @@ def main():
                         help="For trials that don't record theirs (before October 3)")
     parser.add_argument('--arm', help="Replay through this arm's policy overrides (bench.ARMS), from its start")
     parser.add_argument('--out', type=Path, help='Write the rows and summary here (must not exist)')
+    parser.add_argument('--intervals', action='store_true',
+                        help='Also report 95%% intervals on the measured pass rates and what within them would change '
+                             'each decision (a report: decisions are replayed as without it)')
     args = parser.parse_args()
     from .bench import ARMS
     overrides = ARMS[args.arm].get('policy_overrides') if args.arm else None
     start = [ARMS[args.arm]['model'], ARMS[args.arm]['effort']] if args.arm else None
     cfg, table = switch_policy.with_overrides(switch_policy.load(), overrides), rates()
-    rows = [row for run in args.runs for row in replay_run(run, cfg, table, args.recorded_bytes_per_token, start)]
+    intervals = calibration_intervals(cfg) if args.intervals else None
+    variants = interval_variants(cfg, intervals) if intervals else None
+    rows = [row for run in args.runs for row in replay_run(run, cfg, table, args.recorded_bytes_per_token, start, variants)]
     result = {'config_sha256': hashlib.sha256(switch_policy.CONFIG.read_bytes()).hexdigest(), 'arm': args.arm,
               'overrides': overrides, 'start': start,
               'recorded_bytes_per_token': args.recorded_bytes_per_token, 'summary': summarize(rows), 'rows': rows}
+    if intervals:
+        result['intervals'] = {'level': INTERVAL_LEVEL, 'method': 'equal-tailed Beta(passed + 1, failed + 1)',
+                               'grid': INTERVAL_GRID, 'joint_samples': JOINT_SAMPLES, 'seed': JOINT_SEED,
+                               'rates': intervals}
     for r in rows:
         new, was = r['replayed'] or {}, _baseline(r)
         print(f"{r['run'][6:]} {r['task']:30s} {r['trigger']:14s} {was['action']:4s} {was['target']:24s} "
               f"-> {new.get('action', '-'):4s} {new.get('target', '-'):24s} {r['status']:13s} "
               f"p(current) {r['recorded']['p_ok_current'] or 0:.2f} -> {new.get('p_ok_current') or 0:.2f}  "
-              f"passed {r['trial_passed']}")
+              f"passed {r['trial_passed']}" + ('  flips within the intervals' if (r.get('interval_flips') or {}).get('any')
+                                               else ''))
     print(json.dumps(result['summary'], indent=2))
     if args.out:
         with args.out.open('x') as f:  # never overwrite evidence
