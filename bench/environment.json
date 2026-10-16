@@ -3,11 +3,20 @@
  "implementation": "CPython",
  "source": "Homebrew python@3.12, project venv at work/bench/py312 (ignored)",
  "packages": [
+  "attrs==26.1.0",
+  "freezegun==1.5.5",
+  "hypothesis==6.140.2",
   "iniconfig==2.3.0",
   "packaging==26.3",
   "pluggy==1.6.0",
+  "pretend==1.0.9",
   "Pygments==2.21.0",
-  "pytest==8.4.2"
+  "pytest==8.4.2",
+  "python-dateutil==2.9.0.post0",
+  "six==1.17.0",
+  "sortedcontainers==2.4.0",
+  "tomli_w==1.2.0",
+  "typing_extensions==4.15.0"
  ],
  "recreate": "python3.12 -m venv work/bench/py312 && work/bench/py312/bin/pip install -r <(packages above)",
  "note": "The agent and the grader both use this interpreter: its bin directory leads the agent PATH.",
