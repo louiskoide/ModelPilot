@@ -43,6 +43,7 @@ Python 3.10 or newer, standard library only. On macOS, `pip install certifi` sup
 
 ```sh
 python3 -m unittest discover -s tests
+python3 -m modelpilot                                         # lists the commands; [paid: --live] marks paid ones
 python3 -m modelpilot.evaluate                                # writes a plan; sends nothing
 python3 -m modelpilot.governor --out runs/governor-demo.json  # offline walk-through
 ```

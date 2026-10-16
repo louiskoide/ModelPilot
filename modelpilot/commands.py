@@ -82,6 +82,7 @@ COMMANDS = (
 
 # Modules with a `main` that aren't commands, and why.
 EXCLUDED = {
+    '__main__': 'python3 -m modelpilot itself: it lists these commands and runs one',
     'line_trace': 'a tracer run by path with the bench interpreter (exposure.trace); its main takes argv, no CLI',
 }
 
