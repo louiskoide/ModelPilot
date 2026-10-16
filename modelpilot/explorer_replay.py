@@ -197,6 +197,7 @@ def replay(trials, rates, k_grid=K_GRID):
         mine = [r for r in rows_out if r['arm'] == arm]
         costs = [r['cost'] for r in mine if r['cost'] is not None]
         summary = {'trials': len(mine), 'mean_trial_cost_usd': round(statistics.mean(costs), 5) if costs else None,
+                   'unpriced_trials': len(mine) - len(costs),  # left out of the mean (October 15 audit)
                    'candidates': {s: {'mean_results': round(statistics.mean(r['candidates'][s]['results'] for r in mine), 2),
                                       'mean_tokens': round(statistics.mean(r['candidates'][s]['tokens'] for r in mine)),
                                       'kept_for_edit': sum(r['candidates'][s]['kept_for_edit'] for r in mine)}

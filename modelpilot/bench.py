@@ -253,6 +253,11 @@ def accounting(rows, final, jev=False):
     answered = [r for r in messages if not (isinstance(r.get('http_status'), int) and r['http_status'] != 200)]
     if_free = sum(r['cost_usd'] for r in answered) if answered and all(r.get('cost_usd') is not None for r in answered) else None
     proxy_tokens = {wire: sum((r.get('usage') or {}).get(wire, 0) for r in ok) for wire, _ in TOKEN_FIELDS}
+    # An unpriced 200 whose usage is missing a counter or never finished (a cut stream) leaves the totals a lower bound
+    # (October 15 audit: they were summed as complete, a missing counter as 0). A priced row's usage is complete.
+    tokens_complete = all(r.get('cost_usd') is not None or (
+        all(isinstance((r.get('usage') or {}).get(wire), int) for wire, _ in TOKEN_FIELDS)
+        and r.get('usage_complete', True) is not False) for r in ok)
     usage = final.get('modelUsage') or {}
     client_tokens = {wire: sum(m.get(name, 0) for m in usage.values() if isinstance(m, dict)) for wire, name in TOKEN_FIELDS}
     unpriced = sum(r.get('cost_usd') is None for r in messages)
@@ -276,8 +281,8 @@ def accounting(rows, final, jev=False):
            'cost_if_rejected_free_usd': if_free + side_known if if_free is not None and side_unpriced == 0 else None,
            'rejected_assumption': 'API error responses counted as $0 (unconfirmed)',
            'cost_scope': 'provider_only_router_unpriced' if jev else 'complete',
-           'proxy_tokens': proxy_tokens, 'client_tokens': client_tokens,
-           'tokens_match': bool(usage) and proxy_tokens == client_tokens,
+           'proxy_tokens': proxy_tokens, 'proxy_tokens_complete': tokens_complete, 'client_tokens': client_tokens,
+           'tokens_match': bool(usage) and tokens_complete and proxy_tokens == client_tokens,
            'client_cost_usd': client,
            'client_cost_basis': 'sentinel_model_unknown_price' if jev else 'client_model_table',
            'client_cost_matches': None if jev else  # the client's own requests only

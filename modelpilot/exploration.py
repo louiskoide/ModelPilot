@@ -30,10 +30,10 @@ def measured_switch_usd(rows, target_model, rates):
     usage = main[0].get('usage') or {}
     rate = tier(rates.get(target_model), prompt_tokens(usage), main[0].get('started_unix'))
     split = usage.get('cache_creation') or {}
-    if not rate or not split:
-        return None
-    return (split.get('ephemeral_5m_input_tokens', 0) * (rate['write_5m'] - rate['read']) +
-            split.get('ephemeral_1h_input_tokens', 0) * (rate['write_1h'] - rate['read'])) / 1e6
+    keys = ('ephemeral_5m_input_tokens', 'ephemeral_1h_input_tokens')
+    if not rate or not all(isinstance(split.get(k), int) for k in keys):
+        return None  # a lifetime's count missing is unknown, not 0 (October 15 audit)
+    return (split[keys[0]] * (rate['write_5m'] - rate['read']) + split[keys[1]] * (rate['write_1h'] - rate['read'])) / 1e6
 
 
 def trial_view(record, rows, rates):

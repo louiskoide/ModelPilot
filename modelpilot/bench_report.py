@@ -201,10 +201,15 @@ def cost_components(rows, rates):
     """Measured dollars by kind of token: uncached input, cache writes, cache reads and output.
 
     Priced requests only, with the rates they were priced at; None when a priced request can't be split.
+    unpriced_requests counts the sent requests left out (October 15 audit): when it is above 0 the four figures are
+    a lower bound.
     """
-    out = {'input': 0.0, 'cache_write': 0.0, 'cache_read': 0.0, 'output': 0.0}
+    out = {'input': 0.0, 'cache_write': 0.0, 'cache_read': 0.0, 'output': 0.0, 'unpriced_requests': 0}
     for r in rows:
-        if r.get('kind') not in ('messages', 'side_call') or r.get('cost_usd') is None:
+        if r.get('kind') not in ('messages', 'side_call') or r.get('status') == 'refused':
+            continue
+        if r.get('cost_usd') is None:
+            out['unpriced_requests'] += 1
             continue
         usage = r.get('usage') or {}
         rate = tier(rates.get(r.get('model')), prompt_tokens(usage), r.get('started_unix'))
@@ -231,9 +236,12 @@ def write_sources(rows, rates):
     the earlier output and tool results included. Any shortfall was written again: rebuild_expired when that
     prefix was older than its TTL, else rebuild_changed (earlier content changed). The trial's first main-loop
     request is cold_start; the first at any later setting is switch. Requests without tools are Claude Code's
-    own side calls. Dollars are None when a writing row has no write breakdown or no rates."""
-    messages = sorted((r for r in rows if r.get('kind') in ('messages', 'side_call') and r.get('http_status') == 200
-                       and 'cache_read_input_tokens' in (r.get('usage') or {})), key=lambda r: r.get('started_unix', 0))
+    own side calls. Dollars are None when a writing row has no write breakdown or no rates. unmeasured_requests counts
+    sent requests with no cache counts (lost, or answered with an error; October 15 audit): above 0, what they wrote
+    is unknown and the totals are a lower bound."""
+    sent = [r for r in rows if r.get('kind') in ('messages', 'side_call') and r.get('status') != 'refused']
+    messages = sorted((r for r in sent if r.get('http_status') == 200 and 'cache_read_input_tokens' in (r.get('usage') or {})),
+                      key=lambda r: r.get('started_unix', 0))
     tokens, dollars, last = dict.fromkeys(WRITE_SOURCES, 0), dict.fromkeys(WRITE_SOURCES, 0.0), {}
     for r in messages:
         usage = r['usage']
@@ -262,7 +270,7 @@ def write_sources(rows, rates):
         for source, n in parts.items():
             tokens[source] += n
             dollars[source] = None if dollars[source] is None or (n and per_token is None) else dollars[source] + n * (per_token or 0)
-    return {'tokens': tokens, 'usd': dollars}
+    return {'tokens': tokens, 'usd': dollars, 'unmeasured_requests': len(sent) - len(messages)}
 
 
 def cold_cost(record):
@@ -514,7 +522,9 @@ def modelpilot_breakdown(arm, trials, others):
                      'failed_after_cut_test_output': sum(v['excerpts']['cut_test_output'] and not v['passed'] for v in views)},
         'cost_components_usd': {k: sum(c[k] for c in components) for k in ('input', 'cache_write', 'cache_read', 'output')}
                                if components else None,
-        'cost_components_trials': len(components)}
+        'cost_components_trials': len(components),
+        # Requests those trials sent that couldn't be priced: above 0, the components are a lower bound.
+        'cost_components_unpriced_requests': sum(c.get('unpriced_requests') or 0 for c in components)}
 
 
 def start_point_ceiling(by_arm, candidates):
@@ -555,7 +565,9 @@ def write_source_totals(records):
     total = sum(tokens.values())
     return {'trials': len(found), 'tokens': tokens, 'share': {k: n / total for k, n in tokens.items()} if total else None,
             'tokens_per_trial': total / len(found), 'usd': {k: sum(u[k] for u in priced) for k in WRITE_SOURCES},
-            'priced_trials': len(priced)}
+            'priced_trials': len(priced),
+            # Requests whose writes are unknown (no cache counts); above 0, the token totals are a lower bound.
+            'unmeasured_requests': sum(w.get('unmeasured_requests') or 0 for w in found)}
 
 
 def arm_summary(arm, complete, incomplete, arm_cells, rng, resamples):

@@ -256,8 +256,10 @@ def turns(record, rows, rates):
                     'compaction_cost_usd': (sum(r['cost_usd'] for r in compaction)
                                             if compaction and all(r.get('cost_usd') is not None for r in compaction)
                                             else None if compaction else 0.0),
-                    'compaction_output_tokens': sum(((r.get('usage') or {}).get('output_tokens') or 0)
-                                                    for r in compaction)})
+                    # Unknown when a compaction request's output count is missing (October 15 audit: it read 0).
+                    'compaction_output_tokens': (None if any(not isinstance((r.get('usage') or {}).get('output_tokens'), int)
+                                                             for r in compaction)
+                                                 else sum(r['usage']['output_tokens'] for r in compaction))})
         cold_before = cold_through
         answered = [r for r in mine if r.get('kind') == 'messages' and r.get('tool_count') and r.get('http_status') == 200]
         previous = max(answered, key=lambda r: r.get('started_unix', 0)) if answered else previous
@@ -286,7 +288,7 @@ def report(trials, rng_seed=0, resamples=10000):
         if record.get('complete') and record.get('shape') == 'sequence':
             by_arm.setdefault(record['arm'], []).append((record, turn_list))
     arms = {}
-    per_subtask = {}
+    per_subtask, by_subtask_runs = {}, {}
     for arm, items in sorted(by_arm.items()):
         costs, passes, returns, compaction = {}, {}, [], []
         sequence_costs = [r.get('cache', {}).get('cold_equivalent_cost_usd') for r, _ in items]
@@ -297,18 +299,24 @@ def report(trials, rng_seed=0, resamples=10000):
                 passes.setdefault(sub['task'], []).append(bool(sub['passed']))
             returns += [t['return_read_fraction'] for t in turn_list if t['prompt'] == 'task' and t['subtask']]
             compaction += [t for t in turn_list if t['prompt'] == 'compact']
+        by_subtask_runs[arm] = set(costs)
         per_subtask[arm] = ({t: sum(v) / len(v) for t, v in costs.items() if None not in v},
                             {t: sum(v) / len(v) for t, v in passes.items()})
         known = [c for c in sequence_costs if c is not None]
+        compaction_usd = [t['compaction_cost_usd'] for t in compaction]
+        compaction_tokens = [t['compaction_output_tokens'] for t in compaction]
         arms[arm] = {'sequences': len(items), 'subtasks': sum(len(v) for v in passes.values()),
                      'subtasks_passed': sum(sum(v) for v in passes.values()),
                      'mean_sequence_usd': sum(known) / len(known) if known else None,
                      'unknown_cost_sequences': len(sequence_costs) - len(known),
+                     # Left out of the per-subtask pairs below, which compare only subtasks priced on both arms.
+                     'unknown_cost_subtasks': sorted(t for t, v in costs.items() if None in v),
                      'returns': len(returns),
                      'returns_reading_conversation': sum(f is not None and f >= .5 for f in returns),
                      'compaction_turns': len(compaction),
-                     'compaction_usd': sum(t['compaction_cost_usd'] or 0 for t in compaction),
-                     'compaction_output_tokens': sum(t['compaction_output_tokens'] for t in compaction)}
+                     # Unknown when any compaction turn's is (October 15 audit: an unknown turn counted $0 here).
+                     'compaction_usd': None if None in compaction_usd else sum(compaction_usd),
+                     'compaction_output_tokens': None if None in compaction_tokens else sum(compaction_tokens)}
     pairs = []
     names = sorted(per_subtask)
     for i, a in enumerate(names):
@@ -317,7 +325,8 @@ def report(trials, rng_seed=0, resamples=10000):
             rng = random.Random(rng_seed)
             def mean_diff(sample, index=0):
                 return {'value': sum(per_subtask[a][index][t] - per_subtask[b][index][t] for t in sample) / len(sample)}
-            entry = {'arms': [a, b], 'subtasks': len(shared)}
+            ran = set(by_subtask_runs[a]) & set(by_subtask_runs[b])
+            entry = {'arms': [a, b], 'subtasks': len(shared), 'excluded_unpriced_subtasks': len(ran) - len(shared)}
             if shared:
                 entry['cost_per_subtask_usd'] = bench_report.difference(
                     mean_diff(shared)['value'], bench_report.bootstrap(shared, mean_diff, rng, resamples)['value'],

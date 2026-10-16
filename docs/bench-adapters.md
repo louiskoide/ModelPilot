@@ -171,3 +171,34 @@ Validation, all $0 with no provider traffic:
 - Governor, bench, report and adapter tests for the new gate, stop reasons, refusal counts, arm adapter and policy summary.
 
 Full regression: **413 tests, OK, 155.847 seconds** on Python 3.12 (`runs/modelpilot-active-arm-regression-py312.log`), none skipped. Python 3.9 shows only the two known `test_transport` errors (`runs/modelpilot-active-arm-regression-py39.log`). No paid calls. No live ModelPilot trial has run; the first is part of the 4a tuning run.
+
+## Unknown-cost audit (October 15)
+
+Overnight cloud run, item 4, branch `claude/unknown-cost-audit`, $0. The rule is "Unknown accounting remains unknown", and October 14's `router_cost` priced a missing record at $0. This audit read every function that sums or averages dollars or tokens. Each one was fed an input where everything is known, and the same input with one row's cost `None` or one usage field missing (`tests/test_unknown_cost_audit.py`, table-driven, 18 tests). The pass condition: the function returns unknown, or a figure labelled with what it left out. It never returns a smaller known total, and it never drops a trial without saying so. Every fix has a test that fails on the old code (9 of the 18).
+
+| Function | What it does with unknown | Verdict |
+| --- | --- | --- |
+| `bench.accounting` | `cost_usd` None with any unpriced row; `known_cost_usd` and `unpriced_requests` beside it; `cost_if_rejected_free_usd` is a labelled sensitivity | OK |
+| `bench.accounting` `proxy_tokens` | summed a 200 with a missing counter as 0, or a stream cut short as if complete, and `tokens_match` could still hold | **Fixed:** `proxy_tokens_complete`, which `tokens_match` now requires. Such a row's cost was already unknown, so no recorded cost changes |
+| `bench_report.cache_attribution` (cold-equivalent, measured) | None with any unpriced request or side call, or a write without a lifetime breakdown; reasons in `cold_equivalent_unknown` | OK |
+| `bench_report.repriced`, `api_key_equivalent`, `on_date` | a row of unknown cost stays unknown; a write without a breakdown is unpriced | OK |
+| `bench_report.cost_components` | priced requests only, nothing saying any were left out | **Fixed:** `unpriced_requests`; `modelpilot_breakdown` adds `cost_components_unpriced_requests` |
+| `bench_report.write_sources`, `write_source_totals` | skipped a request with no cache counts (lost, or an error), so its writes were missing from complete-looking totals | **Fixed:** `unmeasured_requests`, per trial and per arm; dollars were already None for a write without a breakdown |
+| `bench_report.cells`, `metrics`, `arm_summary` | a task's cell is unknown if any trial is; dollar metrics over priced cells, with `unpriced_trials`, `cold_equivalent_unknown_trials` and the `unknown_cost` list | OK |
+| `bench_report.pair_summary`, `bootstrap`, `difference` (the paired bootstrap) | dollar differences over tasks priced on both arms; `excluded_unpriced_tasks`, `undefined_resamples` | OK |
+| `bench_report.router_cost`, `with_router_cost` | None without a routing record (fixed October 14), on a failed or stub router, and on usage short of the decisions or not whole tokens; the trial then becomes unknown | OK |
+| `bench_report.setting_path`, `trial_view`, `modelpilot_breakdown` climbing | `_add` propagates None; climbing None if any step is | OK |
+| `bench_report.start_point_ceiling` | only tasks every candidate priced; `excluded_tasks` | OK |
+| `bench_report.routing_summary` router tokens | counts decisions with usage only; `decisions` and `fail_open_trials` beside it show the gap; no dollars | OK (tokens, labelled by the decision count) |
+| `long_session.turns` | `cost_usd`, `compaction_cost_usd`, `cold_equivalent_usd` None if any part is; `compaction_output_tokens` summed a missing count as 0 | **Fixed:** None when a compaction request has no output count |
+| `long_session.report` | `compaction_usd` summed with `or 0`, so an unknown compaction turn counted **$0**; subtasks with an unknown trial left out of the pairs without a count | **Fixed:** `compaction_usd` and `compaction_output_tokens` None if any turn's is; `unknown_cost_subtasks` per arm, `excluded_unpriced_subtasks` per pair. `mean_sequence_usd` was already labelled (`unknown_cost_sequences`) |
+| `midtask_compaction.breakdown`, `report` | breakdown via `turns`; report's means dropped unknown trials without a count | **Fixed:** an `unknown` block counts what each mean leaves out |
+| `midtask_compaction.pooled` | `bench_report.summarize` | OK |
+| `exploration.measured_switch_usd`, `summarize` | a lifetime count missing from the split read as 0; group means carry `priced` | **Fixed:** None unless both counts are there. Proxy logs keep the split only when complete, so recorded runs are unaffected |
+| `explorer_replay.replay` | `mean_trial_cost_usd` over priced trials without a count; unaligned and unpriced-model trials listed. A row with no usage is repriced as uncached input inside the replay's estimate | **Fixed:** `unpriced_trials`. The replay's estimate is unchanged |
+| `policy_replay` | no dollar totals; `or 0` only formats a printed probability | OK |
+| `governor` `settle`, `policy`/`_totals`, `spend`, `reconcile_log`, `hooks status` | `settle(None)` and orphans make `cost_complete` False and halt admission (`cost_unknown`); `spent_usd` is the known part beside that flag; an orphan stays unknown | OK |
+| `m5.Budget`, `m5.learn` | unknown settles halt reservations; `learn` refuses a cost that isn't a number | OK |
+| `cache_replication.execute` summary | `known_cost_usd` beside `cost_complete` (False when any row lacks a cost, errors included); `ttl_summary` has no dollars | OK |
+
+**Recorded results.** None of the recorded figures behind current decisions comes from a fixed field. The long-session and mid-task-compaction headlines are paired cold-equivalent dollars (`summarize`, `subtask_costs`), which were already unknown-safe. Whether any recorded long-session run had an unknown compaction turn, which `compaction_usd` would have counted as $0, can be checked on the main machine: `python3 -m modelpilot.long_session report <runs>` now shows it as None.
