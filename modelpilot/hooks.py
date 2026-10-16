@@ -7,6 +7,9 @@ context itself, and always exits 0 so a governor fault cannot stop the client. W
 MODELPILOT_REVIEW_AT_STOP=1 (the ModelPilot arm's review at the finish) Stop also holds the
 agent's finish once per turn, so the proxy's policy can deliver a review on the request that follows.
 
+The agent's own Bash test runs (October 16) are observed too, labelled as the agent's (agent_suite, agent_failures)
+and kept apart from host suite results, for the stuck detector's stalled_agent_tests only.
+
 With MODELPILOT_SUITE (a JSON suite declaration, October 14; off by default) a Stop that really ends a turn runs
 the declared suite on the host and records its result as a ledger observation (modelpilot.suite_adapter): never a
 block, never a change. The hook waits for the suite, so give its settings entry a timeout above the suite's.
@@ -20,6 +23,7 @@ import os
 from pathlib import Path
 import sys
 import time
+from . import delegation
 from .governor import Governor, KINDS, OBSERVABLE
 
 EVENTS = ('SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop')
@@ -68,13 +72,34 @@ def file_evidence(payload):
     return {'file': relative.as_posix(), 'content_hash': digest.hexdigest()}
 
 
+def agent_test_run(payload, output):
+    """The agent's own test run in a Bash call, {'agent_suite', 'agent_failures'}, or None: the call's shell lines that
+    run a test runner (delegation.runs_tests, outside here-document bodies) and the failures its output reports
+    (delegation.failures). The command is the agent's and the output is what the client returned: a stuck signal,
+    never a verdict on the work. A run whose output gives no outcome (no summary, cut off) is not one."""
+    command = (payload.get('tool_input') or {}).get('command') if payload.get('tool_name') == 'Bash' else None
+    if not isinstance(command, str) or not isinstance(output, str):
+        return None
+    lines = [' '.join(line.split()) for line in delegation.shell_lines(command) if delegation.runs_tests(line)]
+    failed = delegation.failures(output) if lines else None
+    return None if failed is None else {'agent_suite': '\n'.join(lines), 'agent_failures': failed}
+
+
 def observation(event, payload):
-    """Conservative mapping; progress and retry language are never inferred from model text."""
+    """Conservative mapping; progress and retry language are never inferred from model text. A Bash call that exits
+    0 arrives as PostToolUse with its output in tool_response; one that doesn't, as PostToolUseFailure with
+    'Exit code N' and its output in error (recorded from 2.1.284, tests/fixtures/hooks-2.1.284-bash)."""
+    if event == 'PostToolUse' and payload.get('tool_name') == 'Bash':
+        response = payload.get('tool_response')
+        streams = [response.get(k) for k in ('stdout', 'stderr')] if isinstance(response, dict) else []
+        return agent_test_run(payload, '\n'.join(s for s in streams if isinstance(s, str)))
     if event == 'PostToolUse':
         return file_evidence(payload)
     if event == 'PostToolUseFailure' and payload.get('is_interrupt') is not True:
         error = payload.get('error')
-        return {'error': error} if isinstance(error, str) and error.strip() else None
+        if not isinstance(error, str) or not error.strip():
+            return None
+        return dict({'error': error}, **(agent_test_run(payload, error) or {}))
     return None
 
 
@@ -198,7 +223,7 @@ def stuck_notice(gov, task, result):
     if last and {k: last.get(k) for k in key} == key:
         return None
     gov.note('stuck_notice', key, task, result['revision'])
-    signals = ', '.join(name for name, on in result['signals'].items() if on)
+    signals = ', '.join(name for name, on in result['signals'].items() if on and name not in result.get('observed_only', ()))
     return (f"ModelPilot (dry-run): stuck signals ({signals}) suggest '{result['recommendation']}' "
             f'for task {task}. Nothing was changed.')
 

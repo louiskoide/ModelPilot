@@ -11,13 +11,16 @@ from modelpilot.governor import Governor
 from modelpilot.hooks import REVIEW_AT_STOP, channel_declaration, handle
 
 FIXTURES = Path(__file__).parent/'fixtures'/'hooks-2.1.280'
+# A Bash call that runs unittest and passes, then one that fails: recorded from the pinned 2.1.284 against a loopback
+# fake API (October 16), workspace paths as {cwd} and the interpreter as python3.
+BASH_FIXTURES = Path(__file__).parent/'fixtures'/'hooks-2.1.284-bash'
 ROOT = Path(__file__).resolve().parents[1]
 SONNET_5M = {'output': 10, 'write': 2.5, 'read': .1}  # Sonnet 5.5, 5m writes
 
 
-def payload(name, cwd, **changes):
-    """A payload recorded from Claude Code 2.1.280, re-rooted at a test workspace."""
-    text = (FIXTURES/f'{name}.json').read_text().replace('{cwd}', str(cwd)).replace('{config}', str(cwd))
+def payload(name, cwd, fixtures=FIXTURES, **changes):
+    """A payload recorded from Claude Code 2.1.280 (or 2.1.284's Bash test runs), re-rooted at a test workspace."""
+    text = (fixtures/f'{name}.json').read_text().replace('{cwd}', str(cwd)).replace('{config}', str(cwd))
     data = json.loads(text)
     data.update(changes)
     return data
@@ -126,6 +129,58 @@ class HookTests(unittest.TestCase):
         self.assertIsNone(self.context(outputs[2]))  # recommendations never enter model context
         self.assertNotIn('systemMessage', outputs[3])  # same recommendation is not repeated
         self.assertEqual(self.gov.state.get(self.task)['level'], 0)  # nothing applied
+
+    def observed(self):
+        rows = self.gov.db.execute("SELECT payload FROM events WHERE task=? AND kind='observation' ORDER BY seq",
+                                   (self.task,)).fetchall()
+        return [json.loads(r['payload']) for r in rows]
+
+    def bash(self, name, **changes):
+        data = payload(name, self.work, BASH_FIXTURES, **changes)
+        return handle(data['hook_event_name'], data, self.env, clock=lambda: self.now[0])
+
+    def test_the_agents_bash_test_runs_are_observed_as_the_agents(self):
+        passed, failed = payload('PostToolUse-Bash', self.work, BASH_FIXTURES), payload('PostToolUseFailure-Bash', self.work, BASH_FIXTURES)
+        self.assertEqual((passed['tool_response']['stdout'][-2:], passed['tool_response']['stderr']), ('OK', ''))
+        self.assertTrue(failed['error'].startswith('Exit code 1\n'))
+        self.bash('PostToolUse-Bash')
+        self.bash('PostToolUseFailure-Bash')
+        first, second = self.observed()
+        self.assertEqual(first, {'agent_suite': 'python3 -m unittest -q test_ok', 'agent_failures': 0})
+        self.assertEqual({k: second.get(k) for k in ('agent_suite', 'agent_failures')},
+                         {'agent_suite': 'python3 -m unittest test_bad', 'agent_failures': 1})
+        self.assertIn('error_hash', second)  # still a tool failure
+        self.assertFalse({'suite', 'failures'} & (set(first) | set(second)))  # never a host suite's result
+
+    def test_other_bash_calls_and_runs_without_an_outcome_are_not_test_runs(self):
+        response = payload('PostToolUse-Bash', self.work, BASH_FIXTURES)['tool_response']
+        for command, stdout in (('ls -la', 'Ran 1 test in 0.000s\n\nOK'),  # not a test runner
+                                ("cat <<'EOF' > t.sh\npython3 -m pytest -q\nEOF", '3 passed'),  # a here-document body
+                                ('grep -rn pytest .', '3 passed'),
+                                ('python3 -m pytest -q', 'collecting ...')):  # cut off: no summary
+            self.bash('PostToolUse-Bash', tool_input={'command': command, 'description': 'd'},
+                      tool_response=dict(response, stdout=stdout))
+        self.assertEqual(self.observed(), [])
+        self.run_hook('PostToolUseFailure')  # 2.1.280's failing Bash: exit 3, no test runner
+        self.assertEqual(list(self.observed()[0]), ['error_hash'])
+
+    def test_a_failure_repeated_on_new_temporary_paths_and_timings_is_one_repeated_error(self):
+        error = payload('PostToolUseFailure-Bash', self.work, BASH_FIXTURES)['error']
+        outputs = [self.bash('PostToolUseFailure-Bash', error=error.replace(str(self.work), f'{self.work}/pytest-{n}')
+                             .replace('0.000s', f'0.00{n}s')) for n in range(3)]
+        self.assertNotIn('systemMessage', outputs[1])
+        self.assertIn("stuck signals (repeated_error) suggest 'increase_effort'", outputs[2]['systemMessage'])
+        result = self.gov.state.recommend(self.task)
+        self.assertTrue(result['signals']['stalled_agent_tests'])  # on and journaled, but not scored or shown
+        self.assertEqual(result['score'], 3)
+
+    def test_stalled_agent_runs_alone_are_journaled_without_a_notice(self):
+        response = payload('PostToolUse-Bash', self.work, BASH_FIXTURES)['tool_response']
+        failing = dict(response, stdout='FAIL: test_b (test_bad.T.test_b)\n\nRan 2 tests in 0.001s\n\nFAILED (failures=1)')
+        outputs = [self.bash('PostToolUse-Bash', tool_response=failing) for _ in range(3)]  # through | tail: exit 0
+        self.assertTrue(all('systemMessage' not in o for o in outputs))
+        stuck = self.gov.journal('stuck')[-1]['payload']
+        self.assertEqual((stuck['signals']['stalled_agent_tests'], stuck['recommendation']), (True, 'hold'))
 
     def test_interrupted_tools_are_not_failures(self):
         for _ in range(3):

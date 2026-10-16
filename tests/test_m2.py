@@ -4,7 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from modelpilot.m2 import State, assess
+from modelpilot.m2 import State, assess, normalize_error
 
 
 class DetectorTests(unittest.TestCase):
@@ -26,6 +26,25 @@ class DetectorTests(unittest.TestCase):
         for counts in ([3,2,1],[0,0,0]):
             self.assertEqual(assess([{'suite':'unit','failures':n} for n in counts])['recommendation'],'hold')
         self.assertTrue(assess([{'suite':'unit','failures':2}]*3)['signals']['stalled_tests'])
+
+    def test_the_agents_own_test_runs_are_observed_apart_and_never_scored(self):
+        result=assess([{'agent_suite':'python3 -m pytest -q','agent_failures':2}]*3)
+        self.assertTrue(result['signals']['stalled_agent_tests'])
+        self.assertEqual((result['score'],result['recommendation'],result['observed_only']),(0,'hold',['stalled_agent_tests']))
+        self.assertFalse(result['signals']['stalled_tests'])  # never read as a host suite's result
+        mixed=[{'suite':'unit','failures':2},{'agent_suite':'unit','agent_failures':2}]*2  # two series of two, not one of four
+        self.assertFalse(any(assess(mixed)['signals'][s] for s in ('stalled_tests','stalled_agent_tests')))
+        self.assertEqual(assess([{'suite':'unit','failures':2}]*3)['recommendation'],'increase_effort')  # a host suite's still counts
+
+    def test_errors_hash_alike_across_temporary_paths_lines_addresses_and_timings(self):
+        one=('Exit code 1\n  File "/private/var/folders/ab/T/pytest-7/w/test_x.py", line 6, in test_b\n'
+             'AssertionError: <Node object at 0x7f3a2c>\nRan 2 tests in 0.004s\nFAILED (failures=1)')
+        two=one.replace('pytest-7','pytest-8').replace('line 6','line 9').replace('0x7f3a2c','0x10b4e').replace('0.004s','1.2s')
+        self.assertEqual(normalize_error(one),normalize_error(two))
+        self.assertIn('"test_x.py", line #',normalize_error(one))
+        self.assertEqual(normalize_error('src/pkg/core.py:41:7: E501'),'src/pkg/core.py:#: E501')
+        self.assertNotEqual(normalize_error(one),normalize_error(one.replace('failures=1','failures=2')))  # counts stay
+        self.assertNotEqual(normalize_error('a/test_x.py: 2 failed'),normalize_error('b/test_x.py: 2 failed'))  # relative paths stay
 
 
 class StateTests(unittest.TestCase):
@@ -89,6 +108,15 @@ class StateTests(unittest.TestCase):
         self.assertEqual(restored,text)
         with self.assertRaises(ValueError): self.state.expand('../../etc/passwd')
         with self.assertRaises(ValueError): self.state.expand(output['handle'],limit=0)
+
+    def test_errors_are_hashed_normalized_and_agent_fields_are_checked(self):
+        for n in (1,2,3): result=self.state.observe(self.task,1,'worker',{'error':f'boom in /tmp/run{n}/x.py, line {n}'})
+        self.assertEqual((result['signals']['repeated_error'],result['recommendation']),(True,'increase_effort'))
+        for bad in ({'agent_failures':-1},{'agent_failures':'2'},{'agent_failures':True},{'agent_suite':3}):
+            with self.assertRaises(ValueError): self.state.observe(self.task,1,'worker',bad)
+        result=self.state.observe(self.task,1,'worker',{'agent_suite':'pytest -q','agent_failures':0})
+        self.assertEqual(self.state.observations(self.task,1,'agent_failures')[0]['agent_suite'],'pytest -q')
+        self.assertEqual(self.state.observations(self.task,1,'failures'),[])  # a host suite's readers never see it
 
     def test_wrong_owner_observation_does_not_pollute_detector(self):
         with self.assertRaises(ValueError): self.state.observe(self.task,1,'other',{'error':'bad'})

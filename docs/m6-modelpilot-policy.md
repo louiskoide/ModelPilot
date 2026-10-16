@@ -293,6 +293,26 @@ Overnight item 15. The policy reads each measured pass rate as `(passed + 1) / (
 - **What would firm it up:** these outcomes count the 29 tuning tasks only. Item 8's labels (38 tasks; without the defective petersen task, strict low concise 95.5% against Sonnet 5.5 medium's 93.2%, `docs/m6-benchmark-plan.md`) aren't in `calibration.outcomes`. Adding them, without counting a task twice, would likely raise low's rate above medium's; at the point values no decision would change. Not done: changing the outcomes changes the policy, and that is the user's call.
 - The first launch of the `modelpilot` and `-for-opus` replays passed every run as one path (a shell quoting error) and stopped on `FileNotFoundError` before reading anything. Those logs are kept as `runs/policy-intervals-*-20261016-shell-error.log`.
 
+### Stuck detector v2: the agent's test runs observed, not scored (October 16, offline, $0)
+
+User request, after an outside write-up on why stuck and miss detection failed. The stuck rule (stuck evidence: straight to Opus 5.5) couldn't see the channel agents test through: agents ran tests through Bash in 206 of 215 trials (`runs/agent-test-steps-20261006.json`), and M2 read only host suites and tool errors. Its error hashes were exact, so a failure repeated with a new temporary path or timing never matched.
+
+**What changed (`modelpilot/m2.py`, `modelpilot/hooks.py`; `heuristic-v2`):**
+- **Errors are normalized before hashing** (`m2.normalize_error`): directories of absolute paths, line numbers, memory addresses and timings are replaced. Counts stay.
+- **The hooks observe the agent's Bash test runs** (`hooks.agent_test_run`), using the same recognizer and parser the steps use (`delegation.runs_tests`, `delegation.failures`). A run that exits 0 comes from PostToolUse's `tool_response`. One that fails comes from PostToolUseFailure's `error`, which is also kept as the error it is. Both payload shapes were recorded from the pinned 2.1.284 against a loopback fake API ($0, `tests/fixtures/hooks-2.1.284-bash/`).
+- **Labelled as the agent's:** `agent_suite`/`agent_failures`, never `suite`/`failures`. Host-suite readers (steps, the consult brief's latest host result) don't see them.
+- **Observed, not scored.** Agent runs stall on the host suite's rule (three non-improving positive counts for the same command) as `stalled_agent_tests`. That signal is reported and journaled with every observation but left out of the score (`m2.OBSERVED_ONLY`), and the user's stuck notice doesn't list it. So it can't trigger an escalation.
+
+**Why not scored** (`runs/stuck-v2-replay-20261016.py` → `.json`, $0). Every trial's tool results on record (82 bench runs, 1,039 trials, every arm) were replayed as the hooks now observe them, assessed after each observation at level 0. Edits get unique hashes, so oscillation isn't replayed; host `run_tests` isn't either.
+- **887 trials** had at least one readable agent test run.
+- **Scored rule:** v1 and v2 each fire in 1 trial, the same one (`sqlglot-starrocks-partitions`, low concise, three identical errors, a strict pass). Normalizing changed no firing on record. None of the 146 ModelPilot-arm trials fires either way.
+- **`stalled_agent_tests`, if it were scored:** 6 trials, 5 of them strict passes, all in fixed arms. In every one a test kept failing over three or more runs, and the agent then fixed it (`runs/stuck-v2-base-check-20261016.py` → `.json`, $0):
+  - Four are sqlglot trials. A task test fails for 3–6 whole-suite runs beside `test_convert`, which fails in every run and at each task's base (`ModuleNotFoundError: pytz`, the bench venv). The task test is then fixed.
+  - Two are `mi-numeric-range-eq-hash`: a targeted test failing three times between edits, then passing on the next run.
+  - Its one miss, `sqlglot-mysql-alter-options` (low concise with Haiku compaction), also cleared its stall: its last own test run passed, and it missed on the hidden tests, the usual confident finish.
+- **Filtering the base's failures changes none of the 6.** `test_convert` fails in every run, so taking it away lowers each count by one, and a task test was failing at each firing point. The signal fires on struggle the agent works through. Scoring it would send 5 passing trials to Opus 5.5 mid-turn, and the one miss had already moved past its stall.
+- **Not done:** refitting the rule to these trials (needing more runs, say), which would fit it on the same record. Scoring it needs new evidence and is the user's call.
+
 ## Why a policy is needed
 
 Today the governor records decisions and never acts. A "ModelPilot arm" would therefore behave exactly like a fixed-model arm. The comparison in work item 4 (`docs/changelog.md`, "Next work, in order") only means something if ModelPilot does something different, so this document defines what it does.
@@ -394,7 +414,7 @@ Opus 5.5 replaced Opus 5 as the top rung on September 26 (user decision). It is 
 | `S0` fallback start | Sonnet 5.5 low with `bench/prompts/concise.md` appended since October 6 (medium before), used only while Jev is unavailable (the start is Jev's prediction since September 28) | fixed |
 | switch-policy parameters | `configs/modelpilot-policy.json`: measured or fitted (task shape, effort factors for low/high/xhigh, model factors, calibration outcomes, `jev_weight` 0.03, recovery fraction 1.0, bytes per token); still guesses: the max effort factor, hysteresis $0.02, downgrade multiplier 2, step spacing | tuning split |
 | `T` excerpt threshold | 8 KB | tuning split |
-| stuck threshold | M2 heuristic-v1 (score ≥ 3, window 6) | fixed |
+| stuck threshold | M2 heuristic-v2 (score ≥ 3, window 6; the agent's test runs observed, not scored; October 16) | fixed |
 | quality floor | off in `modelpilot`; baseline per arm (Sonnet 5.5 medium, Opus 5.5 medium); `min_shared_tasks` 20 (a guess) | user decision (October 8); evidence from the tuning split |
 
 All parameters are frozen, with a recorded policy version and hash, before the final split runs. Only the tuning split is used for tuning (see `docs/m6-benchmark-plan.md`).

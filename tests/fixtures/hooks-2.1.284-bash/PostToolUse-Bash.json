@@ -1,0 +1,25 @@
+{
+  "session_id": "556dbe55-0daf-4b0e-9825-6b32de3d933c",
+  "transcript_path": "{config}/projects/fixture/session.jsonl",
+  "cwd": "{cwd}",
+  "prompt_id": "402aab9f-77fd-4f66-a63b-b351d1600a8c",
+  "permission_mode": "default",
+  "effort": {
+    "level": "low"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "python3 -m unittest -q test_ok",
+    "description": "run tests"
+  },
+  "tool_response": {
+    "stdout": "----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK",
+    "stderr": "",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": false
+  },
+  "tool_use_id": "toolu_fixture0",
+  "duration_ms": 127
+}
