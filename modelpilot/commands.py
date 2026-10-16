@@ -39,6 +39,7 @@ COMMANDS = (
             plans=[[], ['--execute-fallback']]),
     command('claude_check', 'A small real Claude Code check through the M1 proxy', paid=True, plans=[[]],
             refusals=['Claude Code is missing']),
+    command('client_matrix', 'Client-version compatibility against loopback fixtures; a report, the pin stays ($0)'),
     command('doctor', 'A $0 preflight before live runs: read-only checks, each pass, warn or fail ($0)'),
     command('evaluate', 'Fixed model/effort smoke benchmark, four typed-answer tasks (M6)', paid=True, plans=[[]]),
     command('exploration', "The modelpilot-explore arm's report: switched against unswitched trials ($0)"),
