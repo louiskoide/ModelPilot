@@ -51,6 +51,7 @@ COMMANDS = (
                    ['--claude', '{claude}', '--scenario', 'turn-end-rebuild', '--subscription']]),
     command('governor', 'The dry-run governor: a demo report of admit, settle, review and rebase ($0)'),
     command('hooks', 'Claude Code hooks for the dry-run governor, and its coordinator commands ($0)'),
+    command('idle_replay', 'Idle boundaries in recorded logs, and what each idle-plan option would have saved ($0)'),
     command('jev_check', 'Pinned Jev router-only credential preflight (TypeSafe)', paid=True, plans=[[]]),
     command('jev_compat', 'Can pinned Jev route this client: a loopback probe, or --prepare-compat ($0)'),
     command('jev_route_check', 'One-task end-to-end Jev routing preflight through the stock launcher', paid=True,
