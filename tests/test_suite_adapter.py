@@ -3,14 +3,30 @@ revision fenced out by a correction; the Stop hook's opt-in run. $0, no model re
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
 from modelpilot import suite_adapter as sa
+from modelpilot.fixtures import fixture_server
 from modelpilot.governor import Governor
 from modelpilot.hooks import SUITE, handle
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def client_version():
+    claude = shutil.which('claude')
+    if not claude or not shutil.which('node'):
+        return None
+    with tempfile.TemporaryDirectory() as home:
+        out = subprocess.run([claude, '--version'], env={'HOME': home, 'PATH': os.environ.get('PATH', '')},
+                             capture_output=True, text=True, timeout=60)
+    return out.stdout.split()[0] if out.returncode == 0 and out.stdout.strip() else None
 
 # A suite the test controls through files: it reads verdict.json and writes a JUnit report (or only exits), and can
 # sleep or edit a watched file while it runs.
@@ -244,6 +260,89 @@ class StopHookTests(unittest.TestCase):
         self.assertNotIn('decision', output)
         self.assertEqual(self.gov.state.observations(self.task, self.rev, 'suite'), [])
         self.assertEqual(self.gov.journal('suite_refused')[-1]['payload']['refusal'], 'bad_declaration')
+
+
+def running(pid):
+    """Whether a process is alive: not gone, and not dead and waiting to be reaped (Linux shows a zombie in /proc)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    status = Path(f'/proc/{pid}/status')
+    return not (status.exists() and 'State:\tZ' in status.read_text())
+
+
+SLOW_SUITE = '''
+import os, sys, time
+open('suite-started.txt', 'w').write(str(os.getpid()))
+time.sleep(30)
+open('suite-finished.txt', 'w').write('finished')
+'''
+
+
+@unittest.skipUnless(client_version() == '2.1.284', 'needs node and the pinned 2.1.284 client first on PATH')
+class HookTimeoutTests(unittest.TestCase):
+    """October 15 review of #81: what the pinned client does to a Stop hook still waiting for its suite at the hook's
+    settings timeout. The suite runs in its own session (so its timeout can kill its process group without the hook),
+    which a plain kill of the hook's process group would miss. The client, though, sends SIGTERM to the whole process
+    tree, the suite included: nothing outlives the turn and nothing lands. Real client in -p mode against the loopback
+    fixture, fake key, empty HOME, the hook's timeout 2 s, a suite that would take 30 s. $0."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        for name in ('home', 'tmp', 'config', 'work'):
+            (self.root/name).mkdir()
+        (self.root/'work'/'slow_suite.py').write_text(SLOW_SUITE)
+        self.upstream = fixture_server()
+        self.thread = threading.Thread(target=self.upstream.serve_forever, daemon=True)
+        self.thread.start()
+        self.db = self.root/'state.db'
+        self.gov = Governor(self.db, 's', 1)
+        self.task = self.gov.state.create('t', 'x')['id']
+        self.rev = self.gov.state.claim(self.task, 1, 'client', seconds=3600)['revision']
+        self.gov.state.acknowledge(self.task, self.rev, 'client')
+
+    def tearDown(self):
+        self.gov.close()
+        self.upstream.shutdown()
+        self.upstream.server_close()
+        self.thread.join()
+        self.tmp.cleanup()
+
+    def test_a_hook_past_its_timeout_takes_its_suite_with_it(self):
+        spec = {'name': 'slow', 'command': [sys.executable, 'slow_suite.py'], 'timeout_seconds': 60}
+        hooks = {'Stop': [{'hooks': [{'type': 'command', 'command': f'{sys.executable} -m modelpilot.hooks Stop',
+                                      'timeout': 2}]}]}
+        (self.root/'settings.json').write_text(json.dumps({'hooks': hooks}))
+        claude = shutil.which('claude')
+        env = {'PATH': os.pathsep.join([str(Path(claude).parent), str(Path(shutil.which('node')).parent), '/usr/bin', '/bin']),
+               'HOME': str(self.root/'home'), 'TMPDIR': str(self.root/'tmp'), 'CLAUDE_CONFIG_DIR': str(self.root/'config'),
+               'ANTHROPIC_API_KEY': 'sk-ant-offline-fixture-not-a-key', 'DISABLE_AUTOUPDATER': '1',
+               'CLAUDE_CODE_MAX_RETRIES': '0', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC': '1',
+               'ANTHROPIC_BASE_URL': f'http://127.0.0.1:{self.upstream.server_port}', 'PYTHONPATH': str(ROOT),
+               'MODELPILOT_DB': str(self.db), 'MODELPILOT_SESSION': 's', 'MODELPILOT_LIMIT_USD': '1',
+               'MODELPILOT_TASK': self.task, 'MODELPILOT_OWNER': 'client', SUITE: json.dumps(spec)}
+        command = [claude, '-p', 'Reply with OK.', '--model', 'claude-sonnet-4-6', '--output-format', 'stream-json',
+                   '--verbose', '--max-turns', '1', '--setting-sources', '', '--settings', str(self.root/'settings.json'),
+                   '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--tools', '', '--no-session-persistence']
+        started = time.monotonic()
+        result = subprocess.run(command, env=env, cwd=self.root/'work', capture_output=True, text=True, timeout=120,
+                                stdin=subprocess.DEVNULL)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        self.assertLess(time.monotonic() - started, 25)  # the client didn't wait for the suite
+        work = self.root/'work'
+        pid = int((work/'suite-started.txt').read_text())  # the hook got as far as starting it
+        for _ in range(300):
+            if not running(pid):
+                break
+            time.sleep(.01)
+        else:
+            self.fail('the suite outlived its hook')
+        self.assertFalse((work/'suite-finished.txt').exists())
+        self.assertEqual(self.gov.state.observations(self.task, self.rev, 'suite'), [])  # a killed hook lands nothing
+        self.assertTrue(self.gov.journal('client_stop'))
 
 
 if __name__ == '__main__':

@@ -104,3 +104,10 @@ Cloud batch item 3, branch `claude/proxy-client-gaps` (stacked on the shape fixe
 
 Still untested: a real client cancelled during a tool call or between requests, subscription OAuth, and a live provider's own idle behaviour.
 
+## A second review of the cloud batch's proxy changes — October 15, 2026 (overnight cloud run, tests only, $0)
+
+Overnight item 1, branch `claude/stack-review`: #78's `ClientGone`/`transport_error` split, repeated headers, the 502 rule and `server_tool_use` pricing, read again after the merge.
+
+- **Bug, fixed:** a write to a client that stopped reading fails with `TimeoutError` (the handler's 120 s socket timeout), not a broken pipe or a reset, so `to_client` let it through and the row read `transport_error`/`TimeoutError`: the upstream's failure. Any failed write to the client is now the client's (`ClientGone`, any `OSError`; the 502 and the active arm's refusal swallow the same). Accounting was the same either way: a lost request of unknown cost, counted once. New test `test_a_client_that_stops_reading_is_the_clients_failure` (handler timeout 0.5 s, 4 KiB socket buffers, a client that never reads), which fails on the old code with `transport_error`.
+- **Checked, no bug:** only client writes are wrapped, so an upstream reset or close (`RemoteDisconnected`) is never the client's; a 502 is sent only before the upstream's status line reached the client (`sent_headers` is set before the buffered headers are flushed, and nothing between them can fail); `Host`, `Content-Length` and the names `Connection` lists stay dropped, repeats go out as pairs both ways; repricing (`bench_report.repriced`, `api_key_equivalent`) skips a row whose cost is unknown, so a web-search reply can't be repriced into a known cost.
+- **Left for the fuzzing item:** `cache_probe.cost` doesn't check its counters, so a negative or fractional token count in a reply would be priced (overnight item 7).
