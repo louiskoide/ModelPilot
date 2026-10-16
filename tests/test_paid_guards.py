@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CLIENTS = ('claude', 'node', 'npm', 'npx')
 CREDENTIALS = re.compile(r'^(ANTHROPIC_.*|CLAUDE_CODE_OAUTH_TOKEN|.*_API_KEY|TYPESAFE.*|JEV_.*)$')
 # What each plan prints instead of '--live' where it prints no such hint.
-PLAN_MARKERS = {'cache_probe': '"live": false', 'evaluate': '"paid_calls_made": 0'}
+PLAN_MARKERS = {'cache_probe': '"live": false', 'evaluate': '"paid_calls_made": 0', 'risk_predictor': '"live": false'}
 
 
 class Blocked(Exception):
@@ -137,7 +137,7 @@ def runs_listing():
 class PaidGuardTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()  # as resolve_client sees it (macOS: /var is /private/var)
         self.fake = self.root/'bin'/'claude'
         self.fake.parent.mkdir()
         self.fake.write_text('#!/bin/sh\necho "2.1.284 (Claude Code)"\n')
@@ -160,7 +160,10 @@ class PaidGuardTests(unittest.TestCase):
         traps = Traps(self.fake)
         before = runs_listing()
         # bench grades each task's reference fix before its plan ($0, local, needs work/bench/repos): stood in for here.
-        with mock.patch('modelpilot.bench.preflight', lambda tasks, *a: {t['id']: {'hidden_passed': 1} for t in tasks}):
+        # risk_predictor reads each task's base source the same way ($0, local, needs work/bench/repos): stood in too.
+        source = ('', {'names': [], 'source_files': 0, 'files': [], 'bytes': 0})
+        with mock.patch('modelpilot.bench.preflight', lambda tasks, *a: {t['id']: {'hidden_passed': 1} for t in tasks}), \
+                mock.patch('modelpilot.risk_predictor.context', lambda task, repo=None: source):
             code, output = run_main(row.name, argv, traps)
         self.assertEqual(traps.attempts, [], f'{row.name} {argv}: {output[-1500:]}')
         self.assertEqual(runs_listing(), before, f'{row.name} made a run directory')

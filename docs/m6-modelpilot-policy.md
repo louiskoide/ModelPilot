@@ -178,6 +178,26 @@ Replayed over `bench-20261006-134508` ($0), neither arm changes any of the 36 re
 - **Blast radius at the first edit.** `modelpilot/exposure.py` measures public API, callers and the tests that reach a change, but only after the fact. It has to run inside the governor when the agent first edits, starting with the static part. On a wide-reach change it would require stronger evidence before the work stays on a cheaper setting.
 - **Per-task estimates (item 10).** These would let the floor judge a class of tasks instead of all tasks pooled.
 
+### Risk-routed arm (October 15, offline)
+
+User request, October 15. The turn-start risk predictor passed its pre-registered test by one task (`docs/m6-benchmark-plan.md`, "Turn-start risk predictor: result"). A pass committed to building this arm offline, with no claim until it passes on new tasks.
+
+**What it runs** (`modelpilot-for-opus-risk`, `modelpilot/risk_route.py`):
+- **The rating.** Before a trial's first session, Haiku 5.5 rates the task exactly as `risk_predictor` did: the same prompt, the same base-commit source, the same parser, 3 requests each sent once, scored by the median.
+- **The route.** A median of 55 or more runs the trial as `modelpilot-for-opus`; anything lower runs it as `modelpilot-for-sonnet`. 55 is the run's top-third cut, frozen, because a router sees one task at a time. A task with no usable answer runs as `modelpilot-for-opus`: the test left such a task unflagged, but an unknown risk is no evidence that the cheaper setting is safe.
+- **Below the floor, on purpose.** An unflagged task runs under Sonnet 5.5 medium's floor, not the Opus user's. On the 66 rated tasks that lost 2 tasks Opus passes (`parse-decimal-grouping`, `mi-subfactorial`).
+- **The record.** The trial is the routed arm's own (its proxy, policy, floor and grading), recorded under this arm with a `risk_route` block: the answers, the median, the route and the reason. The rating's own files go beside the trial, in `<trial>-risk-rating/`.
+- **The cost.** The rating's dollars are added to every dollar figure the report reads, with the sessions' own figures kept beside them (`session_cost_usd`, `rating_cost_usd`). An unknown rating cost makes the trial's cost unknown. The run budget counts the rating too.
+
+**What it refuses:**
+- **Any task in the benchmark today.** It runs only tasks of a batch that didn't exist at the pre-registration, never the final split. That excludes the 66 rated tasks, and also the 7 sqlglot stage-2 tasks, which were screened before the prompt was written.
+- **Any other predictor.** It won't rate if `risk_predictor.py` no longer has its pre-registered SHA-256.
+- **Sequences.** It rates one task before its first session, so `bench` refuses it in the sequence shape (and, like every non-fixed arm, in the split shape). It needs `ANTHROPIC_API_KEY` in the environment, which the rating requests read.
+
+**Checked at $0.** `risk_route replay` over the rated run routes 27 tasks to `modelpilot-for-opus` and 39 to `modelpilot-for-sonnet`, matching the pre-registered flags on all 66 (`runs/risk-route-replay-20261015.json`). `bench`'s offline plan describes the rating, its maximum cost and both routes. `tests/test_risk_route.py` (10) covers the route, the refusals, the rating, the cost and the bench wiring.
+
+**Not done:** any live run. There is no task it may run yet.
+
 ### Haiku 5.5 and measured candidates (October 8, offline; Haiku on since October 9)
 
 User decisions, October 8: Haiku 5.5 may serve every ModelPilot arm once its probes pass; a session reaches it by a proxy move, never by starting the client on it; and at turn starts the measured settings are weighed beside Jev's pick. Built offline, with Haiku 5.5 still not a candidate. Turning it on is a config change once the probes pass (see "Turning Haiku 5.5 on").

@@ -3,7 +3,7 @@ one-line summary, whether it can send a billable request, and the arguments for 
 
 paid: the module can send a request someone is billed for (Anthropic or TypeSafe), and only does so behind --live.
 That is every name on CLAUDE.md's "Paid" line plus late_fix, cache_replication, miss_checklist and spec_tests, found by
-reading their code. A module that only forwards what a client sends (proxy), drives the client against a loopback
+reading their code. risk_predictor's plan reads each task's base source under work/bench/repos ($0, local). A module that only forwards what a client sends (proxy), drives the client against a loopback
 fixture (jev_compat, thinking_probe's capture-shape) or runs tests on the host is not paid.
 
 plans: argv lists for a plan-only run of a paid module (no --live), which sends nothing; tests/test_paid_guards.py runs
@@ -72,6 +72,9 @@ COMMANDS = (
     command('proxy_overhead', 'What the proxy adds: first byte, per event, throughput, CPU, memory (loopback, $0)'),
     command('regrade', "Re-grade a finished run's saved fixes, edge suites included ($0)"),
     command('report', 'Summarize a proxy log: costs and latency ($0)'),
+    command('risk_predictor', 'Turn-start risk predictor: Haiku 5.5 rates each task; rate paid, score $0', paid=True,
+            plans=[['rate', '--out', '{tmp}/risk-predictor']]),
+    command('risk_route', "The risk-routed arm's route for each task of a rated run ($0)"),
     command('soak', 'M1 soak against a local fake API ($0)'),
     command('spec_tests', 'Plan item 5: tests a stronger model writes from a spec; write paid, score $0', paid=True),
     command('thinking_probe', 'Thinking history across setting changes, direct API; capture-shape is $0', paid=True,
