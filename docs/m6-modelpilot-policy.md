@@ -275,8 +275,23 @@ Overnight item 15. The policy reads each measured pass rate as `(passed + 1) / (
 - **It is a search, not a proof:** a flip strictly between grid points that the draws also miss is possible.
 - **Not varied:** the quality floor reads per-task outcomes, not these rates, and is left alone. So is Jev's weighted share (0.03).
 - **Decisions are replayed exactly as without the flag** (`tests/test_calibration_intervals.py` checks the rows, the summary and the config file's hash).
-- **Not run on recorded decisions:** none are in the cloud clone. The main-machine command is in the overnight report, `runs/cloud-overnight-20261014/REPORT.md`.
+- **Not run on recorded decisions** in the cloud clone, which has none. The main-machine run is below.
 - **On a synthetic turn start** from Sonnet 5.5 low, with the test fixture's Jev answer, low's rate anywhere in about 0.78–0.83 (the bottom of its interval) would move the decision to Sonnet 5.5 medium. That illustrates the method only; the recorded runs decide what it means.
+
+**On the recorded decisions (October 16, main machine, $0): the low start holds by a narrow margin, and the Opus floor holds firmly.**
+
+| Arm, runs | Decisions | Flip within the intervals |
+| --- | --- | --- |
+| `modelpilot`: the six runs of `runs/policy-replay-low-concise-start-20261006.json` and `bench-20261006-134508` (`runs/policy-intervals-modelpilot-20261016.json`) | 180 (111 turn starts, 69 steps) | 107, all turn starts |
+| `modelpilot-for-sonnet`: `bench-20261010-090944` (`runs/policy-intervals-for-sonnet-20261016.json`) | 45 (29 turn starts, 16 steps) | 29, all turn starts |
+| `modelpilot-for-opus`: no runs of its own, so the same decision points as the two rows above, replayed through its overrides from its start (`runs/policy-intervals-for-opus-replayed-20261016.json`) | 225 | 0 |
+
+- **What flips:** every turn start that weighs candidates stays at Sonnet 5.5 low at the point values and jumps to Sonnet 5.5 medium within the intervals. The 4 turn starts that never flip have no advisor answer to weigh (`advice_unavailable`). No step decision flips.
+- **Where it flips** (`modelpilot`; `-for-sonnet` in brackets): Sonnet 5.5 low's rate at 0.854 or below on the grid, 99 decisions (28), or only at 0.829 or below, 8 (1); none flips at 0.879. Its point value is 0.903 (27/29). Sonnet 5.5 medium at the top of its interval (0.969) flips 67 (18) on its own. Every rate at its low end flips 99 (28).
+- **How likely:** under Beta(28, 3), Sonnet 5.5 low's posterior, the rate is below 0.854 with probability about 0.17 and below 0.879 about 0.28 (400,000 draws). The joint draws flip a decision in 16–28 of 64 (median 23).
+- **The Opus floor arm:** no decision changes at any grid point, corner or draw. Its turn starts stay at Opus 5.5 medium; 23 of its step decisions jump (22 to Opus 5.5 medium, 1 to high) at the point values and within the intervals alike.
+- **What would firm it up:** these outcomes count the 29 tuning tasks only. Item 8's labels (38 tasks; without the defective petersen task, strict low concise 95.5% against Sonnet 5.5 medium's 93.2%, `docs/m6-benchmark-plan.md`) aren't in `calibration.outcomes`. Adding them, without counting a task twice, would likely raise low's rate above medium's; at the point values no decision would change. Not done: changing the outcomes changes the policy, and that is the user's call.
+- The first launch of the `modelpilot` and `-for-opus` replays passed every run as one path (a shell quoting error) and stopped on `FileNotFoundError` before reading anything. Those logs are kept as `runs/policy-intervals-*-20261016-shell-error.log`.
 
 ## Why a policy is needed
 

@@ -208,6 +208,13 @@ A 1h boundary saves more each time but comes only after 3,630 s idle, so far les
 
   Each is priced on Sonnet 5.5 and Opus 5.5 at 5m and 1h. Every transition counts as if a change had been queued there. Transitions without usage or times are counted, never priced, and so are the two around a `/compact` turn, whose summary starts a new prefix. It makes no recommendation.
 
+**Run on the recorded logs (October 16, main machine, $0): no evidence either way.** `runs/idle-replay-20261016.json`, over all 82 `runs/bench-2026*` runs, both `governed-session-*` runs and `governed-rebuild-20261012-072505`.
+- **No idle boundary.** Of 188 transitions between sessions, 36 were measured and 152 sit next to a `/compact`-only session, so they are counted but not priced. Measured with every request, those 152 gaps are under 2 s too.
+- **Gaps:** the longest is 305.6 s, the October 12 rebuild session (below 330 s, and its entry was read warm). The rest are under 2 s, because bench starts each session right after the one before.
+- **So every option saves $0 on these runs.** Option (a) comes out negative, up to $1.47 at P = 1 on Sonnet 5.5 at 5m and $4.72 on Opus 5.5 at 1h. That is the replay pricing an early switch at each of the 36 back-to-back pauses, as if a change had been queued at every one: an artifact of how bench sequences sessions, not evidence against (a).
+- **Nowhere else to look:** the M1 soak was synthetic loopback traffic (`docs/m1-results.md`).
+- **Real evidence would need human pauses:** interactive sessions logged through the proxy. Until then the per-boundary table above is all there is, and how often a user idles past the lifetime with a change queued is unmeasured.
+
 ### Test adapter (October 14, cloud batch, offline; off by default)
 
 `modelpilot/suite_adapter.py`. The task's test suite is run by the host and recorded as a ledger observation, so `suite`/`failures` come from a run the host made, never from the session's output or the model's claims. Dry-run: observations only, nothing blocked, no model, effort or context change.
@@ -313,6 +320,16 @@ This is one synthetic two-file task on one model and effort. It shows the mechan
 - **Content:** the page carries no prompt or tool content. The proxy log has none, and the ledger rows shown are labels and counts.
 
 Tested on synthetic rows and on a log made by a governed proxy process in front of `fixtures.fixture_server` (`tests/test_timeline.py`). It has not been run on a real session in this clone.
+
+**On the October 12 rebuild session (October 16, main machine, $0):** `runs/timeline-governed-rebuild-20261016.html`, from `runs/governed-rebuild-20261012-072505` with its `ledger.sqlite3`. The page has no scripts or external resources.
+- **It matches "Live result (October 12)"** above:
+  - the task correction was delivered once, by the held `Stop`;
+  - the effort and compaction changes were queued at turn end;
+  - the idle plan (`compact, effort`) came 305.6 s later, and the follow-up read the whole 4,041-token entry;
+  - the compaction request ran at low and the medium request rewrote 2,011 tokens after reading 2,713;
+  - the plan was acknowledged `observed`;
+  - the total is $0.033412 over 6 requests.
+- **One label differs from `idle_replay`:** the compaction request (read 4,041, wrote 58) is labelled "rebuild after a change". The timeline applies `write_sources`'s rule to it as a main-loop request; `idle_replay` leaves compaction requests out. It is 58 tokens, and the cost is unchanged.
 
 ## Validation
 

@@ -202,3 +202,12 @@ Overnight cloud run, item 4, branch `claude/unknown-cost-audit`, $0. The rule is
 | `cache_replication.execute` summary | `known_cost_usd` beside `cost_complete` (False when any row lacks a cost, errors included); `ttl_summary` has no dollars | OK |
 
 **Recorded results.** None of the recorded figures behind current decisions comes from a fixed field. The long-session and mid-task-compaction headlines are paired cold-equivalent dollars (`summarize`, `subtask_costs`), which were already unknown-safe. Whether any recorded long-session run had an unknown compaction turn, which `compaction_usd` would have counted as $0, can be checked on the main machine: `python3 -m modelpilot.long_session report <runs>` now shows it as None.
+
+**Main-machine check (October 16, $0): no recorded figure changes.**
+- **Long sessions:** none has run (plan item 6 awaits approval), so `long_session report` has nothing to read.
+- **Mid-task compaction:** `midtask_compaction` over the October 13 report's 15 runs (`runs/midtask-compaction-report-20261016.json`) matches `runs/midtask-compaction-report-20261013.json` in every figure. It only adds the new counters:
+  - the `unknown` blocks: 0 in both compact arms; 33 compaction figures in the control, whose trials have no compaction turn and showed `None` before too;
+  - `unmeasured_requests: 0` in every arm's `write_sources`.
+- **Bench runs:** `bench_report` over each of the 32 bench runs `docs/evidence.md` cites (`runs/unknown-cost-recheck-20261016/`; `bench-20260928-200812` is on another computer). Only three have unknowns, all from September:
+  - `bench-20260926-201411` and `bench-20260928-150510` were already recorded with them;
+  - `bench-20260923-070044` (the 3c pilot) now has cold-equivalent cost unknown on its 4 trials. Its proxy log has no 5m/1h split for any cache write (`no_cache_write_breakdown`), and its run-time summary predates the cold-equivalent figure. Its measured cost is fully priced ($0.2947 + $0.3314 = $0.626, the figure the evidence table cites).
