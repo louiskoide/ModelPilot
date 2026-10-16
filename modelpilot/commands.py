@@ -69,6 +69,7 @@ COMMANDS = (
     command('miss_detector', 'Miss detector: host facts and suite checks after a run ($0)'),
     command('policy_replay', "Replay recorded ModelPilot decisions through the current policy ($0)"),
     command('proxy', 'Loopback Messages API pass-through proxy with dry-run decisions; forwards, originates nothing'),
+    command('proxy_overhead', 'What the proxy adds: first byte, per event, throughput, CPU, memory (loopback, $0)'),
     command('regrade', "Re-grade a finished run's saved fixes, edge suites included ($0)"),
     command('report', 'Summarize a proxy log: costs and latency ($0)'),
     command('soak', 'M1 soak against a local fake API ($0)'),

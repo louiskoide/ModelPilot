@@ -184,3 +184,33 @@ Each version is installed into the ignored `work/claude-client-<version>` with a
 - Every version still sends the trailing system message the per-message effort and Jev's compat patch rely on, but from 2.1.299 without the `mid-conversation-system-2026-04-07` beta. Whether the API then still accepts mid-conversation system messages is untested.
 - Not covered: the interactive UI, a subscription login, Haiku 5.5's shape, and anything a real API answer would change.
 
+
+## Proxy overhead — October 15, 2026 (overnight cloud run, cloud container, loopback, $0)
+
+`python3 -m modelpilot.proxy_overhead --repeats 5 --out runs/cloud-overnight-proxy-overhead.json` (new `modelpilot/proxy_overhead.py`). The proxy ran as its own process (`python -m modelpilot.proxy`) against an in-process upstream that answers at once. Each request went through the proxy and, in the same round, straight to the upstream; the figures are proxied minus direct.
+
+Machine: cloud container, 4 CPUs, Linux 6.18, Python 3.12.3. Machine-dependent; on the main machine, rerun it rather than reuse these numbers. Each case ran 5 rounds of 1, 4 or 16 concurrent clients: 5, 20 or 80 requests. At one client the p95 is the slowest of 5. Bodies of 10 MB and 30 MB ran at 1 and 4 clients only.
+
+Added time to the first byte (ms, median / p95) and per-request totals:
+
+| Case | 1 client | 4 clients | 16 clients | 1 client, `--governor-*` | 16 clients, `--governor-*` |
+| --- | --- | --- | --- | --- | --- |
+| 1 KB body | 1.1 / 1.2 | 2.6 / 5.5 | 4.0 / 10.5 | 3.5 / 4.6 | 22.9 / 110.4 |
+| 100 KB body | 1.5 / 2.8 | 3.8 / 5.0 | 5.3 / 18.4 | 4.5 / 5.1 | 23.7 / 112.1 |
+| 1 MB body | 5.3 / 7.3 | 13.8 / 16.8 | 28.3 / 50.8 | 9.6 / 10.6 | 54.6 / 117.0 |
+| 10 MB body | 46.7 / 52.2 | 110.2 / 125.2 | not run | 47.9 / 55.3 | not run |
+| 30 MB body | 138.1 / 379.8 | 353.2 / 792.1 | not run | 145.5 / 505.4 | not run |
+| 10-event stream | 0.8 / 0.9 | 2.0 / 3.4 | 2.9 / 8.5 | 4.7 / 5.1 | 29.6 / 113.5 |
+| 1,000-event stream | 0.7 / 0.9 | 3.5 / 17.7 | 11.1 / 106.4 | 3.9 / 5.7 | 62.5 / 189.4 |
+| 10,000-event stream | 1.1 / 1.3 | 2.0 / 13.1 | 12.7 / 162.2 | 5.3 / 5.9 | 364.9 / 927.8 |
+
+- **Per event** (the added end-to-end time over the event count, µs, median / p95): at 1,000 events 9.0 / 12.6 at one client, 34.6 / 47.2 at four and 84.0 / 147.1 at sixteen. At 10,000 events: 9.4 / 10.0, 33.5 / 38.8 and 85.5 / 125.4. The governor flags make no clear difference per event: 8.8 / 9.7 at one client and 10,000 events. A 10-event stream's figure is mostly the request's fixed cost, not a per-event one.
+- **Upload throughput through the proxy** (MB/s per request, median): 190 for 30 MB and 186 for 10 MB at one client, 78 at four. The proxy reads, parses and re-sends the whole body before the upstream sees a byte, so a large body's added first byte is mostly that store-and-forward.
+- **With `--governor-*`** each request at one client gains about 3–4 ms before the first byte (the SQLite admission) and 3–5 ms at its end (settlement). At sixteen clients the ledger's writes queue: p95 is 110–190 ms for small requests and 928 ms for the 10,000-event stream.
+- **Whole runs** (680 proxied requests each): 18.5 CPU seconds and 367 MiB peak resident without the governor; 20.8 s and 377 MiB with it. The peak comes from the 30 MB bodies at four clients, about three copies of each in flight.
+- **Every reply body matched the direct one byte for byte**, and the proxy logged one row per request.
+- **Finding: the proxy listens with socketserver's default backlog of 5.** At sixteen concurrent clients, 129 of the 480 ungoverned and 172 of the 480 governed proxied connects (all of them in the 16-client cases) waited over 0.5 s, about 1 s each: a SYN retry. That is the 16-client p95 of about 1,030 ms in `proxied_connect_seconds`. The direct upstream, given a backlog of 128, had none. A one-off check outside the run gave 55 of 160 slow connects through the proxy and 0 of 160 against a backlog of 64.
+  - The connect time is reported on its own, not counted in the first-byte figures above.
+  - The first full run (preserved as `runs/cloud-overnight-proxy-overhead-first-reset.err`) stopped on a connection reset from the proxy in a 16-client case; the harness then crashed, before it counted failures instead.
+  - A Claude Code session rarely has more than a few connections open at once, so this matters only if many clients share one proxy. A one-line fix (`request_queue_size = 64` on `ProxyServer`) changes shipped behaviour, so it is proposed in the overnight report, not made.
+- **Not measured:** TLS to a real upstream, real network latency, a slow or bursty upstream, and HTTP keep-alive (the proxy answers HTTP/1.0 and closes each connection).
