@@ -1,0 +1,190 @@
+{
+ "version": "2.1.300",
+ "installed": true,
+ "reports": "2.1.300",
+ "path": "work/claude-client-2.1.300/node_modules/.bin/claude",
+ "shape": {
+  "diff": {
+   "claude-sonnet-5-5": {
+    "captured": true,
+    "top_level_keys": {
+     "added": [],
+     "removed": []
+    },
+    "betas": {
+     "added": [
+      "afk-mode-2026-01-31",
+      "dangerous-tool-use-2026-09-03",
+      "mid-conversation-tool-changes-2026-07-01",
+      "thinking-display-updates-2026-08-18"
+     ],
+     "removed": [
+      "mid-conversation-system-2026-04-07"
+     ]
+    },
+    "system_after_prompt": true,
+    "system_after_tool_result": true,
+    "trailing_system_message": true,
+    "message_roles_same": true,
+    "effort": "medium",
+    "context_management_same": true,
+    "thinking": {
+     "type": "adaptive",
+     "display": "updates"
+    }
+   },
+   "claude-opus-5-5": {
+    "captured": true,
+    "top_level_keys": {
+     "added": [],
+     "removed": []
+    },
+    "betas": {
+     "added": [
+      "afk-mode-2026-01-31",
+      "dangerous-tool-use-2026-09-03",
+      "thinking-display-updates-2026-08-18"
+     ],
+     "removed": [
+      "mid-conversation-system-2026-04-07"
+     ]
+    },
+    "system_after_prompt": true,
+    "system_after_tool_result": true,
+    "trailing_system_message": true,
+    "message_roles_same": true,
+    "effort": "medium",
+    "context_management_same": true,
+    "thinking": {
+     "type": "adaptive",
+     "display": "updates"
+    }
+   }
+  }
+ },
+ "compaction": {
+  "exit_codes": [
+   0,
+   0
+  ],
+  "requests": 2,
+  "compaction_flagged": 1,
+  "cache_lifetimes": [
+   "5m"
+  ],
+  "tokens_match": true,
+  "proxy_tokens": {
+   "input_tokens": 200,
+   "output_tokens": 8,
+   "cache_read_input_tokens": 0,
+   "cache_creation_input_tokens": 0
+  },
+  "client_tokens": {
+   "input_tokens": 200,
+   "output_tokens": 8,
+   "cache_read_input_tokens": 0,
+   "cache_creation_input_tokens": 0
+  }
+ },
+ "hooks": {
+  "exit_code": 0,
+  "events": {
+   "PostToolUse-Read": {
+    "seen": true,
+    "added": [],
+    "removed": []
+   },
+   "PostToolUse-Write": {
+    "seen": true,
+    "added": [],
+    "removed": []
+   },
+   "PostToolUseFailure": {
+    "seen": false
+   },
+   "SessionStart": {
+    "seen": true,
+    "added": [],
+    "removed": []
+   },
+   "Stop": {
+    "seen": true,
+    "added": [],
+    "removed": []
+   },
+   "UserPromptSubmit": {
+    "seen": true,
+    "added": [],
+    "removed": []
+   }
+  },
+  "other_events_seen": [
+   "PreToolUse"
+  ]
+ },
+ "failures": {
+  "http_400": {
+   "exit_code": 0,
+   "result": "success",
+   "is_error": false,
+   "main_requests": 2,
+   "resent": true,
+   "resent_without_streaming": false,
+   "seconds": 0.5,
+   "proxy_rows": [
+    "upstream_error",
+    "ok"
+   ]
+  },
+  "http_429": {
+   "exit_code": 1,
+   "result": "success",
+   "is_error": true,
+   "main_requests": 1,
+   "resent": false,
+   "resent_without_streaming": false,
+   "seconds": 0.4,
+   "proxy_rows": [
+    "upstream_error"
+   ]
+  },
+  "http_529": {
+   "exit_code": 1,
+   "result": "success",
+   "is_error": true,
+   "main_requests": 1,
+   "resent": false,
+   "resent_without_streaming": false,
+   "seconds": 0.6,
+   "proxy_rows": [
+    "upstream_error"
+   ]
+  },
+  "cut_stream": {
+   "exit_code": 0,
+   "result": "success",
+   "is_error": false,
+   "main_requests": 2,
+   "resent": true,
+   "resent_without_streaming": true,
+   "seconds": 0.4,
+   "proxy_rows": [
+    "ok",
+    "ok"
+   ]
+  },
+  "idle_stream": {
+   "exit_code": 0,
+   "result": "success",
+   "is_error": false,
+   "main_requests": 2,
+   "resent": true,
+   "resent_without_streaming": true,
+   "seconds": 2.5,
+   "proxy_rows": [
+    "transport_error",
+    "ok"
+   ]
+  }
+ }
+}
