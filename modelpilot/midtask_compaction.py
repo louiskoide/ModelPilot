@@ -25,6 +25,7 @@ import hashlib
 import json
 from pathlib import Path
 from . import bench, bench_report, long_session
+from .proxy import read_log
 
 PLAN_PREAMBLE = ('You are working in a Python repository in the current directory. This task takes two turns. In this '
                  'one, investigate only: find what has to change and plan the change (which files and functions, the '
@@ -120,7 +121,7 @@ def load_run(run_dir, rates):
         if record.get('shape') != 'split':
             continue
         log = path.parent/'observations.jsonl'
-        rows = [json.loads(l) for l in log.read_text().splitlines() if l.strip()] if log.exists() else []
+        rows = read_log(log)
         record.setdefault('transport_check', bench_report.transport_check(rows))  # as bench_report.load_run
         out.append((record, breakdown(record, rows, rates)))
     return out

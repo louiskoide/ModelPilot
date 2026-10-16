@@ -65,6 +65,31 @@ def read_chunked(stream, limit=MAX_BODY):
     return None
 
 
+# What a log line that doesn't parse stands for (October 15, crash recovery): the proxy killed while writing a row leaves
+# its last line cut, so that request's cost is unknown. A row of unknown cost, never a line skipped or a $0.
+CUT_ROW = {'kind': 'messages', 'status': 'unreadable_log_row', 'http_status': None, 'cost_usd': None,
+           'unreadable_log_row': True}
+
+
+def read_log(path):
+    """A proxy log's rows (JSON lines), [] when there is none. A line that doesn't parse as an object (a crash mid-write
+    cuts the last one) reads as a Messages row of unknown cost, so a trial's total turns unknown instead of losing
+    the request or crashing the reader."""
+    path = Path(path)
+    if not path.exists():
+        return []
+    rows = []
+    for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            row = None
+        rows.append(row if isinstance(row, dict) else dict(CUT_ROW))
+    return rows
+
+
 def clean_headers(headers):
     """The end-to-end headers as (name, value) pairs in their order, a header sent twice kept twice (a dict kept only
     its last value until October 14's cloud batch); hop-by-hop names and the names Connection lists are dropped."""

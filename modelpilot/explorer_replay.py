@@ -32,6 +32,7 @@ from pathlib import Path
 import re
 import statistics
 from .cache_probe import prompt_tokens, tier
+from .proxy import read_log
 
 ROOT = Path(__file__).resolve().parents[1]
 ARMS = ('sonnet-5.5-low-concise', 'sonnet-5.5')
@@ -233,7 +234,7 @@ def dev_trials(rates, arms=ARMS):
                 continue
             trial = run/record['task']/record['arm']/str(record['trial'])
             log = trial/'observations.jsonl'
-            rows = [json.loads(line) for line in log.read_text().splitlines() if line.strip()] if log.exists() else []
+            rows = read_log(log)
             turns, results = transcript(trial/'client.stdout.jsonl')
             out.append({'run': run.name, 'task': record['task'], 'arm': record['arm'], 'trial': record['trial'],
                         'cost': cold_cost(record), 'rows': rows, 'turns': turns, 'results': results})

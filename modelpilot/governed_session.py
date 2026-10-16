@@ -26,7 +26,7 @@ from .governor import Governor, reconcile_log
 from .hooks import COMPACTION_CHECK, EVENTS, SUITE, channel_declaration
 from .jev_route_check import TOKEN_FIELDS, check_anthropic_key, parse_events
 from .m5 import IDLE_BOUNDARY_SECONDS, idle_boundary
-from .proxy import ProxyServer
+from .proxy import ProxyServer, read_log as read_proxy_log
 
 ROOT = Path(__file__).resolve().parents[1]
 OWNER = 'claude-client'
@@ -236,7 +236,7 @@ def summarize(run, db, session, limit, task, stdout, correction_record, expect, 
     tools = [b.get('name') for e in events if e.get('type') == 'assistant'
              for b in e.get('message', {}).get('content', []) if b.get('type') == 'tool_use']
     log = run/'observations.jsonl'
-    rows = [json.loads(line) for line in log.read_text().splitlines() if line.strip()] if log.exists() else []
+    rows = read_proxy_log(log)
     messages = [r for r in rows if r.get('kind') == 'messages']
     ok = [r for r in messages if r.get('http_status') == 200]
     gov = Governor(db, session, limit)
@@ -491,8 +491,7 @@ def run_rebuild_session(run, cli, key, upstream, rates, *, prompt, instruction, 
 
 
 def read_log(run):
-    log = Path(run)/'observations.jsonl'
-    return [json.loads(line) for line in log.read_text().splitlines() if line.strip()] if log.exists() else []
+    return read_proxy_log(Path(run)/'observations.jsonl')
 
 
 def journal_end(db, session, limit):

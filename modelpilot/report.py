@@ -32,10 +32,11 @@ def summarize(rows):
 
 
 def main():
+    from .proxy import read_log
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('observations', type=Path)
     args = parser.parse_args()
-    rows = [json.loads(line) for line in args.observations.read_text().splitlines() if line.strip()]
+    rows = read_log(args.observations)
     print(json.dumps(summarize(rows), indent=2))
 
 

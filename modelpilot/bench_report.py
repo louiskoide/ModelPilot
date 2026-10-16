@@ -35,6 +35,7 @@ import random
 import statistics
 from . import regrade
 from .cache_probe import cost, dated, prompt_tokens, tier
+from .proxy import read_log
 
 TTL_SECONDS = {'5m': 300, '1h': 3600}
 EDGE_ROOT = regrade.EDGE
@@ -754,7 +755,7 @@ def load_run(run_dir, rates, price_at=None):
         record.setdefault('complete', record.get('phase', 'graded') == 'graded')
         log = path.parent/'observations.jsonl'
         if log.exists():
-            rows = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
+            rows = read_log(log)
             record.setdefault('transport_check', transport_check(rows))  # records written before October 13 lack it
             rows = priced_rows(record, rows, rates)
             if price_at is not None:
