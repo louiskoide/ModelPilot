@@ -296,6 +296,24 @@ So **acknowledged means delivered, not obeyed**, and this run shows the gap. A m
 
 This is one synthetic two-file task on one model and effort. It shows the mechanism works end to end with a real client and real billing. It is not evidence of reliability across tasks or models, or of savings.
 
+## Session timeline (October 15)
+
+`python3 -m modelpilot.timeline runs/<session>/observations.jsonl --governor runs/<session>/state.db --out runs/<session>/timeline.html` puts a session's proxy rows and the governor's journal on one static page, in time order ($0, read-only; the ledger opens with SQLite's `mode=ro`).
+
+- **Each request row:**
+  - its time, and the gap since the previous request ended ("overlap" when it started first);
+  - kind, model, effort and `effective_effort`;
+  - uncached input, 5m and 1h writes, reads and output;
+  - cost, or "unknown";
+  - the lifetime its breakpoints asked for;
+  - what its writes were, by `bench_report.write_sources`'s rule: cold start, switch, growth, rebuild after expiry or after a change, side request, or none. A row with both a rebuild and growth shows both.
+- **Idle boundaries:** a main-loop request that came after one (`m5.idle_boundary` of the previous request's lifetime) is marked.
+- **Ledger rows:** plans that would rebase (with their trigger, changes and deferred changes), acknowledgements, corrections delivered, held stops, queued changes, notices, suite results and refusals, reviews, fallbacks, orphan recovery, and M2 task corrections.
+- **Totals** cover requests someone is billed for, so count_tokens and refusals are left out. A total with an unknown part is "unknown".
+- **Content:** the page carries no prompt or tool content. The proxy log has none, and the ledger rows shown are labels and counts.
+
+Tested on synthetic rows and on a log made by a governed proxy process in front of `fixtures.fixture_server` (`tests/test_timeline.py`). It has not been run on a real session in this clone.
+
 ## Validation
 
 Offline, no API key:
