@@ -1081,6 +1081,20 @@ The user ran the pre-registered command once, from `main` at `806b8ea` (`runs/ri
 
 **Not done; the user's call.** A claim needs new labelled tasks. At the 66's rate (8 misses in 66 tasks), each miss to catch takes about 8 new tasks, plus labelling trials on low concise, Sonnet 5.5 medium and Opus 5.5. Option (b) of October 14 put more labelled tasks at $73–146. The floor gap above argues against it: on these tasks the routing already fails 2 that Opus passes.
 
+### Catching misses: where the October 16 discussion left it ($0, no request)
+
+The user asked, after the stuck detector's real-client check (`docs/m6-modelpilot-policy.md`, "Stuck detector v3"), whether anything catches misses. Recorded so the answers travel; no decision changes.
+- **The stuck detector isn't a miss detector.** It was built (M2) to notice an agent looping. On the 891 eligible recorded trials its scored rule flags 0 of 87 misses in v1, v2 and v3. v3's observed-only signals, if scored, would flag 3 misses against 15 passes (`runs/stuck-v3-replay-20261016.json`). Misses finish confidently; they don't loop.
+- **A hidden grader can't run in use.** The benchmark's hidden tests are the upstream fix commit's, and the strict misses come mostly from edge tests written knowing the reference fix. A user's new change has neither.
+- **Tests before the code were item 5** (October 6): Opus 5.5's tests from the instruction alone caught 8 of 29 misses on the three tasks (parse 8/8; tomli 0/17; ISMAGS 0/4 among the tests the reference passes). The agent's own tests pass in 91% of misses.
+- **"Rescued none" has one miss in it.** The October 6 forced review's 27 trials held one miss. Across both review runs Opus named the tomli keyword bug in 1 of 4 reviews; Opus solving tomli itself passes 2 of 4.
+- **An untested idea: compare the change with an existing counterpart.** Each of the three tasks has one the misses disagree with: parse with `format` (`parse('{:,d}', format(-7, ',d'))`; item 5's one catching test was such a round trip), tomli with `json.JSONDecodeError`'s keyword construction, ISMAGS with networkx's other matchers in the hidden test's parameter list. Found after seeing these misses, so it may only fit them.
+  - **The bar:** to equal Opus 5.5 for an Opus user, a check on low concise must catch about 3 misses in 4 that are then repaired (0.915 against 0.981 strict, `opus-vs-modelpilot-20261006.json`); item 5 caught about 1 in 4. 17 of the 29 misses are tomli's one bug, so the bar rests mostly on it.
+  - **The ceiling:** at about $0.07–0.13 a task for the check (estimate, from item 5's $0.134 with Opus) plus $0.056 a repair, it saves at most about $0.05–0.11 a task against running Opus 5.5; for a Sonnet user nothing, since the floor is met.
+  - **Odds:** about 1 in 4 on these three tasks, lower on new ones (a judgment, not measured): comparison tests raise false alarms where a change rightly differs (item 5's ISMAGS tests failed on the reference fix), and Opus misses tomli's convention in half its own attempts.
+  - **Costs:** a $0 check of the recorded transcripts (do the passing trials on the three tasks refer to the counterpart and the misses not?), about 30 minutes; a probe on the three tasks plus about 10 that Sonnet passes, under $1–2 (estimate); a claim needs new labelled tasks, $73–146 (option (b) of October 14; said as "about $10+" in the discussion, wrong).
+- **Not done; the user's call.** The $0 check is offered. Under the rule of no paid runs on thin leads, a probe only if the check is clearly positive.
+
 ### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
 
 User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku passes, the tests are too easy"), so harder tasks come before item 8's labels, from sqlglot (MIT; surveyed October 4, above), in stages. Stage 1 builds 8 tasks and screens them with one low concise and one Opus 5.5 trial each; a full batch follows only if the repository produces misses. sqlglot joins the tuning split; the final split and its lock are unchanged.
