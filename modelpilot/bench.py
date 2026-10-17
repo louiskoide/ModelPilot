@@ -83,6 +83,12 @@ ARMS = {
     # makes for an Opus user has to come from the cache levers (plan item 6). Plain opus-5.5 plus the lifetime.
     'opus-5.5-5m': {'kind': 'fixed', 'model': 'claude-opus-5-5', 'prompt_cache_ttl': '5m'},
     'opus-5.5-1h': {'kind': 'fixed', 'model': 'claude-opus-5-5', 'prompt_cache_ttl': '1h'},
+    # Opus levers that leave its reasoning and its fix alone (user request, October 17; docs/m6-benchmark-plan.md,
+    # "Opus levers"): Opus 5.5 medium with one appended prompt each. lean-io is concise's tool-output bullets without
+    # its fix-scope and prose ones (tool results are 81% of what an Opus trial reads back); batch-calls asks for
+    # independent calls in one response (1.5 of an Opus trial's 9 calling responses run calls in parallel).
+    'opus-5.5-lean-io': {'kind': 'fixed', 'model': 'claude-opus-5-5', 'append_system_prompt': 'bench/prompts/lean-io.md'},
+    'opus-5.5-batch': {'kind': 'fixed', 'model': 'claude-opus-5-5', 'append_system_prompt': 'bench/prompts/batch-calls.md'},
     # Mid-task compaction (user request, October 10; midtask_compaction): low concise with a '/compact' turn between
     # the split shape's plan and fix turns. 'compaction' names who writes the summary: 'session', the session's own
     # setting, as the client does; a model id, and the proxy sends the compaction request there at the client's effort
