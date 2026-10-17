@@ -1,0 +1,20 @@
+{
+  "session_id": "556dbe55-0daf-4b0e-9825-6b32de3d933c",
+  "transcript_path": "{config}/projects/fixture/session.jsonl",
+  "cwd": "{cwd}",
+  "prompt_id": "402aab9f-77fd-4f66-a63b-b351d1600a8c",
+  "permission_mode": "default",
+  "effort": {
+    "level": "low"
+  },
+  "hook_event_name": "PostToolUseFailure",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "python3 -m unittest test_bad",
+    "description": "run tests"
+  },
+  "tool_use_id": "toolu_fixture1",
+  "error": "Exit code 1\n.F\n======================================================================\nFAIL: test_b (test_bad.T.test_b)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"{cwd}/test_bad.py\", line 6, in test_b\n    self.assertEqual(1, 2)\nAssertionError: 1 != 2\n\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nFAILED (failures=1)",
+  "is_interrupt": false,
+  "duration_ms": 47
+}

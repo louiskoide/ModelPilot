@@ -10,10 +10,75 @@ import time
 import uuid
 
 LADDER = ('increase_effort', 'stronger_model', 're_diagnose', 'human_review')
+# Signals journaled for evidence, kept out of the score: both read the agent's own test runs.
+OBSERVED_ONLY = ('stalled_agent_tests', 'repeated_agent_failure')
+# What changes between two runs of the same failure: directories of absolute paths (temporary ones differ every run),
+# line numbers, memory addresses, clock times and a test runner's duration. Counts like '2 failed' and values in a
+# message (a hex literal, '2 s') stay: a change there is a change in state (heuristic-v3; v2 replaced every 0x value
+# and every number before 's', so 0x1f and 0x7f hashed alike).
+VOLATILE = ((re.compile(r'(?<![\w.~-])/(?:[^\s/\'"`:,;()<>\[\]{}]+/)+'), ''),
+            (re.compile(r'\bline \d+'), 'line #'),
+            (re.compile(r'(\.[A-Za-z]\w*):\d+(?::\d+)?\b'), r'\1:#'),
+            (re.compile(r'\bat 0x[0-9a-fA-F]+\b'), 'at 0x#'),  # an object's address in its repr
+            (re.compile(r'\b0x[0-9a-fA-F]{8,}\b'), '0x#'),  # any other address
+            (re.compile(r'\b\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:[.,]\d+)?'), '<time>'),
+            (re.compile(r'\bin \d+(?:\.\d+)?s\b(?: \(\d+:\d\d:\d\d\))?'), 'in #s'))
+ANSI = re.compile(r'\x1b\[[0-9;]*m')
+PYTEST_SUMMARY = re.compile(r'^(?:FAILED|ERROR) (?!\()\S.*$', re.M)  # pytest's short test summary lines
+UNITTEST_FAILURE = re.compile(r'^(?:FAIL|ERROR): \S.*$', re.M)
+RULE = re.compile(r'^(?:={10,}|-{10,})\s*$', re.M)
+
+
+def normalize_error(text):
+    """An error's text as hashed: whitespace collapsed and VOLATILE parts replaced, so a failure repeated with a new
+    temporary path, line number, address, clock time or test duration hashes the same."""
+    for pattern, replacement in VOLATILE:
+        text = pattern.sub(replacement, text)
+    return ' '.join(text.split())
+
+
+def _exception(text):
+    """The exception line a Python traceback ends on (the first unindented line after its frames), or None."""
+    tail = text.rsplit('Traceback (most recent call last):', 1)
+    if len(tail) < 2:
+        return None
+    return next((l.strip() for l in tail[1].splitlines() if l.strip() and not l[:1].isspace()), None)
+
+
+def failure_signature(text):
+    """What identifies a failure, so the same failure after an edit compares equal although the output around it
+    changed (a traceback quotes the edited source; a check prints new values first): pytest's short summary lines
+    (failing test ids with their messages), unittest's failing tests each with its exception line, or the exception a
+    traceback ends on. Other text (a tool's own error, a crash with no traceback) is its own signature."""
+    text = ANSI.sub('', text)
+    summary = PYTEST_SUMMARY.findall(text)
+    if summary:
+        return '\n'.join(sorted(set(summary)))
+    heads = list(UNITTEST_FAILURE.finditer(text))
+    if heads:
+        failures = []
+        for head in heads:
+            block = RULE.split(text[head.end():])
+            body = block[1] if len(block) > 1 else block[0]  # header, rule, traceback, rule
+            failures.append(f'{head[0]} {_exception(body) or body.strip()[-200:]}')
+        return '\n'.join(sorted(set(failures)))
+    return _exception(text) or text
+
+
+def error_hash(text):
+    """The hash the detector compares for a failure: of its normalized signature. None when nothing is left."""
+    signature = normalize_error(failure_signature(text))
+    return hashlib.sha256(signature.encode()).hexdigest() if signature else None
 
 
 def assess(events, level=0):
-    """Heuristic recommendations only. Inputs are ordered observations of one task revision."""
+    """Heuristic recommendations only. Inputs are ordered observations of one task revision.
+
+    The agent's own test runs (agent_suite/agent_failures/agent_failure_hash: its Bash calls that run a test runner,
+    observed by the hooks) are kept apart from a host suite's and are OBSERVED_ONLY: stalled_agent_tests (the host
+    suite's non-improving rule) and repeated_agent_failure (its last three runs failing alike) are reported, never
+    scored. On the 891 eligible recorded trials (runs/stuck-v3-replay-20261016.json) neither separates misses from
+    passes: misses test as often and their last own run passes in 91% (runs/stuck-eval-20261016.json)."""
     if level not in range(5):
         raise ValueError('Escalation level must be 0..4')
     recent = events[-6:]
@@ -28,18 +93,23 @@ def assess(events, level=0):
             snapshots.setdefault(e['file'], []).append(e['content_hash'])
     oscillation = any(len(v) >= 4 and v[-4] == v[-2] and v[-3] == v[-1] and v[-1] != v[-2]
                       for v in snapshots.values())
-    suites = {}
-    for e in recent:
-        if e.get('suite') and isinstance(e.get('failures'), int):
-            suites.setdefault(e['suite'], []).append(e['failures'])
-    stalled = any(len(v) >= 3 and v[-1] > 0 and v[-3] <= v[-2] <= v[-1] for v in suites.values())
+    def stalls(suite_key, failures_key):
+        series = {}
+        for e in recent:
+            if e.get(suite_key) and isinstance(e.get(failures_key), int):
+                series.setdefault(e[suite_key], []).append(e[failures_key])
+        return any(len(v) >= 3 and v[-1] > 0 and v[-3] <= v[-2] <= v[-1] for v in series.values())
+    stalled, stalled_agent = stalls('suite', 'failures'), stalls('agent_suite', 'agent_failures')
+    runs = [e for e in recent if isinstance(e.get('agent_failures'), int)][-3:]
+    repeated_agent = (len(runs) == 3 and all(e['agent_failures'] > 0 and e.get('agent_failure_hash') for e in runs)
+                      and len({e['agent_failure_hash'] for e in runs}) == 1)
     retry = sum(e.get('retry_language') is True for e in recent) >= 3
-    signals = {'repeated_error': repeated, 'edit_oscillation': oscillation,
-               'stalled_tests': stalled, 'retry_language': retry}
+    signals = {'repeated_error': repeated, 'edit_oscillation': oscillation, 'stalled_tests': stalled,
+               'stalled_agent_tests': stalled_agent, 'repeated_agent_failure': repeated_agent, 'retry_language': retry}
     score = 3*repeated + 3*oscillation + 3*stalled + retry
-    return {'score': score, 'signals': signals, 'window_events': len(recent),
+    return {'score': score, 'signals': signals, 'observed_only': list(OBSERVED_ONLY), 'window_events': len(recent),
             'recommendation': LADDER[level] if score >= 3 and level < 4 else 'hold',
-            'applied': False, 'policy': 'heuristic-v1; threshold=3; window=6'}
+            'applied': False, 'policy': 'heuristic-v3; threshold=3; window=6'}
 
 
 class State:
@@ -166,7 +236,11 @@ class State:
     def observe(self, task, revision, owner, observation):
         # suite_outcome and tree_hash (October 14): a host-run suite's verdict and the files it ran against
         # (modelpilot.suite_adapter); an unknown outcome carries no failures, so it never feeds stalled_tests.
-        allowed = {'error','file','content_hash','suite','failures','retry_language','progress','suite_outcome','tree_hash'}
+        # agent_suite and agent_failures (October 16): the agent's own Bash test run, its test-running shell lines and
+        # the failures its output reports (modelpilot.hooks); kept apart from a host suite's suite and failures.
+        # agent_failure_hash (heuristic-v3): error_hash of a failing run's output, never its text.
+        allowed = {'error','file','content_hash','suite','failures','retry_language','progress','suite_outcome','tree_hash',
+                   'agent_suite','agent_failures','agent_failure_hash'}
         if set(observation)-allowed:
             raise ValueError('Unknown observation fields')
         payload = dict(observation)
@@ -177,15 +251,19 @@ class State:
         for key in ('retry_language','progress'):
             if key in payload and type(payload[key]) is not bool:
                 raise ValueError(f'{key} must be boolean')
-        if 'failures' in payload and (type(payload['failures']) is not int or payload['failures'] < 0):
-            raise ValueError('failures must be a nonnegative integer')
-        for key in ('error','file','content_hash','suite','tree_hash'):
+        for key in ('failures','agent_failures'):
+            if key in payload and (type(payload[key]) is not int or payload[key] < 0):
+                raise ValueError(f'{key} must be a nonnegative integer')
+        for key in ('error','file','content_hash','suite','tree_hash','agent_suite'):
             if key in payload and not isinstance(payload[key], str):
                 raise ValueError(f'{key} must be a string')
+        if 'agent_failure_hash' in payload and not (isinstance(payload['agent_failure_hash'], str)
+                                                    and re.fullmatch('[0-9a-f]{64}', payload['agent_failure_hash'])):
+            raise ValueError('agent_failure_hash must be a SHA-256 hex digest')
         if 'error' in payload:
-            error = ' '.join(payload.pop('error').split())
-            if error:
-                payload['error_hash'] = hashlib.sha256(error.encode()).hexdigest()
+            digest = error_hash(payload.pop('error'))
+            if digest:
+                payload['error_hash'] = digest
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
             self._owned(task,revision,owner)
@@ -204,6 +282,16 @@ class State:
                 if len(found) == limit:
                     break
         return found
+
+    def file_hashes(self, task, revision):
+        """Each file's newest observed content hash in one revision, {file: content_hash}."""
+        hashes = {}
+        for row in self.db.execute("SELECT payload FROM events WHERE task=? AND revision=? AND kind='observation' ORDER BY seq",
+                                   (task,revision)):
+            payload = json.loads(row['payload'])
+            if 'file' in payload and 'content_hash' in payload:
+                hashes[payload['file']] = payload['content_hash']
+        return hashes
 
     def recommend(self, task):
         row = self.get(task)

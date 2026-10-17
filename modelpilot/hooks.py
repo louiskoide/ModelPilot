@@ -7,6 +7,11 @@ context itself, and always exits 0 so a governor fault cannot stop the client. W
 MODELPILOT_REVIEW_AT_STOP=1 (the ModelPilot arm's review at the finish) Stop also holds the
 agent's finish once per turn, so the proxy's policy can deliver a review on the request that follows.
 
+The agent's own Bash test runs (October 16) are observed too, labelled as the agent's (agent_suite, agent_failures,
+agent_failure_hash) and kept apart from host suite results, for the stuck detector's observed-only signals only; a
+failing one is never also an error. The files a Bash call changed (git's list plus files already observed) are
+observed as file evidence, as Write and Edit are (heuristic-v3).
+
 With MODELPILOT_SUITE (a JSON suite declaration, October 14; off by default) a Stop that really ends a turn runs
 the declared suite on the host and records its result as a ledger observation (modelpilot.suite_adapter): never a
 block, never a change. The hook waits for the suite, so give its settings entry a timeout above the suite's.
@@ -18,9 +23,12 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import time
+from . import delegation
 from .governor import Governor, KINDS, OBSERVABLE
+from .m2 import error_hash
 
 EVENTS = ('SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop')
 # Events whose hookSpecificOutput.additionalContext reaches the model (verified on Claude Code 2.1.280).
@@ -28,6 +36,7 @@ CONTEXT_EVENTS = ('SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUs
 FILE_TOOLS = {'Write': 'file_path', 'Edit': 'file_path', 'MultiEdit': 'file_path', 'NotebookEdit': 'notebook_path'}
 MAX_STDIN = 16 * 1024 * 1024
 MAX_HASHED_FILE = 64 * 1024 * 1024
+MAX_BASH_FILES = 64  # changed files hashed after one Bash call, beside those already observed
 LEASE_SECONDS = 3600
 BINDING = ('MODELPILOT_DB', 'MODELPILOT_SESSION', 'MODELPILOT_LIMIT_USD', 'MODELPILOT_TASK', 'MODELPILOT_OWNER')
 # Set by the ModelPilot arm when its policy reviews the work at the agent's finish (consult.force 'agent_finish').
@@ -68,14 +77,79 @@ def file_evidence(payload):
     return {'file': relative.as_posix(), 'content_hash': digest.hexdigest()}
 
 
+def agent_test_run(payload, output):
+    """The agent's own test run in a Bash call, {'agent_suite', 'agent_failures'}, or None: the call's shell lines that
+    run a test runner (delegation.runs_tests, outside here-document bodies) and the failures its output reports
+    (delegation.failures). The command is the agent's and the output is what the client returned: a stuck signal,
+    never a verdict on the work. A run whose output gives no outcome (no summary, cut off) is not one."""
+    command = (payload.get('tool_input') or {}).get('command') if payload.get('tool_name') == 'Bash' else None
+    if not isinstance(command, str) or not isinstance(output, str):
+        return None
+    lines = [' '.join(line.split()) for line in delegation.shell_lines(command) if delegation.runs_tests(line)]
+    failed = delegation.failures(output) if lines else None
+    if failed is None:
+        return None
+    run = {'agent_suite': '\n'.join(lines), 'agent_failures': failed}
+    digest = error_hash(output) if failed else None
+    return dict(run, agent_failure_hash=digest) if digest else run
+
+
 def observation(event, payload):
-    """Conservative mapping; progress and retry language are never inferred from model text."""
+    """Conservative mapping; progress and retry language are never inferred from model text. A Bash call that exits
+    0 arrives as PostToolUse with its output in tool_response; one that doesn't, as PostToolUseFailure with
+    'Exit code N' and its output in error (recorded from 2.1.284, tests/fixtures/hooks-2.1.284-bash).
+
+    A failing test run whose output gives an outcome is the agent's test run only, never also an error (heuristic-v3):
+    in v2 it fed the scored repeated_error when the command exited non-zero, but not when piped through tail (exit 0,
+    1,011 of 1,024 failing runs on record), so whether the agent's test runs could escalate depended on a pipe."""
+    if event == 'PostToolUse' and payload.get('tool_name') == 'Bash':
+        response = payload.get('tool_response')
+        streams = [response.get(k) for k in ('stdout', 'stderr')] if isinstance(response, dict) else []
+        return agent_test_run(payload, '\n'.join(s for s in streams if isinstance(s, str)))
     if event == 'PostToolUse':
         return file_evidence(payload)
     if event == 'PostToolUseFailure' and payload.get('is_interrupt') is not True:
         error = payload.get('error')
-        return {'error': error} if isinstance(error, str) and error.strip() else None
+        if not isinstance(error, str) or not error.strip():
+            return None
+        return agent_test_run(payload, error) or {'error': error}
     return None
+
+
+def changed_files(root):
+    """Files under root that git reports as modified or new and not ignored (paths relative to root, at most
+    MAX_BASH_FILES, sorted), or [] when root isn't in a repository or git fails. Untracked directories are skipped
+    whole (--directory), so a virtualenv made in the workspace isn't hashed. Read-only: no index lock, no fsmonitor."""
+    try:
+        listed = subprocess.run(['git', '--no-optional-locks', '-c', 'core.quotepath=off', '-c', 'core.fsmonitor=false',
+                                 'ls-files', '--modified', '--others', '--exclude-standard', '--directory', '-z'],
+                                cwd=root, capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if listed.returncode:
+        return []
+    names = {n for n in listed.stdout.decode(errors='replace').split('\0') if n and not n.endswith('/')}
+    return sorted(names)[:MAX_BASH_FILES]
+
+
+def bash_file_evidence(state, task, revision, payload):
+    """Files a Bash call changed, as file evidence ({'file', 'content_hash'}, in path order): agents edit through
+    Bash too (python here-documents, sed -i, cat >; 391 source-file writes beside 1,367 Edit/Write calls in the
+    eligible recorded trials, the only source edits in 143 of 891: runs/stuck-eval-20261016.json), which file_evidence
+    never saw. Candidates are the files git reports changed or new under the workspace plus every file already
+    observed in this revision (a file put back as it was at the base drops out of git's list, and that return is what
+    edit_oscillation looks for). A file is observed when its hash differs from the one last observed for it."""
+    cwd = payload.get('cwd')
+    if payload.get('tool_name') != 'Bash' or not isinstance(cwd, str):
+        return []
+    root = Path(cwd).resolve()
+    last = state.file_hashes(task, revision)
+    found = []
+    for name in sorted(set(changed_files(root)) | set(last)):
+        evidence = file_evidence({'tool_name': 'Write', 'tool_input': {'file_path': name}, 'cwd': str(root)})
+        if evidence and last.get(evidence['file']) != evidence['content_hash']:
+            found.append(evidence)
+    return found
 
 
 def marker(code):
@@ -198,7 +272,7 @@ def stuck_notice(gov, task, result):
     if last and {k: last.get(k) for k in key} == key:
         return None
     gov.note('stuck_notice', key, task, result['revision'])
-    signals = ', '.join(name for name, on in result['signals'].items() if on)
+    signals = ', '.join(name for name, on in result['signals'].items() if on and name not in result.get('observed_only', ()))
     return (f"ModelPilot (dry-run): stuck signals ({signals}) suggest '{result['recommendation']}' "
             f'for task {task}. Nothing was changed.')
 
@@ -250,13 +324,15 @@ def handle(event, payload, env, clock=time.time):
             notices += [notice] if notice else []
             renew(gov, task, owner)
         found = observation(event, payload)
-        if found:
+        if found or (event in ('PostToolUse', 'PostToolUseFailure') and payload.get('tool_name') == 'Bash'):
             row = gov.state.get(task)
-            try:
-                result = gov.observe(task, row['revision'], owner, found)
-            except ValueError:
-                gov.note('observe_refused', {'event': event}, task, row['revision'])
-            else:
+            # The files a Bash call changed come first: its edits happened before the test run it may end with.
+            for item in bash_file_evidence(gov.state, task, row['revision'], payload) + ([found] if found else []):
+                try:
+                    result = gov.observe(task, row['revision'], owner, item)
+                except ValueError:
+                    gov.note('observe_refused', {'event': event}, task, row['revision'])
+                    break
                 notice = stuck_notice(gov, task, result) if result['recommendation'] != 'hold' else None
                 notices += [notice] if notice else []
         if event == 'UserPromptSubmit':

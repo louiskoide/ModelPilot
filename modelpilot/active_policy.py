@@ -68,7 +68,7 @@ def parameters(model, effort, config=None, overrides=None):
                            'pass rates when calibration is on; a failure is redone at the turn\'s effort. With the '
                            'quality floor on, only settings no worse than the baseline (or above the current one) are '
                            'weighed, and a setting below it moves to the cheapest allowed one',
-            'stop_on': 'stuck with no stronger setting', 'stuck': 'm2 heuristic-v1 (score >= 3, window 6)',
+            'stop_on': 'stuck with no stronger setting', 'stuck': 'm2 heuristic-v3 (score >= 3, window 6)',
             'config_sha256': hashlib.sha256(switch_policy.CONFIG.read_bytes()).hexdigest(), 'overrides': overrides or {},
             'admission': 'measured spend below the per-task limit; a move also needs the limit to cover its full '
                          'rebuild (request bytes/3 tokens at the dearest write rate), not its output allowance',

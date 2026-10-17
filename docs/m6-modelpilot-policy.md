@@ -293,6 +293,64 @@ Overnight item 15. The policy reads each measured pass rate as `(passed + 1) / (
 - **What would firm it up:** these outcomes count the 29 tuning tasks only. Item 8's labels (38 tasks; without the defective petersen task, strict low concise 95.5% against Sonnet 5.5 medium's 93.2%, `docs/m6-benchmark-plan.md`) aren't in `calibration.outcomes`. Adding them, without counting a task twice, would likely raise low's rate above medium's; at the point values no decision would change. Not done: changing the outcomes changes the policy, and that is the user's call.
 - The first launch of the `modelpilot` and `-for-opus` replays passed every run as one path (a shell quoting error) and stopped on `FileNotFoundError` before reading anything. Those logs are kept as `runs/policy-intervals-*-20261016-shell-error.log`.
 
+### Stuck detector v2: the agent's test runs observed, not scored (October 16, offline, $0)
+
+User request, after an outside write-up on why stuck and miss detection failed. The stuck rule (stuck evidence: straight to Opus 5.5) couldn't see the channel agents test through: agents ran tests through Bash in 206 of 215 trials (`runs/agent-test-steps-20261006.json`), and M2 read only host suites and tool errors. Its error hashes were exact, so a failure repeated with a new temporary path or timing never matched.
+
+**What changed (`modelpilot/m2.py`, `modelpilot/hooks.py`; `heuristic-v2`):**
+- **Errors are normalized before hashing** (`m2.normalize_error`): directories of absolute paths, line numbers, memory addresses and timings are replaced. Counts stay.
+- **The hooks observe the agent's Bash test runs** (`hooks.agent_test_run`), using the same recognizer and parser the steps use (`delegation.runs_tests`, `delegation.failures`). A run that exits 0 comes from PostToolUse's `tool_response`. One that fails comes from PostToolUseFailure's `error`, which is also kept as the error it is. Both payload shapes were recorded from the pinned 2.1.284 against a loopback fake API ($0, `tests/fixtures/hooks-2.1.284-bash/`).
+- **Labelled as the agent's:** `agent_suite`/`agent_failures`, never `suite`/`failures`. Host-suite readers (steps, the consult brief's latest host result) don't see them.
+- **Observed, not scored.** Agent runs stall on the host suite's rule (three non-improving positive counts for the same command) as `stalled_agent_tests`. That signal is reported and journaled with every observation but left out of the score (`m2.OBSERVED_ONLY`), and the user's stuck notice doesn't list it. So it can't trigger an escalation.
+
+**Why not scored** (`runs/stuck-v2-replay-20261016.py` → `.json`, $0). Every trial's tool results on record (82 bench runs, 1,039 trials, every arm) were replayed as the hooks now observe them, assessed after each observation at level 0. Edits get unique hashes, so oscillation isn't replayed; host `run_tests` isn't either.
+- **887 trials** had at least one readable agent test run.
+- **Scored rule:** v1 and v2 each fire in 1 trial, the same one (`sqlglot-starrocks-partitions`, low concise, three identical errors, a strict pass). Normalizing changed no firing on record. None of the 146 ModelPilot-arm trials fires either way.
+- **`stalled_agent_tests`, if it were scored:** 6 trials, 5 of them strict passes, all in fixed arms. In every one a test kept failing over three or more runs, and the agent then fixed it (`runs/stuck-v2-base-check-20261016.py` → `.json`, $0):
+  - Four are sqlglot trials. A task test fails for 3–6 whole-suite runs beside `test_convert`, which fails in every run and at each task's base (`ModuleNotFoundError: pytz`, the bench venv). The task test is then fixed.
+  - Two are `mi-numeric-range-eq-hash`: a targeted test failing three times between edits, then passing on the next run.
+  - Its one miss, `sqlglot-mysql-alter-options` (low concise with Haiku compaction), also cleared its stall: its last own test run passed, and it missed on the hidden tests, the usual confident finish.
+- **Filtering the base's failures changes none of the 6.** `test_convert` fails in every run, so taking it away lowers each count by one, and a task test was failing at each firing point. The signal fires on struggle the agent works through. Scoring it would send 5 passing trials to Opus 5.5 mid-turn, and the one miss had already moved past its stall.
+- **Not done:** refitting the rule to these trials (needing more runs, say), which would fit it on the same record. Scoring it needs new evidence and is the user's call.
+- **Correction (same day, "Stuck detector v3" below):** the 1,039 trials include 148 without an eligible strict label, and the 196 strict misses the replay's totals count include 109 that `bench_report.ineligible_reason` excludes (network failures). The 6 firings are all eligible, so the counts above stand; on eligible trials the signal finds 1 of 87 misses, not 1 of 196.
+
+### Stuck detector v3: evaluation and four fixes, still not scored (October 16, offline, $0)
+
+User request: evaluate v2, then "do everything 1–4" of the fixes the evaluation listed. Both scripts read only recorded transcripts and the task repositories.
+
+**Evaluation** (`runs/stuck-eval-20261016.py` → `.json`):
+- **Denominator.** Of the 196 strict misses the v2 replay counted, 109 are ineligible (106 `transport_error`, 3 `catalog_incomplete`), every one ending on a client error, 97 within two requests. Eligible: 891 trials, 804 passes and 87 misses (80 without `nx-generalized-petersen`).
+- **Misses don't struggle; passes do.** The agent's own test runs, eligible trials:
+
+  | | Passes (804) | Misses (87) |
+  | --- | --- | --- |
+  | own test runs, mean | 2.22 | 2.22 |
+  | any of them failed | 48.5% | 33.3% |
+  | the last one passed | 77.7% | 90.8% |
+  | the last one failed | 19.3% | 3.4% |
+
+  On the tasks with both labels the gap is wider (any failed: passes 67%, misses 36%). The agent's tests don't hold the requirement it missed, so no signal read from them separates misses from passes.
+- **Looser stall rules add false alarms, not information** (passes/misses flagged): as built 5/1; command key without pipes and flags 6/1; a window of the last 6 test runs 5/1; every run as one series 74/11 (13% misses against a 9.8% base rate). A sensitivity check, not a rule fit.
+- **The one scored firing on record** (`sqlglot-starrocks-partitions`, a pass) is three Read calls naming `file` for `file_path` (InputValidationError), fixed on the next call; not a loop. Whether the client sends PostToolUseFailure for a validation error isn't recorded.
+- **Channels.** 1,011 of 1,024 failing agent runs exited 0 (piped through tail; 2,282 of 2,351 test-running calls are piped) and 13 through a client error: only those 13 fed v2's scored `repeated_error`. Tool errors on eligible trials: Bash python checks 76, other Bash 65, a tool named `bash` that doesn't exist 29, Bash test runs 26, Grep 18, Edit 16, Read 15. Source files written through Bash: 391 writes beside 1,367 Edit/Write calls, in 188 trials, the only source edits in 143: `edit_oscillation` never saw them.
+
+**What changed (`modelpilot/m2.py`, `modelpilot/hooks.py`; `heuristic-v3`):**
+1. **Evidence on eligible trials** (the scripts above and below; the v2 section's counts corrected).
+2. **Observed-only holds.** A failing Bash test run whose output gives an outcome is observed as the agent's run only, never also an `error`, whatever its exit code. A failing Bash call that ran no test, or whose output gives no outcome, stays an error. This removes one path to escalation (an unpiped test run failing alike three times); on record it never fired.
+3. **Failure signatures.** `m2.error_hash` hashes a normalized `failure_signature`: pytest's short summary lines (failing ids with messages), unittest's failing tests each with its exception line, the exception a traceback ends on, else the text. A failing agent run carries its own as `agent_failure_hash`, and `repeated_agent_failure` (the last three agent runs failing alike) is a second `OBSERVED_ONLY` signal. Normalization now replaces only memory addresses (`at 0x…`, or 8+ hex digits), clock times and a test runner's `in Xs` (with pytest's `(h:mm:ss)`); v2's every-`0x` and every-number-before-`s` rules merged distinct values (`0x1f` and `0x7f`).
+4. **Bash edits observed.** After a Bash call the hooks hash the files git lists as modified or new under the workspace (not ignored; untracked directories skipped whole; at most 64) plus every file already observed in the revision, and observe each whose hash differs from its last observed one (`hooks.bash_file_evidence`, `m2.State.file_hashes`). A file put back as it was at the base drops out of git's list, so the observed set keeps it. Outside a repository, none. **`edit_oscillation` is scored**, so edits going back and forth through Bash can now escalate the ModelPilot arm; how often is unmeasured, since transcripts don't say what Bash wrote (oscillation through Edit/Write fired in none of the 891 trials).
+
+**Replay** (`runs/stuck-v3-replay-20261016.py` → `.json`; v1 and v2 are their own `m2.py` from git, v3 today's code; eligible trials only). Edit oscillation is replayed for the first time: Edit, MultiEdit and Write content is rebuilt from the task's base commit and setup files (1,143 edits rebuilt, 36 not), a file a Bash command may have written is dropped from then on (384), and the rebuilt files match the agents' final `agent.diff` in 333 of 340 (the 7 others: one September 29 trial whose diff lacks edits its transcript shows, and docs files). Bash edits and v3's Bash file evidence can't be replayed (the transcript doesn't say what Bash wrote); host `run_tests` isn't either.
+- **Scored rule:** v1, v2 and v3 each fire in 1 trial, the same pass (the Read trial). `edit_oscillation` fires in none. Signature hashing added no scored firing. None of the ModelPilot-arm trials fires.
+- **Observed only:** `stalled_agent_tests` 5 passes, 1 miss (as in v2); `repeated_agent_failure` 12 passes, 3 misses (`tomli-decode-error-attrs` in the `modelpilot` arm, two sqlglot trials with Haiku compaction). Each is a task test failing alike three runs in a row, never the bench venv's `test_convert` alone. 3 of 87 against 12 of 804 is too few to read, and it was found on the record it would be fitted on.
+
+**Still not scored.** Nothing here shows a scored stuck signal that fires before misses more often than before passes; the conditions in "What's left" of the outside write-up stand (long sessions, plan item 6, or new labelled tasks). The new signals and the Bash file evidence are journaled with every observation at no cost.
+
+**Real-client check (same day, $0, `tests/test_stuck_bash_session.py`).** The pinned 2.1.284 client runs scripted Bash calls in a git workspace against the loopback fixture, with the governor's hooks and the fixture policy, which turns a scored recommendation into an escalation of the forwarded request. Recorded payloads (`tests/test_hooks.py`) gave the hooks their input until now; here the client produces it.
+- **Test runs failing alike** (three piped through tail, exit 0; three unpiped, exit 1, so PostToolUseFailure; then a fix through `sed -i` and a passing run): seven agent runs, the six failing ones with one `agent_failure_hash` whichever channel carried them, no `error`, the `sed` edit observed as file evidence before the run it ends with. `stalled_agent_tests` and `repeated_agent_failure` fire and the score stays 0: no notice, every request at the client's medium. Under v2 (`ec983dd`, same scripts) the unpiped runs were also errors, `repeated_error` fired and the policy escalated to high.
+- **Edits going back and forth through Bash** (`printf >` and `git checkout --`, twice each): four observations of `calc.py`, alternating hashes, though the restored file drops out of git's list. `edit_oscillation` fires on the fourth, one notice, and the next request goes out at high. Under v2 no file was observed and nothing escalated.
+- **A quirk, observed only:** `stalled_agent_tests` stays on for the observation after the fix passes, because the passing run's command line (`sed … && python3 -m unittest …`) is another series; the failing series leaves the window only after six more observations. `repeated_agent_failure` clears on the passing run.
+
 ## Why a policy is needed
 
 Today the governor records decisions and never acts. A "ModelPilot arm" would therefore behave exactly like a fixed-model arm. The comparison in work item 4 (`docs/changelog.md`, "Next work, in order") only means something if ModelPilot does something different, so this document defines what it does.
@@ -394,7 +452,7 @@ Opus 5.5 replaced Opus 5 as the top rung on September 26 (user decision). It is 
 | `S0` fallback start | Sonnet 5.5 low with `bench/prompts/concise.md` appended since October 6 (medium before), used only while Jev is unavailable (the start is Jev's prediction since September 28) | fixed |
 | switch-policy parameters | `configs/modelpilot-policy.json`: measured or fitted (task shape, effort factors for low/high/xhigh, model factors, calibration outcomes, `jev_weight` 0.03, recovery fraction 1.0, bytes per token); still guesses: the max effort factor, hysteresis $0.02, downgrade multiplier 2, step spacing | tuning split |
 | `T` excerpt threshold | 8 KB | tuning split |
-| stuck threshold | M2 heuristic-v1 (score ≥ 3, window 6) | fixed |
+| stuck threshold | M2 heuristic-v3 (score ≥ 3, window 6; errors by failure signature; the agent's test runs observed, not scored, never also errors; Bash edits observed; October 16) | fixed |
 | quality floor | off in `modelpilot`; baseline per arm (Sonnet 5.5 medium, Opus 5.5 medium); `min_shared_tasks` 20 (a guess) | user decision (October 8); evidence from the tuning split |
 
 All parameters are frozen, with a recorded policy version and hash, before the final split runs. Only the tuning split is used for tuning (see `docs/m6-benchmark-plan.md`).
