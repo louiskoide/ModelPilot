@@ -215,6 +215,14 @@ A 1h boundary saves more each time but comes only after 3,630 s idle, so far les
 - **Nowhere else to look:** the M1 soak was synthetic loopback traffic (`docs/m1-results.md`).
 - **Real evidence would need human pauses:** interactive sessions logged through the proxy. Until then the per-boundary table above is all there is, and how often a user idles past the lifetime with a change queued is unmeasured.
 
+**Own sessions (October 17; built and tested offline, no live session yet).** The user asked for the proxy on their own work, to measure what benchmarks can't: idle boundaries, context sizes at them, and how much real sessions read (what a delegated explorer could save, `docs/m6-modelpilot-policy.md`, "Opus 5.5 as the main loop").
+- **Use:** from any directory, `PYTHONPATH=<checkout> python3.12 -m modelpilot.own_sessions --live [-- client args]`. Without `--live` it prints the plan and starts nothing. The client is the user's own (`claude` on PATH, resolved to its binary at start), not the pin: this is the user's work, not a benchmark.
+- **What it does:** the dry-run proxy on a free loopback port and the dry-run governor (reservations, settlements, settings and context notes), then the client in the terminal with `ANTHROPIC_BASE_URL` set and nothing else changed. Nothing is refused, applied or sent of its own. No hooks: their correction and lease messages would reach the user, and turn ends can be read later from the client's own transcripts. When the client exits, the proxy stops and `summary.json` is written (`docs/code-map.md`).
+- **Kept:** the proxy's rows (usage, cost, timing, request hashes; no message text) and the ledger (hashes and decisions), under the ignored `runs/own-sessions/`. The client's transcripts stay in `~/.claude/projects`, kept 30 days by default.
+- **Tests** (`tests/test_own_sessions.py`, $0): a stand-in client and the installed 2.1.302 through the proxy to the loopback fixture; only `ANTHROPIC_BASE_URL` changes in the client's environment; one directory per session and one shared ledger; gaps against each lifetime's boundary. The plan sends nothing (`tests/test_paid_guards.py`).
+- **Not checked yet:** a subscription login through the proxy in the interactive UI (bench's subscription arms run through it in `-p` mode), and 2.1.302 against the live API. The first own session is that check: its `summary.json` should show every request priced and none unknown.
+- **Not built yet:** `idle_replay` and `explorer_replay` read benchmark and governed-session logs, not these; their adapters come once there is data.
+
 ### Test adapter (October 14, cloud batch, offline; off by default)
 
 `modelpilot/suite_adapter.py`. The task's test suite is run by the host and recorded as a ledger observation, so `suite`/`failures` come from a run the host made, never from the session's output or the model's claims. Dry-run: observations only, nothing blocked, no model, effort or context change.
