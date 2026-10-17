@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -149,7 +150,9 @@ class HookTests(unittest.TestCase):
         self.assertEqual(first, {'agent_suite': 'python3 -m unittest -q test_ok', 'agent_failures': 0})
         self.assertEqual({k: second.get(k) for k in ('agent_suite', 'agent_failures')},
                          {'agent_suite': 'python3 -m unittest test_bad', 'agent_failures': 1})
-        self.assertIn('error_hash', second)  # still a tool failure
+        self.assertNotIn('error_hash', second)  # the agent's run only, never also a scored error (heuristic-v3)
+        self.assertRegex(second['agent_failure_hash'], '^[0-9a-f]{64}$')
+        self.assertNotIn('agent_failure_hash', first)  # a passing run has no failure to compare
         self.assertFalse({'suite', 'failures'} & (set(first) | set(second)))  # never a host suite's result
 
     def test_other_bash_calls_and_runs_without_an_outcome_are_not_test_runs(self):
@@ -164,15 +167,24 @@ class HookTests(unittest.TestCase):
         self.run_hook('PostToolUseFailure')  # 2.1.280's failing Bash: exit 3, no test runner
         self.assertEqual(list(self.observed()[0]), ['error_hash'])
 
-    def test_a_failure_repeated_on_new_temporary_paths_and_timings_is_one_repeated_error(self):
+    def test_a_test_run_failing_alike_on_new_paths_is_observed_without_a_notice(self):
         error = payload('PostToolUseFailure-Bash', self.work, BASH_FIXTURES)['error']
         outputs = [self.bash('PostToolUseFailure-Bash', error=error.replace(str(self.work), f'{self.work}/pytest-{n}')
                              .replace('0.000s', f'0.00{n}s')) for n in range(3)]
+        self.assertTrue(all('systemMessage' not in o for o in outputs))  # v2 escalated here, but not when piped (exit 0)
+        result = self.gov.state.recommend(self.task)
+        self.assertEqual({s: result['signals'][s] for s in ('repeated_error', 'stalled_agent_tests', 'repeated_agent_failure')},
+                         {'repeated_error': False, 'stalled_agent_tests': True, 'repeated_agent_failure': True})
+        self.assertEqual(result['score'], 0)
+
+    def test_another_failure_repeated_on_new_temporary_paths_is_one_repeated_error(self):
+        check = {'command': 'python3 check.py', 'description': 'check'}
+        error = ('Exit code 1\nvalue {n}\nTraceback (most recent call last):\n  File "{d}/check.py", line {n}, in <module>\n'
+                 "    assert parse('1,000') == 1000\nAssertionError: got None\n")
+        outputs = [self.bash('PostToolUseFailure-Bash', tool_input=check, error=error.format(d=f'{self.work}/tmp{n}', n=n + 3))
+                   for n in range(3)]
         self.assertNotIn('systemMessage', outputs[1])
         self.assertIn("stuck signals (repeated_error) suggest 'increase_effort'", outputs[2]['systemMessage'])
-        result = self.gov.state.recommend(self.task)
-        self.assertTrue(result['signals']['stalled_agent_tests'])  # on and journaled, but not scored or shown
-        self.assertEqual(result['score'], 3)
 
     def test_stalled_agent_runs_alone_are_journaled_without_a_notice(self):
         response = payload('PostToolUse-Bash', self.work, BASH_FIXTURES)['tool_response']
@@ -181,6 +193,60 @@ class HookTests(unittest.TestCase):
         self.assertTrue(all('systemMessage' not in o for o in outputs))
         stuck = self.gov.journal('stuck')[-1]['payload']
         self.assertEqual((stuck['signals']['stalled_agent_tests'], stuck['recommendation']), (True, 'hold'))
+
+    def repo(self, files):
+        """self.work as a one-commit repository, as a bench workspace is."""
+        for name, text in files.items():
+            (self.work/name).write_text(text)
+        for args in (['init', '-q'], ['add', '-A'], ['commit', '-q', '-m', 'base']):
+            subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@localhost', *args], cwd=self.work,
+                           check=True, capture_output=True)
+
+    def shell(self, command='true'):
+        """A Bash call that ran no test, as PostToolUse sends it."""
+        return self.bash('PostToolUse-Bash', tool_input={'command': command, 'description': 'd'},
+                         tool_response={'stdout': '', 'stderr': '', 'interrupted': False, 'isImage': False})
+
+    @unittest.skipUnless(shutil.which('git'), 'needs git')
+    def test_files_a_bash_call_changes_are_observed_as_file_evidence(self):
+        self.repo({'a.py': 'x = 1\n', '.gitignore': 'build/\n'})
+        digest = lambda text: hashlib.sha256(text.encode()).hexdigest()
+        (self.work/'a.py').write_text('x = 2\n')
+        (self.work/'new.py').write_text('n\n')
+        for ignored in ('build/out.py', 'venv/lib/site.py'):  # ignored, and a new directory: never hashed
+            (self.work/ignored).parent.mkdir(parents=True)
+            (self.work/ignored).write_text('skip\n')
+        (self.root/'outside.py').write_text('x\n')
+        self.shell("sed -i '' 's/1/2/' a.py")
+        self.assertEqual(self.observed(), [{'file': 'a.py', 'content_hash': digest('x = 2\n')},
+                                           {'file': 'new.py', 'content_hash': digest('n\n')}])
+        self.shell('ls')
+        self.assertEqual(len(self.observed()), 2)  # nothing changed since it was last observed
+        (self.work/'a.py').write_text('x = 1\n')  # back as at the base: git no longer lists it
+        self.shell()
+        self.assertEqual(self.observed()[2:], [{'file': 'a.py', 'content_hash': digest('x = 1\n')}])
+        (self.work/'a.txt').write_text('ON DISK\n')
+        self.run_hook('PostToolUse-Write')  # the Write tool's own evidence, then a Bash call: observed once
+        self.shell()
+        self.assertEqual([e['file'] for e in self.observed()[3:]], ['a.txt'])
+
+    @unittest.skipUnless(shutil.which('git'), 'needs git')
+    def test_edits_going_back_and_forth_through_bash_raise_edit_oscillation(self):
+        self.repo({'a.py': 'x = 1\n'})
+        outputs = []
+        for text in ('x = 2\n', 'x = 3\n', 'x = 2\n', 'x = 3\n'):
+            (self.work/'a.py').write_text(text)
+            outputs.append(self.shell("python3 - <<'E'\nopen('a.py', 'w').write(...)\nE"))
+        self.assertNotIn('systemMessage', outputs[2])
+        self.assertIn("stuck signals (edit_oscillation) suggest 'increase_effort'", outputs[3]['systemMessage'])
+
+    def test_bash_calls_outside_a_repository_observe_no_files(self):
+        inside = subprocess.run(['git', 'rev-parse'], cwd=self.work, capture_output=True) if shutil.which('git') else None
+        if inside and inside.returncode == 0:
+            self.skipTest('the temporary directory is inside a repository')
+        (self.work/'a.py').write_text('x\n')
+        self.shell()
+        self.assertEqual(self.observed(), [])
 
     def test_interrupted_tools_are_not_failures(self):
         for _ in range(3):

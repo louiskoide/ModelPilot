@@ -4,7 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from modelpilot.m2 import State, assess, normalize_error
+from modelpilot.m2 import State, assess, error_hash, failure_signature, normalize_error
 
 
 class DetectorTests(unittest.TestCase):
@@ -30,7 +30,8 @@ class DetectorTests(unittest.TestCase):
     def test_the_agents_own_test_runs_are_observed_apart_and_never_scored(self):
         result=assess([{'agent_suite':'python3 -m pytest -q','agent_failures':2}]*3)
         self.assertTrue(result['signals']['stalled_agent_tests'])
-        self.assertEqual((result['score'],result['recommendation'],result['observed_only']),(0,'hold',['stalled_agent_tests']))
+        self.assertEqual((result['score'],result['recommendation'],result['observed_only']),
+                         (0,'hold',['stalled_agent_tests','repeated_agent_failure']))
         self.assertFalse(result['signals']['stalled_tests'])  # never read as a host suite's result
         mixed=[{'suite':'unit','failures':2},{'agent_suite':'unit','agent_failures':2}]*2  # two series of two, not one of four
         self.assertFalse(any(assess(mixed)['signals'][s] for s in ('stalled_tests','stalled_agent_tests')))
@@ -45,6 +46,47 @@ class DetectorTests(unittest.TestCase):
         self.assertEqual(normalize_error('src/pkg/core.py:41:7: E501'),'src/pkg/core.py:#: E501')
         self.assertNotEqual(normalize_error(one),normalize_error(one.replace('failures=1','failures=2')))  # counts stay
         self.assertNotEqual(normalize_error('a/test_x.py: 2 failed'),normalize_error('b/test_x.py: 2 failed'))  # relative paths stay
+
+    def test_values_in_a_message_stay_but_clock_times_and_runner_durations_go(self):
+        self.assertNotEqual(normalize_error("assert '\\x1f' == 0x1f"),normalize_error("assert '\\x1f' == 0x7f"))  # v2 merged them
+        self.assertNotEqual(normalize_error('expected 2 s, got 5 s'),normalize_error('expected 2 s, got 9 s'))
+        self.assertEqual(normalize_error('ptr 0x7ffee4b2c8a0'),normalize_error('ptr 0x7ffee4b31f00'))  # an address
+        self.assertEqual(normalize_error('2026-10-16 12:00:01,123 ERROR boom'),normalize_error('2026-10-17T09:30:00 ERROR boom'))
+        self.assertEqual(normalize_error('1 failed in 75.32s (0:01:15)'),normalize_error('1 failed in 0.20s'))
+
+    def test_a_failure_is_known_by_its_signature_not_the_output_around_it(self):
+        def unittest_run(source):
+            return ('Exit code 1\n.F\n' + '='*70 + '\nFAIL: test_b (test_bad.T.test_b)\n' + '-'*70 +
+                    f'\nTraceback (most recent call last):\n  File "/tmp/w/test_bad.py", line 6, in test_b\n    {source}\n'
+                    'AssertionError: 1 != 2\n\n' + '-'*70 + '\nRan 2 tests in 0.000s\n\nFAILED (failures=1)')
+        one,two=unittest_run('self.assertEqual(f(), 2)'),unittest_run('self.assertEqual(g(x), 2)')  # the traceback quotes an edit
+        self.assertEqual(failure_signature(one),'FAIL: test_b (test_bad.T.test_b) AssertionError: 1 != 2')
+        self.assertEqual(error_hash(one),error_hash(two))
+        self.assertNotEqual(error_hash(one),error_hash(one.replace('1 != 2','1 != 3')))
+        pytest_run=('tests/t.py F\n    def test_a():\n        a = f(1)\n>       assert a == 2\n'
+                    '=== short test summary info ===\nFAILED tests/t.py::test_a - assert 1 == 2\n'
+                    "ERROR tests/u.py - ModuleNotFoundError: No module named 'pytz'\n1 failed, 1 error in 0.20s")
+        self.assertEqual(failure_signature(pytest_run).splitlines(),
+                         ["ERROR tests/u.py - ModuleNotFoundError: No module named 'pytz'",'FAILED tests/t.py::test_a - assert 1 == 2'])
+        edited='\x1b[31m' + pytest_run.replace('a = f(1)','a = g(1)').replace('0.20s','3.1s') + '\x1b[0m'  # colored, too
+        self.assertNotEqual(normalize_error(pytest_run),normalize_error(edited))  # v2 hashed these apart
+        self.assertEqual(error_hash(pytest_run),error_hash(edited))
+        check='Exit code 1\nvalue: {}\nTraceback (most recent call last):\n  File "<string>", line 3, in <module>\nAssertionError: got 5\n'
+        self.assertEqual(failure_signature(check.format(4)),'AssertionError: got 5')
+        self.assertEqual(error_hash(check.format(4)),error_hash(check.format(7)))  # what the check printed first changed
+        self.assertEqual(failure_signature('String to replace not found in file.'),'String to replace not found in file.')
+        self.assertIsNone(error_hash('   '))
+
+    def test_three_alike_failing_agent_runs_are_observed_but_not_scored(self):
+        run={'agent_suite':'pytest -q','agent_failures':1,'agent_failure_hash':'h'}
+        result=assess([run]*3)
+        self.assertTrue(result['signals']['repeated_agent_failure'])
+        self.assertEqual((result['score'],result['recommendation']),(0,'hold'))
+        passed={'agent_suite':'pytest -q','agent_failures':0}
+        for events in ([run,passed,run,run],[run,run,dict(run,agent_failure_hash='other')],[run,run]):
+            self.assertFalse(assess(events)['signals']['repeated_agent_failure'])
+        self.assertTrue(assess([run,{'file':'a','content_hash':'x'},dict(run,agent_suite='pytest -x'),run])
+                        ['signals']['repeated_agent_failure'])  # edits between runs and another command: the same failure
 
 
 class StateTests(unittest.TestCase):
@@ -112,11 +154,20 @@ class StateTests(unittest.TestCase):
     def test_errors_are_hashed_normalized_and_agent_fields_are_checked(self):
         for n in (1,2,3): result=self.state.observe(self.task,1,'worker',{'error':f'boom in /tmp/run{n}/x.py, line {n}'})
         self.assertEqual((result['signals']['repeated_error'],result['recommendation']),(True,'increase_effort'))
-        for bad in ({'agent_failures':-1},{'agent_failures':'2'},{'agent_failures':True},{'agent_suite':3}):
+        for bad in ({'agent_failures':-1},{'agent_failures':'2'},{'agent_failures':True},{'agent_suite':3},
+                    {'agent_failure_hash':'not a digest'},{'agent_failure_hash':7}):
             with self.assertRaises(ValueError): self.state.observe(self.task,1,'worker',bad)
         result=self.state.observe(self.task,1,'worker',{'agent_suite':'pytest -q','agent_failures':0})
         self.assertEqual(self.state.observations(self.task,1,'agent_failures')[0]['agent_suite'],'pytest -q')
         self.assertEqual(self.state.observations(self.task,1,'failures'),[])  # a host suite's readers never see it
+        self.state.observe(self.task,1,'worker',{'agent_suite':'pytest -q','agent_failures':1,'agent_failure_hash':'a'*64})
+
+    def test_file_hashes_are_each_files_newest_in_the_revision(self):
+        for file,digest in (('a.py','1'),('b.py','2'),('a.py','3')):
+            self.state.observe(self.task,1,'worker',{'file':file,'content_hash':digest})
+        self.state.observe(self.task,1,'worker',{'error':'boom'})
+        self.assertEqual(self.state.file_hashes(self.task,1),{'a.py':'3','b.py':'2'})
+        self.assertEqual(self.state.file_hashes(self.task,2),{})
 
     def test_wrong_owner_observation_does_not_pollute_detector(self):
         with self.assertRaises(ValueError): self.state.observe(self.task,1,'other',{'error':'bad'})
