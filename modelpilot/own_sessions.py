@@ -21,7 +21,10 @@ Dry-run: every request is forwarded unchanged and none is refused (admission is 
 client's requests are billed as usual; ModelPilot sends none of its own. Without --live the plan is printed and
 nothing starts, since a session sends billable requests.
 
-    python3.12 -m modelpilot.own_sessions [--claude PATH] [--live] [-- CLIENT ARGS...]
+    PYTHONPATH=<this checkout> python3.12 -P -m modelpilot.own_sessions [--claude PATH] [--live] [-- CLIENT ARGS...]
+
+Run it from the project to work on: the client opens in the current directory. -P keeps that directory off the
+import path, so another checkout's modelpilot package there can't shadow this one.
 """
 import argparse
 import datetime

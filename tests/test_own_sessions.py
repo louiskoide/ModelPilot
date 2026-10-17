@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import unittest.mock
 
@@ -111,6 +112,9 @@ class SessionTests(unittest.TestCase):
         env = {'PATH': os.environ.get('PATH', ''), 'HOME': str(self.root)}
         first = own_sessions.run(sys.executable, 'stand-in', self.root/'out', self.url, [str(client), str(self.root/'a')],
                                  RATES_55, env=env, stdin=subprocess.DEVNULL)
+        # Directories are named by the second and pid, and a reused name is refused
+        # (test_a_session_directory_is_never_reused): start the second session in a later second.
+        time.sleep(1.01 - time.time() % 1)
         second = own_sessions.run(sys.executable, 'stand-in', self.root/'out', self.url, [str(client), str(self.root/'b')],
                                   RATES_55, env=env, stdin=subprocess.DEVNULL)
         self.assertNotEqual(first['governor_session'], second['governor_session'])
