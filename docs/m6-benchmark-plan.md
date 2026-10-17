@@ -1095,6 +1095,89 @@ The user asked, after the stuck detector's real-client check (`docs/m6-modelpilo
   - **Costs:** a $0 check of the recorded transcripts (do the passing trials on the three tasks refer to the counterpart and the misses not?), about 30 minutes; a probe on the three tasks plus about 10 that Sonnet passes, under $1–2 (estimate); a claim needs new labelled tasks, $73–146 (option (b) of October 14; said as "about $10+" in the discussion, wrong).
 - **Not done; the user's call.** The $0 check is offered. Under the rule of no paid runs on thin leads, a probe only if the check is clearly positive.
 
+### Behavioural vote (CBV): the research report reviewed, and its $0 step pre-registered (October 16, before the run)
+
+The user gave a research report ("Catching ModelPilot's Confident Wrong Finishes Cheaply", a PDF outside the repository) and asked for it to be reviewed and implemented. Its design has three parts. (1) A strong model writes an "implied requirements" note before the run. (2) After the finish, two or three Haiku 5.5 solutions and the agent's fix run on generated probe *inputs*, and the fix is flagged when it behaves differently from the Haiku majority. (3) Only on a flag, Opus judges the divergence neutrally. Its first step is offline and $0: recorded peer tests turned into input-only probes, recorded Haiku 5.5 fixes as voters, scored against a criterion it fixes in advance. Live steps (about $2 and $5 by its estimate) come only after an offline pass. That first step is built here as `modelpilot/behavior_vote.py` and `modelpilot/vote_plugin.py`. Nothing in this section has been run on the miss tasks yet.
+
+**Review: what the record confirms or corrects** (dev split, `runs/miss-crosscheck-20261014-112627`, `runs/miss-detector-readings-20261014.json`, `docs/evidence.md`)
+- **Confirmed.** The agent's own suite fails on 0 of 40 dev misses. Opus peers flag 34/39 misses at 7% of passes. Haiku peers flag 17.5/37, falling to 3.7/37 with the reference filter. Opus spec tests catch parse 8/8. Every Sonnet/Opus failure reported success.
+- **"Whether Haiku shares Sonnet's tomli misreading is unmeasured": it is measured.** All 3 counted dev Haiku 5.5 trials on `tomli-decode-error-attrs` miss strictly, and so does the live Haiku arm (`bench-20261010-090944`). tomli holds 21 of the 40 dev misses. A 75% recall needs 30, so the vote passes only if Sonnet's tomli misses *behave* differently from Haiku's on the probes. A voter majority that is wrong would also flag tomli's 3 passes.
+- **The voter's price is about 3× the report's.** Its $0.0118 is the ModelPilot arm running on Haiku 5.5 (Sonnet's prompt, concise), and that arm missed parse and ISMAGS. The Haiku that passed both 2/2 is fixed Haiku 5.5 medium, at $0.0338 a task (`runs/haiku-arm-live-analysis-20261010.json`). Dev Haiku trials average $0.0262. Three voters therefore cost about $0.08–0.10 before any probe generator, not $0.04–0.05. For an Opus user, $0.07 + $0.09 + f × $0.24 beats all-Opus ($0.24) only while the flag rate f stays under about 33%, not 50%.
+- **Opus's floor isn't 0 misses.** Opus 5.5 missed tomli in 2 of its 36 counted dev trials; it had 0 misses in item 8's 38. The report's "0 in 74" pools item 8 with a count that leaves out the dev misses.
+- **"Rescued 0/27":** the 27 trials held one miss (recorded October 16, above).
+- **"1,039 trials and 196 misses":** 109 of those misses are ineligible (network failures). 87 eligible (October 16, "Stuck detector v3").
+- **The offline probes are better than deployed ones would be.** They come from every peer's tests, Opus's included, and Opus's tests are where the cross-check's signal came from. Deployed, a cheap generator writes them. Readings by probe author are reported beside the verdict.
+- **sqlglot can't confirm it at $0.** No sqlglot trial ran on Haiku 5.5, so there are no voters. The report calls the result exploratory unless it holds on sqlglot. A pass here therefore stays exploratory.
+
+**Pre-registration (fixed before the run).** Modules: `behavior_vote.py` SHA-256 `8cabf764d488ef244692a8bc5d5d3751745a1f70ef28ddb3989af591d1550499` and `vote_plugin.py` `977fc82775f009b70daec9ec033f6de947747007a2ea4a0171404c47be31f7ad`, on branch `claude/behavior-vote` from `b5344a4`. `run` records both hashes in `plan.json` and `readings.json`. `score` records the hashes it ran with.
+- **Population.** Every counted dev trial: the cross-check's 453, by `miss_detector`'s rule (`miss_crosscheck.dev_trials`). The verdict reads every trial with at least 2 voters that ran cleanly, misses and passes alike, Haiku 5.5 targets included. This is the report's "all misses with at least two available Haiku voters", with the target's own trial left out of its voters.
+- **Probes.** The cross-check's recorded peer tests: each trial's added or changed test functions that passed on its own tree. Their text is rebuilt from the trial's diff and must match the recorded SHA-256. Each file goes through `probe_source`, and every expected value is dropped. An assertion records its non-literal operands (a literal operand is the test's expected value). `assertIsInstance` records the `isinstance` result. `assertCountEqual` records its value unordered. A raises check (pytest's or unittest's, `with` or call form) records the exception's class name, or 'none', and swallows it. A message pattern is dropped. A warns check records the warning categories. `fail()` records that it was reached. Each task's probes, deduplicated by file content, run on every trial's tree in one pytest run: the grader's isolation, `PYTHONHASHSEED=0`, `--hypothesis-seed=0`, rootdir the tree.
+- **A reading** is a probe's status, ordered observations and warning categories. Values are read by `vote_plugin.canon`: exact dicts by sorted items, sets sorted, floats to 10 significant digits, everything else by repr, with addresses and the tree's and temporary paths replaced. Statuses: 'ok'; 'skipped'; 'assertion' (an AssertionError from a helper, which would rest on an expected value); `<phase>:<exception>`; `collect:<exception>`; 'missing'.
+- **Voters.** The task's counted dev Haiku 5.5 trials, except the target, 3 a task (2 for a Haiku target). Each voter's tree runs twice. A probe whose reading differs between a voter's two runs is unstable and dropped for its task.
+- **Flag.** A probe is usable for a target when every voter reads it 'ok' and the target's status isn't 'assertion'. It votes when more than half the voters share one reading. The target is flagged when its reading of any voting probe differs from the majority's. A target crash, collection error or missing test counts as different.
+- **Pass, all of:** recall ≥ 75%; the 2.5th percentile of recall over 10,000 task-clustered bootstrap resamples (the tasks holding a miss, seed 0) ≥ 60%; passes flagged ≤ 15%; within-task conditional permutation p < 0.01 (computed exactly, as a hypergeometric per task convolved over tasks); misses caught on at least 3 distinct tasks. These are the report's thresholds, unchanged.
+- **Fail:** anything else.
+- **Void:** the run's module hashes differ from those above, or more than 10% of eligible-by-voters trials error (tree or pytest failures).
+- **Exploratory either way.** There are 6 miss tasks and no sqlglot voters (see the review).
+
+**Reported beside the verdict.**
+- tomli on its own, and every task, leaving each task out in turn.
+- Non-Haiku targets only (the cross-model case), and the Sonnet low concise and ModelPilot arms.
+- Probes not written by Opus (closer to a cheap generator), probes written by Haiku, and probes not written by the target.
+- How often the voters have no majority.
+- Price from recorded costs: three voters at the dev Haiku mean, plus a late fix per flag.
+- The comparison the report asks for: Haiku peer *assertions* flagged 17.5/37 (one peer) or 23/37 at 80/413 passes (all), and 3.7/37 or 7/37 at 17/413 with the reference filter.
+
+**What each outcome commits to.**
+- **Pass:** the live step is planned offline and priced from these costs: generated probes, fresh fixed Haiku 5.5 medium voters, on parse, tomli, ISMAGS and sqlglot tasks. Nothing is sent without the user's go. A claim still needs new labelled tasks.
+- **Fail:** the report's decision rule applies. `modelpilot-for-opus` stays on Opus 5.5, CBV isn't wired into the governor, and the implied-requirements note isn't funded on this report's case. Under the no-thin-leads rule, a near miss doesn't buy a live run.
+
+**Disclosed before the run.** The criterion is the report's, written before any of this code existed. The author of this module had read the dev misses (the October 14–16 sections above) and the voter outcomes above, which is why the review states the tomli risk in advance. Before the hashes were fixed, a mechanical check (probe statuses only, no vote computed) ran 2 trees each of `tomli-hex-escape`, `nx-vf2-isolated-nodes` and `parse-hyphen-field`, three tasks with no misses. Every probe read 'ok'. After it, one change: the "low concise and ModelPilot" reading had counted the Haiku low concise arm, and now excludes it. That change touched no part of the verdict.
+
+```sh
+python3.12 -m modelpilot.behavior_vote run --out runs/behavior-vote-<ts> --jobs 6
+python3.12 -m modelpilot.behavior_vote score runs/behavior-vote-<ts>
+```
+
+### Behavioural vote: result (October 16, $0): fail, on false flags
+
+One `run` (`runs/behavior-vote-20261016-205720`, 492.5 s, 6 jobs), then `score` (`score.json` beside it). The mechanical check's script is `runs/behavior-vote-mech-check-20261016.py`.
+
+**Not void.** Both module hashes in `plan.json`, `readings.json` and the score match the pre-registration. 16 of 453 trials errored (3.5%; the limit was 10%): all of them `cachetools-cache-key`, a task with no surviving peer test (`no_probes`), and all of them passes. 437 trials are eligible. A trial averaged 78 usable probes; voters had no majority on 1.1% of them; 0 probe-pool errors (every rebuilt file matched the cross-check's SHA-256).
+
+**Verdict: fail.** One check of five fails, and not narrowly:
+
+| Check | Bar | Result |
+| --- | --- | --- |
+| Recall | ≥ 75% | 33/40, 82.5% (pass) |
+| Task-clustered lower 95% | ≥ 60% | 69.2% (pass) |
+| Passes flagged | ≤ 15% | 95/397, 23.9% (**fail**) |
+| Within-task p | < 0.01 | 0.0045; 29.1 expected (pass) |
+| Tasks with a catch | ≥ 3 | 5 (pass) |
+
+**Beside the verdict.**
+- **The within-task signal comes from Haiku targets.** Without them (the cross-model case the report proposes): 29/34 misses, 84/319 passes, 27.3 expected, p 0.09. On the Sonnet low concise and ModelPilot arms, the ones it would guard: 13/16 at 47/172, 12.4 expected, p 0.40. On the arms that matter, the flags follow the task, not the miss.
+- **The false flags are interpretation forks.** These are behaviours the instruction leaves open, where correct fixes differ:
+  - `parse-strftime-directives`: all 15 passes, mostly on what an unsupported directive does;
+  - `nx-ismags-monomorphism`: 16 of 18, on comparisons with VF2;
+  - `parse-decimal-grouping`: 10 of 12;
+  - `cachetools-cached-condition`: 11 of 15;
+  - `mi-reshape-multidim`: 10 of 12;
+  - `toolz-compose-annotations`: 10 of 15.
+
+  This is the report's own PatchDiff caveat (66% of divergences "uncertain due to under-specified requirements"), and here it dominates.
+- **tomli, which the review expected to be blind, separates:** 15 of 21 misses against 1 of 3 passes. Most catches diverge on peers' pickle round-trip tests. A Sonnet miss and a Haiku miss are wrong in different ways, and pickling rebuilds the error from `args`. Three passes is too few to read, and the reading is post hoc.
+- **Leaving out tomli:** 18/19 misses at 94/394 passes. The other tasks' misses are caught, but on tasks whose passes are flagged nearly as often.
+- **By probe author** (every target): without Opus-written probes, 33/40 at 94/397, the same. Haiku-written probes only: 22/40 at 51/397 (12.8%), p 0.0002; for non-Haiku targets 18/34 at 44/319 (p 0.03); for low concise and ModelPilot 8/16 at 21/172 (p 0.15). Without the target's own tests: 31/40 at 92/397.
+- **Against Haiku peer assertions** (October 14): all Haiku peers flagged 23/37 at 80/413, and 7/37 at 17/413 with the reference filter. Input-only Haiku probes flag 22/40 at 51/397: about the same misses, fewer passes. They don't beat the reference-filtered reading "at a similar flag rate", the report's test, so its "wrong expected values" diagnosis is neither confirmed nor refuted.
+- **Price** (recorded costs): three voters at the dev Haiku mean ($0.0262) plus a late fix per flag (29.3% of trials) comes to $0.095 a trial, or $1.26 per miss caught. Two adjustments:
+  - **Voters as fixed Haiku 5.5 medium** (the one that passed parse and ISMAGS): $0.0338 each.
+  - **For an Opus user,** flagged tasks redone on Opus ($0.248): low concise ($0.078) plus voters ($0.079–0.101) plus 31.9% × $0.248 comes to about $0.24–0.26 a task, against $0.248 for all-Opus, with 3 of the 16 low concise and ModelPilot misses never flagged.
+
+  No saving, and below the floor (estimates from recorded means).
+
+**What the fail commits to (as pre-registered).** `modelpilot-for-opus` stays on Opus 5.5. The vote isn't wired into the governor. The report's live steps (implied-requirements note, live vote with generated probes) aren't funded on its case. The tomli separation is a post-hoc observation on 3 passes, a thin lead under the no-funding rule. The module stays, as the record of this check.
+
 ### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
 
 User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku passes, the tests are too easy"), so harder tasks come before item 8's labels, from sqlglot (MIT; surveyed October 4, above), in stages. Stage 1 builds 8 tasks and screens them with one low concise and one Opus 5.5 trial each; a full batch follows only if the repository produces misses. sqlglot joins the tuning split; the final split and its lock are unchanged.

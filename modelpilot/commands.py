@@ -25,7 +25,8 @@ def command(name, summary, paid=False, plans=(), needs=None, refusals=()):
 
 
 COMMANDS = (
-    command('bench', 'Benchmark harness: tasks × arms × trials, isolated, graded, wire-accounted', paid=True,
+    command('behavior_vote', "Miss detector: recorded Haiku 5.5 fixes vote on peer tests' inputs, expected values dropped ($0)"),
+    command('bench','Benchmark harness: tasks × arms × trials, isolated, graded, wire-accounted', paid=True,
             plans=[['--tasks', 'parse-decimal-grouping', '--arms', 'sonnet-5.5-low-concise', '--claude', '{claude}']],
             needs='--run-budget'),
     command('bench_report', "A benchmark run's summary: cold-equivalent cost, paired bootstrap, router pricing ($0)"),
@@ -67,6 +68,9 @@ COMMANDS = (
     command('miss_checklist', 'Miss detector: a requirements checklist, list/judge paid, score/plan $0', paid=True),
     command('miss_crosscheck', "Miss detector: other agents' tests run against each saved fix ($0)"),
     command('miss_detector', 'Miss detector: host facts and suite checks after a run ($0)'),
+    command('own_sessions', 'Your own Claude Code sessions through the dry-run proxy, logged under runs/own-sessions',
+            paid=True, plans=[['--claude', '{claude}'], ['--claude', '{claude}', '--', '--model', 'opus']],
+            refusals=['Claude Code is missing']),
     command('policy_replay', "Replay recorded ModelPilot decisions through the current policy ($0)"),
     command('proxy', 'Loopback Messages API pass-through proxy with dry-run decisions; forwards, originates nothing'),
     command('proxy_overhead', 'What the proxy adds: first byte, per event, throughput, CPU, memory (loopback, $0)'),

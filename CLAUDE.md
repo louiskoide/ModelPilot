@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Updated October 15, 2026. History: `docs/changelog/`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
+Updated Oct 16, 2026. History: `docs/changelog/`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
 
 ## Objective
 
@@ -79,7 +79,7 @@ Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 fou
 5. Dropped for the quality floor (user decision, Oct 8).
 6. Mid-task compaction: no loss shown (Oct 13), not on Haiku. Long sessions await approval.
 7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
-8. Fail (Oct 11); post-run checks don't pay (Oct 14). Haiku risk rating: thin pass below Opus's floor; `-for-opus-risk` awaits new tasks (Oct 15).
+8. Fail (Oct 11); post-run checks don't pay (Oct 14, 16). Haiku risk rating: thin pass below Opus's floor; `-for-opus-risk` awaits new tasks (Oct 15).
 9. Caveman: parked (user decision).
 10. Dropped (8 failed); Jev's advisor role too (Oct 11).
 11. 4b held (user decision); Oct 16: n=1, vs-Opus pair.
