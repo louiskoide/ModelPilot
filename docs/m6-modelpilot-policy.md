@@ -471,3 +471,9 @@ The policy fails if either of these holds on the final split:
 Low concise stays in the final run as a reference: it shows how much of a saving the cheap setting gives on its own and how much ModelPilot adds.
 
 That result gets reported as it is. Every rule above can be switched off individually, so the tuning split can also show which lever, if any, carries the savings.
+
+**Amended October 16, before any final trial** (`docs/m6-benchmark-plan.md`, "4b: amendments before the run"):
+- `modelpilot-for-opus` against compat Jev is reported, not a fail condition: Jev keeps no Opus floor.
+- `modelpilot-for-sonnet` against `opus-5.5` is a registered comparison, reported with fixed wording; it is not a fail condition.
+- One trial a task.
+- Lost trials are topped up by a fixed rule.

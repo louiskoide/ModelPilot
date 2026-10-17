@@ -82,7 +82,7 @@ Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 fou
 8. Fail (Oct 11); post-run checks don't pay (Oct 14, 16). Haiku risk rating: thin pass below Opus's floor; `-for-opus-risk` awaits new tasks (Oct 15).
 9. Caveman: parked (user decision).
 10. Dropped (8 failed); Jev's advisor role too (Oct 11).
-11. 4b held (user decision; its trial-count rule gives n=1).
+11. 4b held (user decision); Oct 16: n=1, vs-Opus pair.
 12. Governor: live checks passed (Oct 12); idle plans wait out the cache TTL, a prompt late; compact if it pays (Oct 13).
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
 14. Haiku 5.5: helper roles only; the read/search explorer doesn't pay (Oct 14).
