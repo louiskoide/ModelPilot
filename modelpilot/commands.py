@@ -25,7 +25,8 @@ def command(name, summary, paid=False, plans=(), needs=None, refusals=()):
 
 
 COMMANDS = (
-    command('bench', 'Benchmark harness: tasks × arms × trials, isolated, graded, wire-accounted', paid=True,
+    command('behavior_vote', "Miss detector: recorded Haiku 5.5 fixes vote on peer tests' inputs, expected values dropped ($0)"),
+    command('bench','Benchmark harness: tasks × arms × trials, isolated, graded, wire-accounted', paid=True,
             plans=[['--tasks', 'parse-decimal-grouping', '--arms', 'sonnet-5.5-low-concise', '--claude', '{claude}']],
             needs='--run-budget'),
     command('bench_report', "A benchmark run's summary: cold-equivalent cost, paired bootstrap, router pricing ($0)"),
