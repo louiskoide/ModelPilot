@@ -1221,6 +1221,50 @@ So about $19: $9.80 of subscription usage as sent ($0 API) and about $9.10 on th
 
 **Plan text fixed.** Since October 11 every ModelPilot arm runs without an advisor, and `bench`'s plan described each one as the exploration arm (random switches to Opus 5.5), without its quality floor. `bench.modelpilot_plan` now describes each arm by what it runs (exploration draw, Jev's advice, or measured rates alone), with its floor and delegation.
 
+### 4b: amendments before the run (October 16, $0; still held)
+
+The user asked what could run without interfering with the governor work in another session, then said "start the Pre-registration amendments and a script fix" (item 1 of that list). Committed before any 4b trial exists. Nothing here ran a final task; the plan-only check grades only the references. These amendments change the October 8 test (`docs/m6-modelpilot-policy.md`, "What would count against it") and the October 11 plan above.
+
+1. **A new registered comparison: `modelpilot-for-sonnet` against `opus-5.5`.** The user's point: most people run Opus, and the project's idea was ModelPilot cheaper than Opus at Opus's quality. Without this pair, 4b drops that question.
+   - **Measure,** the October 8 test's, spelled out here: `bench_report`'s paired differences over the 24 final tasks. The comparison favours the arm if the `cost_per_pass_usd` difference shows a difference below 0 and the `pass_rate` difference shows none below 0. "Shows a difference" means a 95% interval that excludes 0, on at least 10 paired tasks.
+   - **Not one of the policy's fail conditions.** The arm's floor is Sonnet 5.5 medium, not Opus, so its fail conditions stay against `sonnet-5.5` and Jev. This comparison is reported whichever way it goes.
+   - **Its wording is fixed now.** A favourable result is reported as "cheaper per passed task than Opus 5.5, no pass-rate difference shown on 24 tasks graded on hidden tests", with both intervals. It is never reported as "Opus quality". There are two reasons:
+     - At one trial a task, a pass-rate drop shows only once 4 of the 24 tasks fail on the arm alone (17 points), or 7 if Opus fails one the arm passes. This was checked with `bench_report`'s bootstrap.
+     - Final tasks are graded on hidden tests alone (rule 3). In the tuning record, 7 of the 8 misses passed the hidden tests and failed only edge suites.
+   - **The tuning record is reported beside it:** on 26 tuning tasks, strict, ModelPilot from low concise scored 0.962 against Opus 5.5's 0.981 (−1.9 points [−5.8, 0]), at −$0.166 a task [−0.215, −0.125] (`opus-vs-modelpilot-20261006.json`).
+2. **`modelpilot-for-opus` against compat Jev is reported, not a fail condition.** Jev keeps no Opus floor. In 4a it served Sonnet 5.5 on all 16 tasks, at $0.087 a task against Opus 5.5's $0.170 (`bench-20260929-000001`). So the arm loses on cost by construction, and hidden tests can't show the quality its floor protects. `modelpilot-for-sonnet` against Jev stays a fail condition, and `modelpilot-for-opus` against `opus-5.5` stays its own.
+3. **n = 1 for every arm** (user decision, October 16, with the list): one trial a task. It confirms what the September 27 trial-count rule gave on October 11. The rule was rerun today (`runs/trial-count-rule-20261016.py` → `.json`, the October 11 script with this pairing added, at October 16 prices):
+   - **Floor pairings:** still n = 1, with half-widths of $0.010 against a $0.0135 target and $0.023 against $0.037.
+   - **The new pairing gives 3 if the rule is read literally.** Low concise stands in for the arm against Opus 5.5 medium (73 tasks): mean −$0.176, between-task SD $0.111, half-width $0.048 at n = 1 and $0.046 at n = 3, against a $0.037 target.
+   - **No n meets that target,** because the spread is between tasks, not between trials. Tripling 4b (about $57) would narrow that interval by 4%, while the expected gap is 3.7 times the n = 1 half-width.
+   - **n stays 1.** This figure was computed after the user's go, so it is put to the user before the run.
+4. **Lost trials: the top-up rule.** Start the full run in a fresh subscription usage window, with nothing else using the subscription. The October 11 compaction run stopped on the limit at 55 of 99 trials.
+   - **What gets rerun:** a final task and arm whose trial was lost. That means it stopped on a usage or rate limit (429) or an account error, it is ineligible as `transport_error` or `connection_retried` (`bench_report.ineligible_reason`), or it never started because the run stopped. A trial that completed eligibly is never rerun, whatever its grade.
+   - **How:** `runs/4b-final-20261016.sh topup ARM TASKS BUDGET` runs one bench per arm on the tasks it lost, with the full run's flags (`--final`, seed 4, one trial, 30 turns, $1 a session), into a new run directory. After a 429, the next top-up starts only in a fresh usage window. Top-ups go on until each lost trial counts, run by hand; the script doesn't wait or repeat by itself. A task and arm lost three times stops 4b for the user.
+   - **Nothing changes in between:** the same commit, pinned client, policy file and prices. The script refuses uncommitted changes under `modelpilot/`, `configs/` and `bench/`. If anything must change, what has run is reported as it is, and the rest waits for the user.
+   - **Budget:** top-ups share the full run's $15 API-key stop threshold, so BUDGET is $15 less what the 4b runs have spent on the key. At $15, 4b stops for the user.
+   - **Any other ineligible reason** (`effort_not_applied`, `prompt_not_applied`, `ttl_not_applied`, an adapter's own) means an arm didn't run as registered. 4b then stops for the user, with no top-up.
+   - **Reading:** the run and its top-ups are read together, each arm's trials pooled: `runs/4b-final-20261016.sh report RUN...` (`bench_report --pool`, new today). Without `--pool`, an arm in two runs is labelled per run. The report lists any task and arm with more than one counted trial (`pooled.task_arms_with_several_counted_trials`), and there should be none.
+   - **Precedent:** item 8's reruns (`runs/item8-rerun-20261010.sh`) and the compaction run's lost trials (October 12, PR #58).
+5. **The script now runs from its own checkout.** `runs/4b-final-20261011.sh` changed into `/Users/louiskoide/ModelPilot`. That checkout is now on `claude/stuck-bash-tests`, whose governor work changes the hooks the ModelPilot arms run through, so a run there would pick up whatever is on disk.
+   - **The new copy:** `runs/4b-final-20261016.sh` (not committed; the October 11 copy is kept unchanged in the main checkout's `runs/`). It runs from the checkout it sits in, prints that checkout's commit, refuses a paid step if the harness code differs from the commit, and adds `topup` and `report`.
+   - **Where it lives:** `../ModelPilot-final-split`, on branch `4b-prereg-amendments`. That checkout's `runs/` is now its own directory. Since the cloud overnight report, `main` tracks files under `runs/`, so checking out `main` replaced the link to the main checkout's `runs/`; nothing in it was lost. 4b's run directories land there. `work/` is still linked to the main checkout's (the client, the bench venv, Jev's checkouts).
+   - **Checked ($0):**
+     - every argument check refused;
+     - a paid step refused while `bench_report.py` had uncommitted changes, with nothing sent;
+     - the plan-only check, run from that checkout at `main` (`607df61`, with this branch's `bench_report` change not yet committed), graded all 24 references and prepared 144 trials. Its text is the same as October 12's (`runs/4b-final-plan-20261016.txt` there).
+
+**Still before the run,** in the order given to the user on October 16:
+- the governor work merged and its scored rules settled;
+- the policy frozen at that commit, with its version and hash recorded;
+- the plan-only check again at that commit;
+- `doctor`, with the bench venv's site-packages read-only (it is today);
+- `jev_check --live` for the TypeSafe key (a small charge);
+- the smoke trial;
+- then 4b.
+
+Edge suites for the final tasks (amending rule 3) wait for the user's yes. If they are committed before the run, they apply to every arm alike.
+
 ### Haiku 5.5 (October 8; plan set by user decisions; live runs need the user's go)
 
 Haiku 5.5 replaced Haiku 4.5 as the policy's bottom tier (`docs/m6-modelpilot-policy.md`, "Tier set"). It isn't a candidate yet, so no ModelPilot arm moves to it. User decisions (October 8): test it as a cheap default and work toward making it a routing candidate; quality first, so the candidate work waits for the arms; handle the client's 40× price with a raised `--budget` rather than a repin; price Sonnet 5.5's cache reads by date; up to $3 of paid spend before the user sees results. In order:

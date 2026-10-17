@@ -1,0 +1,12 @@
+## October 16, 2026: 4b's pre-registration amended and its run script fixed; 4b still held
+
+$0, no model request. User request: "start the Pre-registration amendments and a script fix", item 1 of the list of work that doesn't interfere with the governor work in another session. Branch `4b-prereg-amendments` in `../ModelPilot-final-split`, from `main` (`607df61`). Detail: `docs/m6-benchmark-plan.md`, "4b: amendments before the run".
+
+- **Registered:** `modelpilot-for-sonnet` against `opus-5.5`, on the October 8 measure. It is not a fail condition, and its wording is fixed: never "Opus quality". At n = 1 a pass-rate drop shows only once 4 of the 24 tasks fail. Final tasks are graded on hidden tests, and 7 of the tuning record's 8 misses passed them.
+- **Report-only:** `modelpilot-for-opus` against compat Jev. Jev keeps no Opus floor; it served Sonnet 5.5 on all 16 of 4a's tasks.
+- **n = 1 (user decision).** The trial-count rule, rerun with the new pairing, gives 3 for it if read literally: half-width $0.048 at n = 1 and $0.046 at 3, against a $0.037 target, because the spread is between tasks. So n = 1 for that pairing is put to the user.
+- **Top-up rule for lost trials** (429, account error, lost connection, never started): rerun per arm into new run directories with the same flags and commit, within the shared $15 key budget, and read pooled. `bench_report --pool` is new for that, with one test.
+- **Script:** `runs/4b-final-20261016.sh` (not committed) runs from its own checkout, refuses a paid step on uncommitted harness code, and adds `topup` and `report`. Checked at $0: the argument refusals, the dirty-tree guard (nothing sent), and the plan-only check (24 references pass, 144 trials prepared, the same text as October 12).
+- **A side effect, kept:** `main` tracks files under `runs/`, so checking it out in `../ModelPilot-final-split` replaced that checkout's `runs/` link to the main checkout's with a directory. Nothing was lost; 4b's runs will land in that checkout, as they do for `../ModelPilot-main-machine-steps`.
+- **Tests:** all 982 offline tests pass on Python 3.12.14 with the pinned 2.1.284 client first on PATH, no skips (`runs/4b-prereg-amendments-regression-py312.log` in `../ModelPilot-final-split`, with the code change, before the last doc edits). On the final files, `tests/test_changelog.py`, `test_hygiene.py` and `test_claude_md.py` pass (12).
+- **`CLAUDE.md`:** item 11 updated (8,187 bytes).

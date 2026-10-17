@@ -361,6 +361,37 @@ class RebuildTests(unittest.TestCase):
             self.assertIn('cross_run', summary)
             self.assertEqual(json.loads(out.read_text())['rebuilt_from'], [str(before), str(after)])
 
+    def test_pooled_runs_keep_an_arm_whole_and_list_task_arms_counted_twice(self):
+        # 4b's top-up rule (October 16): a run's lost trials are rerun into a new directory and read with it, pooled.
+        with tempfile.TemporaryDirectory() as tmp:
+            def run(name, trials):
+                path = Path(tmp)/name
+                path.mkdir()
+                arms = list(dict.fromkeys(arm for _, arm, _ in trials))
+                (path/'manifest.json').write_text(json.dumps({'seed': 4, 'arms': dict.fromkeys(arms, {}),
+                                                              'code': {'commit': 'aaa'}, 'client_version': '2.1.284'}))
+                for task, arm, kwargs in trials:
+                    trial = path/task/arm/'0'
+                    trial.mkdir(parents=True)
+                    (trial/'trial.json').write_text(json.dumps(record(task, arm, **kwargs)))
+                return path
+            first = run('bench-first', [('t0', 'sonnet-5', {}), ('t0', 'opus-5', dict(cost_usd=.3)),
+                                        ('t1', 'sonnet-5', {}), ('t1', 'opus-5', dict(complete=False, passed=False))])
+            topup = run('bench-topup', [('t1', 'opus-5', dict(cost_usd=.3, passed=False))])
+            summary = bench_report.summary_of([first, topup], RATES, resamples=50, pool=True)
+            self.assertEqual([a['arm'] for a in summary['arms']], ['sonnet-5', 'opus-5'])
+            opus = summary['arms'][1]
+            self.assertEqual((opus['trials'], opus['incomplete_trials'], opus['passes']), (2, 1, 1))
+            self.assertEqual([(p['arms'], p['tasks']) for p in summary['paired']], [(['sonnet-5', 'opus-5'], 2)])
+            self.assertEqual(summary['pooled'], {'arms_pooled_across_runs': ['opus-5'],
+                                                 'task_arms_with_several_counted_trials': []})
+            again = run('bench-again', [('t0', 'sonnet-5', {})])  # t0 wasn't missing: a top-up mistake, listed
+            summary = bench_report.summary_of([first, topup, again], RATES, resamples=50, pool=True)
+            self.assertEqual(summary['pooled']['task_arms_with_several_counted_trials'], [['t0', 'sonnet-5']])
+            labeled = bench_report.summary_of([first, topup], RATES, resamples=50)
+            self.assertEqual([a['arm'] for a in labeled['arms']], ['sonnet-5', 'opus-5@bench-first', 'opus-5@bench-topup'])
+            self.assertNotIn('pooled', labeled)
+
 
 if __name__ == '__main__': unittest.main()
 
