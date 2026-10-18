@@ -83,6 +83,12 @@ ARMS = {
     # makes for an Opus user has to come from the cache levers (plan item 6). Plain opus-5.5 plus the lifetime.
     'opus-5.5-5m': {'kind': 'fixed', 'model': 'claude-opus-5-5', 'prompt_cache_ttl': '5m'},
     'opus-5.5-1h': {'kind': 'fixed', 'model': 'claude-opus-5-5', 'prompt_cache_ttl': '1h'},
+    # Opus levers that leave its reasoning and its fix alone (user request, October 17; docs/m6-benchmark-plan.md,
+    # "Opus levers"): Opus 5.5 medium with one appended prompt each. lean-io is concise's tool-output bullets without
+    # its fix-scope and prose ones (tool results are 81% of what an Opus trial reads back); batch-calls asks for
+    # independent calls in one response (1.5 of an Opus trial's 9 calling responses run calls in parallel).
+    'opus-5.5-lean-io': {'kind': 'fixed', 'model': 'claude-opus-5-5', 'append_system_prompt': 'bench/prompts/lean-io.md'},
+    'opus-5.5-batch': {'kind': 'fixed', 'model': 'claude-opus-5-5', 'append_system_prompt': 'bench/prompts/batch-calls.md'},
     # Mid-task compaction (user request, October 10; midtask_compaction): low concise with a '/compact' turn between
     # the split shape's plan and fix turns. 'compaction' names who writes the summary: 'session', the session's own
     # setting, as the client does; a model id, and the proxy sends the compaction request there at the client's effort
@@ -145,7 +151,9 @@ ARMS = {
     # The modelpilot arm with the quality floor on (user decision, October 8; docs/m6-modelpilot-policy.md, "Quality
     # floor"): no worse than the user's own model, one arm per baseline, each compared with that baseline's fixed arm
     # (sonnet-5.5, opus-5.5). Each starts at the cheapest setting its floor allows on the October 8 evidence: low concise
-    # against Sonnet 5.5 medium, Opus 5.5 medium (with the concise prompt) against Opus 5.5 medium.
+    # against Sonnet 5.5 medium, Opus 5.5 medium against Opus 5.5 medium. The Opus arm carried the concise prompt until
+    # October 17, when it was removed (user decision: standard Opus; no Opus prompt lever is adopted), so it now runs
+    # its baseline's exact setting. It had never run live.
     'modelpilot-for-sonnet': {'kind': 'modelpilot', 'model': 'claude-sonnet-5-5', 'effort': 'low', 'advisor': None,
                               'append_system_prompt': 'bench/prompts/concise.md',
                               'models': POLICY_TIERS,
@@ -154,7 +162,6 @@ ARMS = {
                               'policy_overrides': {'quality_floor': {'enabled': True,
                                                                      'baseline': 'claude-sonnet-5-5/medium'}}},
     'modelpilot-for-opus': {'kind': 'modelpilot', 'model': 'claude-opus-5-5', 'effort': 'medium', 'advisor': None,
-                            'append_system_prompt': 'bench/prompts/concise.md',
                             'models': POLICY_TIERS,
                             'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}),
                             'policy': 'docs/m6-modelpilot-policy.md',
@@ -167,8 +174,9 @@ ARMS = {
     # pre-registration. No claim until it passes on them.
     'modelpilot-for-opus-risk': {'kind': 'risk_route', 'model': 'claude-opus-5-5',
                                  'rater': risk_route.risk_predictor.MODEL, 'threshold': risk_route.THRESHOLD,
+                                 # No prompt of its own: each trial runs its route's (flagged none, since October 17;
+                                 # unflagged the concise prompt).
                                  'routes': {'flagged': risk_route.FLAGGED, 'unflagged': risk_route.UNFLAGGED},
-                                 'append_system_prompt': 'bench/prompts/concise.md',  # both routes'
                                  'served_models': sorted({m for m, _ in switch_policy.settings(switch_policy.load())}
                                                          | {risk_route.risk_predictor.MODEL}),
                                  'policy': 'docs/m6-modelpilot-policy.md'},
@@ -1122,7 +1130,8 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
                 'python': python_version(limits.get('python') or bench_tasks.interpreter()), 'limits': limits,
                 'preamble': PREAMBLE, 'tools': TOOLS, 'shape': shape, 'gap_seconds': gap,
                 'appended_prompts': {a: {'path': ARMS[a]['append_system_prompt'], 'text': p['text'], 'sha256': p['sha256']}
-                                     for a in arms for p in [appended_prompt(ARMS[a])] if p} or None,
+                                     for a in [*arms, *(r for x in risky for r in ARMS[x]['routes'].values())]
+                                     for p in [appended_prompt(ARMS[a])] if p} or None,  # a risk arm's: its routes'
                 'follow_up_prompt': FOLLOW_UP if shape == 'followup' else None, 'run_budget_usd': run_budget,
                 'reference_preflight': expected, 'cost_basis': 'cold-equivalent; measured alongside',
                 'pass_rule': PASS_RULE, 'edge_suites': edge_manifest(tasks),

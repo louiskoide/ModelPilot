@@ -551,7 +551,7 @@ All arms use the same tasks, tools, per-task limits, graders and isolation. The 
 | ModelPilot (`modelpilot`) | policy in `docs/m6-modelpilot-policy.md`, active for this arm only (approved September 26). Since September 28: Jev (compat checkout, advice only; its model question unchanged plus an effort question) predicts the model and effort at each turn start and on stuck evidence. ModelPilot jumps straight there when the expected total cost says it pays, else stays; stuck with nothing stronger, the task stops. Client fallback start Sonnet 5.5 low with `bench/prompts/concise.md` appended since October 6 (medium before; `prompt_check` as in the fixed arms); R5 tools; limit enforced on wire cost; discovers only the policy's models, like `jev-compat-o55`. Needs the TypeSafe key; dollars are a provider-only lower bound. Trials without a live advisor or with an incomplete catalog are ineligible. Offline-verified only |
 | ModelPilot delegate (`modelpilot-delegate`, October 5) | the `modelpilot` arm with delegation on (`policy_overrides`; `docs/m6-modelpilot-policy.md`, "Delegation"): priced consults and handoff notes, plus a consult made whatever its price when the host-run suite first passes (a review of the fix by a stronger setting, for measurement). Consults and notes are side requests the proxy sends itself (`kind: side_call`), billed in the trial's cost and left out of the client-proxy token match. Built and tested offline only |
 | ModelPilot for a Sonnet user (`modelpilot-for-sonnet`, October 8) | the `modelpilot` arm with the quality floor on, baseline Sonnet 5.5 medium (`docs/m6-modelpilot-policy.md`, "Quality floor"); starts at low concise. Every setting qualifies on today's evidence, so it decides as `modelpilot` does. Compared with `sonnet-5.5` |
-| ModelPilot for an Opus user (`modelpilot-for-opus`, October 8) | the same with baseline Opus 5.5 medium; starts at Opus 5.5 medium with the concise prompt, and only Opus 5.5 at medium or above qualifies today. Compared with `opus-5.5` |
+| ModelPilot for an Opus user (`modelpilot-for-opus`, October 8) | the same with baseline Opus 5.5 medium; starts at Opus 5.5 medium (with the concise prompt until October 17, none since), and only Opus 5.5 at medium or above qualifies today. Compared with `opus-5.5` |
 
 Every arm runs through ModelPilot's proxy for wire accounting. That arrangement already reconciles Jev exactly. Claude Code's own cost figures are never used for Jev or ModelPilot.
 
@@ -1178,6 +1178,124 @@ One `run` (`runs/behavior-vote-20261016-205720`, 492.5 s, 6 jobs), then `score` 
 
 **What the fail commits to (as pre-registered).** `modelpilot-for-opus` stays on Opus 5.5. The vote isn't wired into the governor. The report's live steps (implied-requirements note, live vote with generated probes) aren't funded on its case. The tomli separation is a post-hoc observation on 3 passes, a thin lead under the no-funding rule. The module stays, as the record of this check.
 
+### Opus levers: Sonnet's derivation repeated for Opus (October 17, $0; the run needs the user's go)
+
+User request, October 17: low concise came from splitting where Sonnet's cost went, so do the same for Opus and find what makes it cheaper at the same quality. Low effort is ruled out (user agreement): Opus's edge sits on the few tasks Sonnet misses, and lower effort is the likeliest way to lose it.
+
+**Where an Opus 5.5 medium trial's cost goes** (`runs/opus-cost-split-20261017.py` → `.json`; the 143 complete single-shape `opus-5.5` trials on 74 tuning tasks, main-loop requests, task means, October 8 prices with 5m writes and the start prefix priced as written; `sonnet-5.5` on the same 74 tasks beside it):
+
+| | Opus 5.5 medium | Share | Sonnet 5.5 medium |
+| --- | --- | --- | --- |
+| Cost | $0.252 | | $0.093 |
+| Output | $0.118 (5.9K tokens) | 47% | $0.041 (4.0K) |
+| Growth written | $0.066 (13.2K tokens) | 26% | $0.024 (9.6K) |
+| Start prefix | $0.036 (7.2K tokens) | 14% | $0.018 (7.2K) |
+| Cache reads | $0.032 | 13% | $0.010 |
+
+- **About half the output is thinking.** Text and tool input come to 9.6K characters, about 2.7K tokens at 3–4 characters a token, against 5.9K output tokens. Thinking is the reasoning, so it is left alone.
+- **No waste to remove.** 0.20 re-reads of a file and 0.007 repeated commands a trial, as Sonnet's; no rebuilds (October 3).
+- **Opus does more work than Sonnet:** 9.9 requests against 7.6; tool results 17.7 KB against 13.7 (source read or searched 14.3 KB, 81%); Edit/Write input 1.7K characters against 0.3K; 1.5 responses after the last edit against 0.5. Price explains 2× of its 2.7×, and this extra work the rest. Its edge may come from it, so none of it is cut by instruction.
+
+**Three levers that leave the reasoning and the fix alone:**
+
+1. **Warm session starts: settled at $0, no run.** 128 of 143 trials already started with a cache read: the first request read 4.0K tokens and wrote 3.0K (medians), and back-to-back trials cost $0.253 measured against $0.270 cold-equivalent. What's left is the dynamic section `--exclude-dynamic-system-prompt-sections` would move (about 1.2K tokens, "Where cache writes come from"): about $0.006 a warm Opus start (2%), only when sessions start within the TTL, and invisible in cold-equivalent cost. The 13% ceiling first given in conversation included the task prompt and the part already warm; it was wrong. Not added to any arm, as on October 3.
+2. **`opus-5.5-lean-io`** (`bench/prompts/lean-io.md`): concise's tool-output bullets (Grep before Read, line ranges, the specific test while working, quiet flags, head/tail, no re-reads), without its fix-scope bullets ("smallest change", "only the tests that cover your change") or its prose bullet, and stating that it is about size, not checking less. Concise cut Sonnet's tool results 27%. On growth and reads tied to tool results (about $0.064 of Opus's $0.098), a similar cut is about $0.015 a trial (6%).
+3. **`opus-5.5-batch`** (`bench/prompts/batch-calls.md`): independent reads, searches and commands as parallel calls in one response. Only 1.5 of Opus's 9.0 calling responses use parallel calls. The pinned 2.1.284 client's system prompt already says "Maximize use of parallel tool calls where possible" (its "Using your tools" section), so this repeats an instruction Opus already has; the remaining sequential calls may be dependent. Expected effect: small, a few percent at most.
+
+**Checked at $0.** Both arms are `opus-5.5` plus one appended prompt (`tests/test_bench.py`). Through the pinned client on a subscription login against the owned fixture, every main-loop request is `claude-opus-5-5` at medium effort with the prompt at the end of the system prompt, and `prompt_check` is applied 4/4. The offline plan below prepares 87 trials; the reference preflight passes on all 29 tasks.
+
+**Proposed run (needs the user's go):** the 29 tasks of `bench-20261006-134508` (which include tomli, parse-decimal and ISMAGS) × `opus-5.5`, `opus-5.5-lean-io`, `opus-5.5-batch` × 1 trial, seed 14, same limits, all on the subscription, no retries; the same-run `opus-5.5` is the control against drift.
+
+```sh
+python3.12 -m modelpilot.bench --tasks cachetools-cache-key,cachetools-cached-condition,cachetools-setitem-evict,cachetools-tlru-cache,cachetools-tlru-stale,cachetools-ttl-expire,mi-is-sorted-lt-only,mi-last-reversed-none,mi-numeric-range-consistent,mi-one-falsy-exception,mi-reshape-multidim,mi-running-minmax-stable,mi-running-statistics,mi-sample-strict-counts,nx-bipartite-butterflies,nx-classes-weak-views,nx-connectivity-digraph-cuts,nx-dag-antichain-width,nx-ismags-monomorphism,nx-vf2-isolated-nodes,parse-decimal-grouping,parse-hyphen-field,parse-strftime-directives,tomli-decode-error-attrs,tomli-hex-escape,tomli-inline-table-newlines,tomli-loads-typeerror,tomli-optional-seconds,toolz-compose-annotations --arms opus-5.5,opus-5.5-lean-io,opus-5.5-batch --trials 1 --seed 14 --subscription-arms opus-5.5,opus-5.5-lean-io,opus-5.5-batch --live --run-budget 1 --claude work/claude-client/node_modules/.bin/claude
+```
+
+$0 API. About $22 API-key equivalent ($0.25 a trial on these tasks), about $27 of subscription use as sent, about 3 hours with grading.
+
+**How it will be read (fixed before the run):**
+- **Eligible trials** as `bench_report` counts them: complete, prompt applied, no transport failure or rate limit. Failed trials are not evidence of anything; a task lost that way is rerun in a new run directory.
+- **Quality.** Strict passes per arm against the same-run `opus-5.5`. A lever arm that strictly misses a task the control passes is flagged. A miss on tomli, parse-decimal or ISMAGS stops that lever, with no further run. At one trial per task, passing everything is no evidence of the Opus floor.
+- **Mechanism.** Paired by task against the control, task-level bootstrap 95% intervals: tool-result KB a trial for `lean-io`, requests a trial and parallel responses for `batch`. A lever "moved" if its interval excludes 0. Within-task noise from the recorded trials puts the 29-task half-width at about ±12% for tool-result KB and ±11% for requests.
+- **Dollars.** `bench_report`'s paired cold-equivalent difference, API-key equivalent. Its half-width is about ±8% on 29 tasks, more than either lever's ceiling, so a saving is claimed only if the interval excludes 0; otherwise "not shown".
+- **What each outcome commits to.** A flagged miss: that lever stops. No flag and the mechanism moved: a run sized for dollars (at least 74 tasks, about ±5%) is a new decision with its own cost. No flag and no movement: the lever is dropped. `modelpilot-for-opus` doesn't change on this run.
+
+**Not done:** the run.
+
+### Opus levers: result (October 17; stopped by a rate limit at 65 of 87 usable trials)
+
+**The run** (`runs/bench-20261017-113427`; the user's, on the subscription, commit `6fa7574` with no uncommitted changes, pinned 2.1.284, seed 14, no retries).
+- $0 API: $14.41 API-key equivalent known, $17.56 as sent.
+- A 429 on `nx-classes-weak-views` × `opus-5.5` at 13:04 stopped it, as designed: 18 trials never ran.
+- Three more lost their last request to a transport error and are excluded (`nx-classes-weak-views` and `nx-ismags-monomorphism` on batch, `mi-sample-strict-counts` on the control). Not evidence of anything.
+- 65 usable trials: 17 tasks paired with the control for lean-io, 16 for batch, not the 29 the rule was sized for.
+- Prompt applied on every lever trial.
+- The $0 re-grade (`runs/regrade-bench-20261017-113427-20261017-142511`) agrees on every strict verdict. Its one "mismatch", batch's tomli, compares its hidden-only verdict with the recorded strict one (`regrade.py` sets `matches` from `grade['passed']`). Its own edge run fails the same test.
+- Scoring (`runs/opus-levers-score-20261017.py` → `.json`): task-level bootstrap, 10,000 resamples.
+
+**Strict passes:** control 22/22, lean-io 22/22, batch 20/21. Batch's miss is `tomli-decode-error-attrs` (`test_line_starts_and_keywords`): a `*args`-only constructor, so keyword construction warns. That is the Sonnet failure; the control and lean-io used named parameters. Batch's ISMAGS trial was the transport-error one, so ISMAGS has no usable batch trial.
+
+**Paired with the same-run control** (lever − control):
+
+| | lean-io (17 tasks) | batch (16 tasks) |
+| --- | --- | --- |
+| Tool-result KB | −21% [−35%, −9%] | −9% [−30%, +10%] |
+| Requests | **+16% [+1%, +33%]** | −11% [−22%, +1%] |
+| Parallel responses | | −0.5 a trial [−1.1, +0.1], fewer, not more |
+| Test lines in the fix | −18% [−34%, −4%] | −15% [−28%, −3%] |
+| Source lines in the fix | −3% [−17%, +12%] | −8% [−25%, +5%] |
+| Output tokens | −4% [−19%, +14%] | −10% [−18%, −4%] |
+| Cost (`bench_report`) | −$0.008 [−$0.037, +$0.025], not shown | −$0.021 [−$0.036, −$0.007], shown |
+
+**What the reading rule says, on the trials it has:**
+- **Batch stops** (rule: a miss on tomli, parse-decimal or ISMAGS). Its saving is the only one shown, but it didn't come from batching: parallel responses fell. It came from Opus doing less (output −10%, test lines −15%), with the Sonnet-style tomli fix.
+- **Lean-io: no flagged miss, and its mechanism moved.** Tool results fell 21%, but Opus made 16% more requests to read in smaller pieces, so cost moved −4%, not shown.
+- **Across both prompts, a cost framing ("paid for again at every later step", "fewer responses cost less") made Opus write 15–18% fewer test lines.** Lean-io kept every strict pass on 22 tasks, and its fix size didn't change.
+- **Not yet the rule's reading for lean-io:** 12 of the 29 tasks lack a usable control/lean-io pair. The rule reruns lost tasks in a new run directory. Batch's lost trials are not rerun: it has stopped.
+
+**Completion run (needs the user's go):** the 12 tasks × `opus-5.5`, `opus-5.5-lean-io` × 1, seed 15, so each new pair is from one run. The offline plan prepares 24 trials; the preflight passes.
+- $0 API, about $6 API-key equivalent, about $7.50 as sent, about 30 minutes.
+- Read with this run's 17 pairs under the same rule, 29 pairs in all.
+- First attempt, `runs/bench-20261017-144337` (14:43): refused at its first request by the subscription's five-hour limit (utilization 1, resets 16:30 PDT, no overage). Nothing usable; rerun the same command in a new run directory after the reset.
+
+```sh
+python3.12 -m modelpilot.bench --tasks cachetools-tlru-cache,cachetools-tlru-stale,cachetools-ttl-expire,mi-one-falsy-exception,mi-reshape-multidim,mi-running-minmax-stable,mi-running-statistics,mi-sample-strict-counts,nx-classes-weak-views,nx-vf2-isolated-nodes,parse-strftime-directives,tomli-loads-typeerror --arms opus-5.5,opus-5.5-lean-io --trials 1 --seed 15 --subscription-arms opus-5.5,opus-5.5-lean-io --live --run-budget 1 --claude work/claude-client/node_modules/.bin/claude
+```
+
+### Opus levers: lean-io read on all 29 tasks (October 17): quality kept, no saving shown
+
+**The completion run** (`runs/bench-20261017-173151`; the user's, after the reset). Subscription, commit `6fa7574` with no uncommitted changes, seed 15, no retries.
+- 24/24 trials complete, none excluded, prompt applied on every lean-io trial.
+- $0 API: $5.75 API-key equivalent, $6.91 as sent.
+- The re-grade (`runs/regrade-bench-20261017-173151-20261017-182412`) agrees on every trial, with no mismatches.
+
+**The reading** (`runs/opus-levers-final-score-20261017.py` → `.json`; each task paired with the control from its own run, 17 from `bench-20261017-113427` and 12 from this run; task bootstrap, 10,000 resamples):
+- **Strict passes:** control 29/29, lean-io 29/29, re-graded the same. tomli, parse-decimal and ISMAGS pass on both. No flagged miss.
+
+| lean-io − control, 29 tasks | Estimate | 95% interval |
+| --- | --- | --- |
+| Tool-result KB | −19% | [−31%, −9%] |
+| Requests | +7% | [−3%, +17%] |
+| Parallel responses | +0.8 a trial | [+0.2, +1.4] |
+| Output tokens | −4% | [−16%, +8%] |
+| Source lines in the fix | −7% | [−18%, +4%] |
+| Test lines in the fix | −14% | [−25%, −4%] |
+| Wall time | −5% | [−18%, +8%] |
+| Cost | −$0.011 (−4.6%) | [−$0.034, +$0.012] |
+
+The cost difference agrees with `bench_report` on each run: −$0.008 on the first run's 17 tasks and −$0.015 on these 12.
+
+**What the rule commits to:** no flagged miss and the mechanism moved, so a run sized for dollars is a new decision with its own cost. It would add the other 45 tuning tasks × both arms (90 trials, about $23 API-key equivalent, about $28 as sent, about 2 five-hour windows of subscription use) for 74 pairs at about ±5%.
+- At the measured −4.6%, that run has about even odds of showing a saving. Even if it does, the saving is about $0.011 a task for an Opus user.
+- Test lines still fall 14%, which bears on how Opus checks its work.
+- This is a thin lead. `opus-5.5-lean-io` stays an arm; `modelpilot-for-opus` doesn't change.
+- **User decision (October 17): continue with standard Opus.** No Opus prompt lever is adopted, and the dollar run isn't funded.
+- **Then (user request, October 17): the concise prompt is off both Opus ModelPilot arms.** `modelpilot-for-opus` and the risk-routed arm's flagged route now run Opus 5.5 medium with no appended prompt, `opus-5.5`'s exact setting. Neither had run live. In 4b, `modelpilot-for-opus` against `opus-5.5` no longer measures the concise prompt on Opus; on today's evidence it measures only the proxy's overhead (below, "4b: amendments before the run", item 6).
+
+**Where the Opus question stands.**
+- Of the three levers that leave Opus's reasoning and fix alone, warm starts are already mostly realized, batch saved money only by doing less and missed tomli, and lean-io kept quality but saved too little to show.
+- Opus has no waste to remove, and a prompt that mentions cost makes it write fewer tests. Making Opus itself cheaper by instruction isn't supported.
+- What remains is running Opus only on tasks that need it, which needs a miss predictor that hasn't been found (item 8, the stuck detector, the behavioural vote; the risk-routed arm awaits new tasks).
+
 ### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
 
 User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku passes, the tests are too easy"), so harder tasks come before item 8's labels, from sqlglot (MIT; surveyed October 4, above), in stages. Stage 1 builds 8 tasks and screens them with one low concise and one Opus 5.5 trial each; a full batch follows only if the repository produces misses. sqlglot joins the tuning split; the final split and its lock are unchanged.
@@ -1350,6 +1468,11 @@ The user asked what could run without interfering with the governor work in anot
      - every argument check refused;
      - a paid step refused while `bench_report.py` had uncommitted changes, with nothing sent;
      - the plan-only check, run from that checkout at `main` (`607df61`, with this branch's `bench_report` change not yet committed), graded all 24 references and prepared 144 trials. Its text is the same as October 12's (`runs/4b-final-plan-20261016.txt` there).
+
+6. **`modelpilot-for-opus` runs without the concise prompt** (user request, October 17, after the decision to continue with standard Opus; above, "Opus levers: lean-io read on all 29 tasks"). No 4b trial exists, so this too comes before the run.
+   - **What it runs now:** Opus 5.5 medium with no appended prompt, `opus-5.5`'s exact setting. Its pairing with `opus-5.5` now measures the proxy and the policy, which on today's evidence never moves the arm, not the prompt.
+   - **Unchanged:** its comparisons and fail conditions, and n = 1.
+   - **The trial-count stand-in no longer applies.** Its floor pairing's $0.023 half-width (item 3) came from the concise prompt's effect on Sonnet, scaled to Opus. Without the prompt, the expected difference is the overhead alone.
 
 **Still before the run,** in the order given to the user on October 16:
 - the governor work merged and its scored rules settled;
