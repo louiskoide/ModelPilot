@@ -129,6 +129,8 @@ class FixtureHandler(BaseHTTPRequestHandler):
         self.send_header('Transfer-Encoding', 'chunked')
         self.send_header('retry-after', '1')
         self.send_header('request-id', request_id)
+        for k, v in self.server.response_headers:
+            self.send_header(k, v)
         self.end_headers()
         try:
             # Split SSE/JSON in arbitrary places; first fragment arrives before a pause.
@@ -157,5 +159,6 @@ def fixture_server():
     server.truncate_models = set()  # scripted streams for these models end before message_stop
     server.keep_bodies = False  # tests that must see what reached the model set this
     server.bodies = []
+    server.response_headers = []  # (name, value) pairs added to every POST reply, e.g. rate-limit headers
     server.lock = threading.Lock()
     return server

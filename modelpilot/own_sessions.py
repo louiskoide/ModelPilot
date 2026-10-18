@@ -11,8 +11,9 @@ configuration is touched. When the client exits, the proxy stops and summary.jso
 
 Kept under the ignored runs/own-sessions/:
 - one directory per session: the proxy's rows (observations.jsonl: model, effort, usage, cost, timing, request hash;
-  no message text) and summary.json (requests, cost, and the gaps between main-loop requests against each one's cache
-  lifetime boundary, `m5.idle_boundary`);
+  no message text; since October 18 also each reply's rate-limit headers, `proxy.rate_limit_headers`) and
+  summary.json (requests, cost, the gaps between main-loop requests against each one's cache lifetime boundary,
+  `m5.idle_boundary`, and what the subscription's usage-limit headers said, `rate_limit`);
 - ledger.sqlite3, the governor's ledger shared by every session (reservations, settlements, settings and context
   sizes; hashes and decisions, no text).
 The client keeps its own transcripts where it always does (~/.claude/projects).
@@ -35,6 +36,7 @@ import path, so another checkout's modelpilot package there can't shadow this on
 import argparse
 import datetime
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -81,7 +83,43 @@ def summarize(log):
             'known_cost_usd': round(sum(known), 6), 'unknown_cost_requests': len(messages) - len(known),
             'models': sorted({r['model'] for r in messages if r.get('model')}),
             'longest_gap_seconds': max((g['seconds'] for g in gaps), default=None),
-            'gaps_past_boundary': [g for g in gaps if g['past_boundary']]}
+            'gaps_past_boundary': [g for g in gaps if g['past_boundary']], 'rate_limit': rate_limits(rows)}
+
+
+# The usage windows a subscription's rate-limit headers report, as the user's 2.1.302 client lists them.
+WINDOWS = ('5h', '7d', '7d_oi')
+
+
+def rate_limits(rows):
+    """What the subscription's usage-limit headers said during the session (`proxy.rate_limit_headers`, October 18):
+    how many replies carried them, the limiter's statuses, and per window its first and last utilization, how many
+    resets it named, and the smallest change between two readings in one window (the same reset), the closest the
+    session comes to its resolution. Other clients on the same login move the same numbers, so a change isn't this
+    session's alone."""
+    read = sorted((r for r in rows if isinstance(r.get('rate_limit'), dict) and r.get('started_unix') is not None),
+                  key=lambda r: r['started_unix'])
+    statuses = {}
+    for r in read:
+        status = r['rate_limit'].get('unified-status')
+        if status is not None:
+            statuses[status] = statuses.get(status, 0) + 1
+    windows = {}
+    for window in WINDOWS:
+        readings = []
+        for r in read:
+            try:
+                value = float(r['rate_limit'][f'unified-{window}-utilization'])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                readings.append((value, r['rate_limit'].get(f'unified-{window}-reset')))
+        if readings:
+            steps = [round(abs(b - a), 9) for (a, reset), (b, later) in zip(readings, readings[1:])
+                     if reset == later and b != a]
+            windows[window] = {'readings': len(readings), 'first': readings[0][0], 'last': readings[-1][0],
+                               'resets': len({reset for _, reset in readings}),
+                               'smallest_step': min(steps, default=None)}
+    return {'replies': len(read), 'statuses': statuses, 'windows': windows}
 
 
 def plan(claude, version, out_root, upstream, client_args, keep=False):
@@ -136,10 +174,12 @@ def run(claude, version, out_root, upstream, client_args, rates, env=None, stdin
         net = 'unknown' if k['net_usd'] is None else f"${k['net_usd']:.4f}"
         kept = (f"; keeper: {k['pings']} pings, ${k['ping_cost_usd']:.4f}, {len(k['kept_returns'])} kept returns, "
                 f"net {net}")
+    five = summary['rate_limit']['windows'].get('5h')
+    usage = f"; 5h usage {five['first']} to {five['last']}" if five else ''
     (path/'summary.json').write_text(json.dumps(summary, indent=1) + '\n')
     print(f"ModelPilot: {summary['messages']} requests, ${summary['known_cost_usd']:.4f} known, "
           f"{summary['unknown_cost_requests']} unknown, {len(summary['gaps_past_boundary'])} gaps past the cache "
-          f"boundary{kept}; {path/'summary.json'}", file=sys.stderr, flush=True)
+          f"boundary{kept}{usage}; {path/'summary.json'}", file=sys.stderr, flush=True)
     return summary
 
 

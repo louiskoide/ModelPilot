@@ -236,6 +236,28 @@ def logged_usage(usage):
     return row
 
 
+# The rate-limit headers on a reply (October 18): on a subscription, anthropic-ratelimit-unified-*: the limiter's status
+# and, per usage window (5h, 7d, 7d_oi), its utilization, reset time and warning threshold, which the user's 2.1.302
+# client reads (checked at $0 in its binary); on a key, the API's request and token limits. Logged so an own session
+# shows how the subscription counts a keeper ping against a rewrite (docs/cache-keeper-design.md, unknown 2).
+RATE_LIMIT_NAME = re.compile(r'anthropic-ratelimit-([a-z0-9_-]{1,64})')
+RATE_LIMIT_VALUE = re.compile(r'[A-Za-z0-9_.:+-]{1,64}')
+RATE_LIMIT_MAX = 64
+
+
+def rate_limit_headers(headers):
+    """{name less its anthropic-ratelimit- prefix: value} for a reply's rate-limit headers, {} when it has none. Values
+    stay the strings sent, so their precision shows; one that isn't a short plain token (free text, a list) is None:
+    present, not kept. At most RATE_LIMIT_MAX names."""
+    out = {}
+    for k, v in headers.items():
+        match = RATE_LIMIT_NAME.fullmatch(k.lower())
+        if match and (match.group(1) in out or len(out) < RATE_LIMIT_MAX):
+            v = v.strip()
+            out[match.group(1)] = v if RATE_LIMIT_VALUE.fullmatch(v) else None
+    return out
+
+
 def effective_effort(request):
     """The effort the model runs at: the latest effort-only system message's (per-message effort), else the top-level one."""
     for m in reversed(request.get('messages') or []):
@@ -542,6 +564,9 @@ class ProxyServer(ThreadingHTTPServer):
             provider_id = response.headers.get('request-id', '')
             if PROVIDER_ID.fullmatch(provider_id):
                 row['provider_request_id'] = provider_id
+            limits = rate_limit_headers(response.headers)
+            if limits:
+                row['rate_limit'] = limits
             data = response.read(MAX_BODY + 1)
             if len(data) > MAX_BODY:
                 raise ValueError('reply too large')
@@ -857,6 +882,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             provider_id = response.headers.get('request-id', '')
             if PROVIDER_ID.fullmatch(provider_id):
                 row['provider_request_id'] = provider_id
+            limits = rate_limit_headers(response.headers)
+            if limits:
+                row['rate_limit'] = limits  # forwarded to the client unchanged, like every end-to-end header
             self.send_response_only(response.status, response.reason)
             for k, v in clean_headers(response.headers):
                 self.send_header(k, v)

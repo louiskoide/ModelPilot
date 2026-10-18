@@ -115,6 +115,13 @@ Unknown 1 is settled by the October 18 check above: resumes happen in an open cl
 2. **The subscription.**
    - On the user's subscription, a saving is usage headroom, not dollars, and whether its limits weigh reads and writes as API prices do is unknown.
    - Pings use the same limit as the user's work. A 429 stops keeping, but the ping that drew it has already used some of the limit.
+   - **Logged since October 18, not yet measured.** A subscription's replies carry the limiter's readings. These are the `anthropic-ratelimit-unified-*` headers: a status, and for each window (5h, 7d, 7d_oi) a utilization, a reset time and a warning threshold. The user's 2.1.302 client reads them (checked at $0 in its binary).
+     - The proxy now logs them on every row, keeper pings included (`rate_limit`, `proxy.rate_limit_headers`).
+     - `summary.json`'s `rate_limit` gives, per window, the first and last utilization and the smallest change seen, the closest a session comes to the window's resolution.
+     - The October 18 live check started on the earlier code, so it logs none.
+   - **What will measure it:** the change in utilization from one ping to the next, set against a step that wrote a lot (a cold start, or an unkept return). Two caveats:
+     - Other clients on the same login move the same numbers, so a step is clean only while nothing else uses the login.
+     - The headers arrive before the reply's output, so whether a reading counts its own request is unknown.
 3. **The `refusal` stop reason.**
    - One of two 1-token pings ended `refusal` with no output; the other ended `max_tokens` with 1 token. Both had the same cache effect.
    - Why it happens is unexplained. The 16-token check didn't run (the renewal run had loaded the code before it was added).
