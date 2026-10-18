@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Updated Oct 17, 2026. History: `docs/changelog/`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
+Updated Oct 18, 2026. History: `docs/changelog/`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
 
 ## Objective
 
@@ -74,16 +74,15 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 
 ## Plan, in order
 
-Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 found no pre-run miss signal.
+Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 found no pre-run miss signal. 5, 10 dropped (Oct 8, 11).
 
-5. Dropped for the quality floor (user decision, Oct 8).
 6. Mid-task compaction: no loss shown (Oct 13), not on Haiku. Long sessions await approval.
 7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
 8. Fail (Oct 11); post-run checks don't pay (Oct 14, 16). Haiku risk rating: thin pass below Opus's floor; `-for-opus-risk` awaits new tasks (Oct 15).
 9. Caveman: parked (user decision).
-10. Dropped (8 failed); Jev's advisor role too (Oct 11).
 11. 4b held (user decision); Oct 16: n=1, vs-Opus pair.
 12. Governor: live checks passed (Oct 12); idle plans wait out the cache TTL, a prompt late; compact if it pays (Oct 13).
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
 14. Haiku 5.5: helper roles only; the read/search explorer doesn't pay (Oct 14).
 15. Opus levers (Oct 17): none pays; standard Opus stays (user decision).
+16. Cache keeper: built Oct 18, opt-in (`own_sessions --keep`); live check next.
