@@ -57,6 +57,8 @@ COMMANDS = (
     command('jev_compat', 'Can pinned Jev route this client: a loopback probe, or --prepare-compat ($0)'),
     command('jev_route_check', 'One-task end-to-end Jev routing preflight through the stock launcher', paid=True,
             plans=[[], ['--variant', 'compat', '--accounting', 'wire']]),
+    command('keeper_ping', "Cache keeper: what one ping costs at Opus 5.5 xhigh, and whether it keeps the entry warm",
+            paid=True, plans=[[], ['--renewal']]),
     command('late_fix', 'Plan item 7: what a miss costs to fix once noticed late', paid=True,
             plans=[['run', '{tmp}/late-fix']], needs='--limit-usd'),
     command('long_session', "Long sessions (plan item 6): sequences file and a run's per-turn report ($0)"),
@@ -84,6 +86,7 @@ COMMANDS = (
     command('thinking_probe', 'Thinking history across setting changes, direct API; capture-shape is $0', paid=True,
             plans=[['--out', '{tmp}/thinking-probe']]),
     command('timeline', "A session's requests and the governor's events as one static HTML page ($0)"),
+    command('transcript_replay', "Cache keeper replay over the client's own transcripts: what a keeper would have saved ($0)"),
     command('worker_check', 'Bounded live M3 check: search and fixed-test worker sessions', paid=True, plans=[[]]),
 )
 
