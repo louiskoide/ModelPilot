@@ -269,6 +269,12 @@ User request ("let's run A"), after the own sessions showed a 101,340-token tool
   - **Its stop reason was `refusal`, not `max_tokens`,** with 0 output tokens; the seed and the later request ended `end_turn`. One request can't tell whether that is how the API reports a cut before the first token or a real refusal. A design shouldn't rest on it unexplained.
   - **Not run:** `--renewal`, which shows a ping keeping an entry past its hour. The replay's precondition showed entries outliving the hour while in use, not a ping doing it.
 - **Then (user's go, October 17):** `keeper_ping` also sends one ping at max_tokens 16 after a 1-token one, to see whether it stops normally; the user started `--renewal`. The design: `docs/cache-keeper-design.md` (DRAFT, for the user's decision).
+- **The renewal run** (`python3 -m modelpilot.keeper_ping --renewal --live`; the user's run, October 17 22:07–23:57, `runs/keeper-ping-20261017-220721`, API key, 3 requests, $0.098 known, nothing unknown):
+  - **A ping kept the entry past its hour.** The seed wrote 11,638 tokens. The 1-token ping 55 minutes later read all of them and wrote nothing ($0.002396). The seed's body, 110 minutes after the seed, read all 11,638 back and wrote nothing.
+  - **Without a ping, entries don't last that long** (`runs/keeper-renewal-control-20261017.py` → `.txt`, the user's transcripts, usage and timestamps only). After a main-loop pause of 75 minutes to 2 hours, none of 22 next requests read the previous prompt back; the median read was 10%. At 60–75 minutes, 2 of 12 did. So the whole read at 110 minutes is the ping's doing, not a longer life.
+  - **This time the 1-token ping ended `max_tokens`,** with 1 output token and no thinking. Of two 1-token pings, one ended `refusal` with no output and one `max_tokens`; both read the whole prefix and wrote nothing, so the cache effect was the same.
+  - **The 16-token stop check didn't run.** The run had loaded `keeper_ping` at 22:07:21, 41 seconds before the check was added, and its result has no `stop_check`.
+  - **The go holds:** K_all(4h) repriced at this ping nets $71.85, 6.47%.
 
 ### Test adapter (October 14, cloud batch, offline; off by default)
 

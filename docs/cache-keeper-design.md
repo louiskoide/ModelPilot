@@ -16,7 +16,10 @@ While a session sits idle, its 1h cache entry expires after an hour. The user's 
   - At Opus 5.5 xhigh with adaptive thinking, a ping at max_tokens 1 was accepted. It read the whole prefix, wrote nothing and billed no output, so it costs only its read.
   - The entry was read back afterwards. Repriced at that ping, the 4-hour keeper nets $71.88 (6.48%).
   - Its stop reason was `refusal`, unexplained.
-- **Waiting on:** `keeper_ping --renewal`, which tests whether a ping keeps an entry past its hour, and whether a 16-token ping stops normally.
+- **Renewal** (`runs/keeper-ping-20261017-220721`, the user's run, $0.098):
+  - A 1-token ping 55 minutes after the seed read the whole prefix. The seed's body, 110 minutes after the seed, read it all back.
+  - In the user's transcripts, no next request read its whole previous prompt after a pause of 75 minutes to 2 hours with no ping (0 of 22; `runs/keeper-renewal-control-20261017.txt`). So the ping kept the entry.
+  - This ping ended `max_tokens` with 1 output token. Repriced at it, the 4-hour keeper nets $71.85 (6.47%).
 
 ## Mechanism
 
@@ -26,7 +29,7 @@ While a session sits idle, its 1h cache entry expires after an hour. The user's 
   - It is that request with `max_tokens` lowered and nothing else changed.
   - Changing the model, effort or thinking would write a new prefix (M0). Changing `max_tokens` didn't: the ping read 100%.
   - It keeps the client's `stream` setting; the ping check only tested non-streamed requests.
-  - Its `max_tokens` is 1, or 16 if the renewal run shows 16 stops normally where 1 is labelled `refusal`. At Opus prices, 16 thinking tokens cost $0.0003 a ping.
+  - Its `max_tokens` is 1. Both 1-token pings sent so far read the whole prefix and wrote nothing. A ping at 16 is untested; at Opus prices, 16 thinking tokens would cost $0.0003 more a ping.
 - **When:**
   - The first ping goes 55 minutes after the session's last request ends, then one every 55 minutes.
   - It stops at whichever comes first: a new request from the session; 4 hours after the last real one; the session's client exiting; any non-200 reply (no retry, ever); or the budget.
@@ -47,8 +50,12 @@ While a session sits idle, its 1h cache entry expires after an hour. The user's 
 2. **The subscription.**
    - On the user's subscription, a saving is usage headroom, not dollars, and whether its limits weigh reads and writes as API prices do is unknown.
    - Pings use the same limit as the user's work. A 429 stops keeping, but the ping that drew it has already used some of the limit.
-3. **The `refusal` stop reason.** It is unexplained. A keeper that sends about 50 pings a day shouldn't rest on it until it is understood; the renewal run's 16-token check is the first step.
-4. **Renewal.** It is pending; if a ping doesn't keep an entry past its hour, the keeper doesn't work.
+3. **The `refusal` stop reason.**
+   - One of two 1-token pings ended `refusal` with no output; the other ended `max_tokens` with 1 token. Both had the same cache effect.
+   - Why it happens is unexplained. The 16-token check didn't run (the renewal run had loaded the code before it was added).
+   - The keeper would treat `refusal` as a normal end and log each ping's stop reason. The live check, and the month after it, would show how often it happens.
+
+Settled: **renewal.** A ping keeps an entry past its hour (the renewal run, above).
 
 ## Rules it changes
 
