@@ -1296,6 +1296,36 @@ The cost difference agrees with `bench_report` on each run: −$0.008 on the fir
 - Opus has no waste to remove, and a prompt that mentions cost makes it write fewer tests. Making Opus itself cheaper by instruction isn't supported.
 - What remains is running Opus only on tasks that need it, which needs a miss predictor that hasn't been found (item 8, the stuck detector, the behavioural vote; the risk-routed arm awaits new tasks).
 
+### Forced pre-edit Opus note: the October 18 review and its two $0 checks
+
+The user gave two candidates for the governor (pasted text, not in the repository) and asked for a review, then for its two $0 checks. (1) Before the cheap agent's first edit, the host forces one Opus 5.5 call that reads the transcript and returns a short note: the plan, the implied requirements and the conventions to match. It runs on every task, a fixed tax rather than a detector, and the agent doesn't choose when. (2) The October 16 counterpart check (above, "Catching misses").
+
+**Review, against the record:**
+- "With the repo read, Opus solves tomli 34 of 36 dev trials": 36 is Opus's whole dev split, and both its misses are tomli. Opus on tomli is 2/4 in dev and 0.5 on tuning.
+- "Item 5 caught tomli 0/17": that was one Opus suite, scored against 17 saved misses.
+- "The forced review failed because it saw a diff": its 27 trials held one miss. Over both review runs, Opus named the tomli bug in 1 of 4 reviews.
+- "17 of 29 low-concise misses are tomli, so tomli decides": the 29 are saved misses from all arms. Per task against Opus (`opus-vs-modelpilot-20261006.json`) the gaps are parse 1.0, tomli 0.5 and ISMAGS 0.2. Item 8's four tasks where low concise misses and Opus passes count too.
+
+**A: the first change on recorded low-concise trials** (`runs/first-edit-check-20261018.py` → `.json`, code `901def2`; criteria in its docstring, fixed before it ran). All 58 counted dev trials of `sonnet-5.5-low-concise`, 5 misses. **Passes both criteria.**
+- **Trigger.** All 58 can be held before their first change, but only 15 through Edit/Write. 43 (74%) first change the code with a `python3 - <<'E'` script in Bash that reads a file, replaces text and writes it back. A PreToolUse matcher on Edit/Write alone would miss three trials in four. The Bash pattern caught all 43 (each command read), but it fits one idiom. A host check of the workspace after each tool call (git status or file hashes) is the sturdier trigger; it fires just after the first write.
+- **Timing.** The hold comes at the third request (median) of six, never at the first.
+- **What the note would see.** Before the hold the agent has made a median of one Read/Grep/Glob and one Bash call, about 2,200 tokens of tool output. tomli's two misses had about 1,000 and no Read.
+- **Cost.** Median $0.076, 90th percentile $0.098, at most $0.119 (ISMAGS). That is the whole context at Opus 5.5's uncached input price plus the forced-review consults' median 1,702 output tokens: an upper estimate. With Sonnet acting on the note (the forced review added about $0.02 beyond its consult), the arm would cost about $0.17 against $0.248 for Opus 5.5. That is about $0.08 a task at best, for an Opus user only.
+
+**B: the October 16 transcript check, dev split** (`runs/counterpart-transcript-check-20261018.py` → `.json`; criterion in its docstring, fixed before it ran). Every counted dev trial of the three tasks, any arm: 70 trials, 37 misses. **Fail.**
+
+| Task | Passes using the counterpart | Misses using it |
+| --- | --- | --- |
+| parse | 5/12 | 0/10 |
+| tomli | 3/3 | 18/21 |
+| ISMAGS | 18/18 | 6/6 |
+
+- **Each task's instruction names its counterpart:** tomli "the attributes json.JSONDecodeError has", ISMAGS "exactly those that GraphMatcher(...).subgraph_monomorphisms_iter() yields", parse "format(1000000, ',d') == '1,000,000'". The misses had it and used it.
+- **What separates is one behaviour checked.** On tomli, building the error with keywords: 2 of 3 passes, 0 of 21 misses. On parse, a round trip through `format`: 5 of 12 passes (none of Sonnet's 4) and 0 of 10 misses. All 6 ISMAGS misses compared with GraphMatcher and still fail the hidden multigraph-pattern-against-simple-graph tests. Choosing that behaviour is knowing the implied requirement, so the check comes down to item 5's problem.
+- **The holdout isn't read.** Item 8's four tasks are the miss detector's holdout (seed 8), read once after a committed pre-registration and on the user's call. The review offered them as a $0 extension; that was a mistake, caught before any was read. With dev negative, the counterpart check gets no holdout pre-registration.
+
+**What follows.** The counterpart check is dropped. The forced note's trigger and cost hold up; its content is open, since it helps only if Opus names that one behaviour. The evidence so far is item 5's suite catching all 8 parse misses with a round trip, and on tomli Opus naming the bug in 1 of 4 reviews and solving it in 2 of 4. Option C answers it: each recorded Sonnet transcript replayed up to its first change, one Opus request each, scored at $0 (the user will run it, October 18).
+
 ### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
 
 User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku passes, the tests are too easy"), so harder tasks come before item 8's labels, from sqlglot (MIT; surveyed October 4, above), in stages. Stage 1 builds 8 tasks and screens them with one low concise and one Opus 5.5 trial each; a full batch follows only if the repository produces misses. sqlglot joins the tuning split; the final split and its lock are unchanged.
