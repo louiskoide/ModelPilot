@@ -1221,6 +1221,80 @@ $0 API. About $22 API-key equivalent ($0.25 a trial on these tasks), about $27 o
 
 **Not done:** the run.
 
+### Opus levers: result (October 17; stopped by a rate limit at 65 of 87 usable trials)
+
+**The run** (`runs/bench-20261017-113427`; the user's, on the subscription, commit `6fa7574` with no uncommitted changes, pinned 2.1.284, seed 14, no retries).
+- $0 API: $14.41 API-key equivalent known, $17.56 as sent.
+- A 429 on `nx-classes-weak-views` × `opus-5.5` at 13:04 stopped it, as designed: 18 trials never ran.
+- Three more lost their last request to a transport error and are excluded (`nx-classes-weak-views` and `nx-ismags-monomorphism` on batch, `mi-sample-strict-counts` on the control). Not evidence of anything.
+- 65 usable trials: 17 tasks paired with the control for lean-io, 16 for batch, not the 29 the rule was sized for.
+- Prompt applied on every lever trial.
+- The $0 re-grade (`runs/regrade-bench-20261017-113427-20261017-142511`) agrees on every strict verdict. Its one "mismatch", batch's tomli, compares its hidden-only verdict with the recorded strict one (`regrade.py` sets `matches` from `grade['passed']`). Its own edge run fails the same test.
+- Scoring (`runs/opus-levers-score-20261017.py` → `.json`): task-level bootstrap, 10,000 resamples.
+
+**Strict passes:** control 22/22, lean-io 22/22, batch 20/21. Batch's miss is `tomli-decode-error-attrs` (`test_line_starts_and_keywords`): a `*args`-only constructor, so keyword construction warns. That is the Sonnet failure; the control and lean-io used named parameters. Batch's ISMAGS trial was the transport-error one, so ISMAGS has no usable batch trial.
+
+**Paired with the same-run control** (lever − control):
+
+| | lean-io (17 tasks) | batch (16 tasks) |
+| --- | --- | --- |
+| Tool-result KB | −21% [−35%, −9%] | −9% [−30%, +10%] |
+| Requests | **+16% [+1%, +33%]** | −11% [−22%, +1%] |
+| Parallel responses | | −0.5 a trial [−1.1, +0.1], fewer, not more |
+| Test lines in the fix | −18% [−34%, −4%] | −15% [−28%, −3%] |
+| Source lines in the fix | −3% [−17%, +12%] | −8% [−25%, +5%] |
+| Output tokens | −4% [−19%, +14%] | −10% [−18%, −4%] |
+| Cost (`bench_report`) | −$0.008 [−$0.037, +$0.025], not shown | −$0.021 [−$0.036, −$0.007], shown |
+
+**What the reading rule says, on the trials it has:**
+- **Batch stops** (rule: a miss on tomli, parse-decimal or ISMAGS). Its saving is the only one shown, but it didn't come from batching: parallel responses fell. It came from Opus doing less (output −10%, test lines −15%), with the Sonnet-style tomli fix.
+- **Lean-io: no flagged miss, and its mechanism moved.** Tool results fell 21%, but Opus made 16% more requests to read in smaller pieces, so cost moved −4%, not shown.
+- **Across both prompts, a cost framing ("paid for again at every later step", "fewer responses cost less") made Opus write 15–18% fewer test lines.** Lean-io kept every strict pass on 22 tasks, and its fix size didn't change.
+- **Not yet the rule's reading for lean-io:** 12 of the 29 tasks lack a usable control/lean-io pair. The rule reruns lost tasks in a new run directory. Batch's lost trials are not rerun: it has stopped.
+
+**Completion run (needs the user's go):** the 12 tasks × `opus-5.5`, `opus-5.5-lean-io` × 1, seed 15, so each new pair is from one run. The offline plan prepares 24 trials; the preflight passes.
+- $0 API, about $6 API-key equivalent, about $7.50 as sent, about 30 minutes.
+- Read with this run's 17 pairs under the same rule, 29 pairs in all.
+- First attempt, `runs/bench-20261017-144337` (14:43): refused at its first request by the subscription's five-hour limit (utilization 1, resets 16:30 PDT, no overage). Nothing usable; rerun the same command in a new run directory after the reset.
+
+```sh
+python3.12 -m modelpilot.bench --tasks cachetools-tlru-cache,cachetools-tlru-stale,cachetools-ttl-expire,mi-one-falsy-exception,mi-reshape-multidim,mi-running-minmax-stable,mi-running-statistics,mi-sample-strict-counts,nx-classes-weak-views,nx-vf2-isolated-nodes,parse-strftime-directives,tomli-loads-typeerror --arms opus-5.5,opus-5.5-lean-io --trials 1 --seed 15 --subscription-arms opus-5.5,opus-5.5-lean-io --live --run-budget 1 --claude work/claude-client/node_modules/.bin/claude
+```
+
+### Opus levers: lean-io read on all 29 tasks (October 17): quality kept, no saving shown
+
+**The completion run** (`runs/bench-20261017-173151`; the user's, after the reset). Subscription, commit `6fa7574` with no uncommitted changes, seed 15, no retries.
+- 24/24 trials complete, none excluded, prompt applied on every lean-io trial.
+- $0 API: $5.75 API-key equivalent, $6.91 as sent.
+- The re-grade (`runs/regrade-bench-20261017-173151-20261017-182412`) agrees on every trial, with no mismatches.
+
+**The reading** (`runs/opus-levers-final-score-20261017.py` → `.json`; each task paired with the control from its own run, 17 from `bench-20261017-113427` and 12 from this run; task bootstrap, 10,000 resamples):
+- **Strict passes:** control 29/29, lean-io 29/29, re-graded the same. tomli, parse-decimal and ISMAGS pass on both. No flagged miss.
+
+| lean-io − control, 29 tasks | Estimate | 95% interval |
+| --- | --- | --- |
+| Tool-result KB | −19% | [−31%, −9%] |
+| Requests | +7% | [−3%, +17%] |
+| Parallel responses | +0.8 a trial | [+0.2, +1.4] |
+| Output tokens | −4% | [−16%, +8%] |
+| Source lines in the fix | −7% | [−18%, +4%] |
+| Test lines in the fix | −14% | [−25%, −4%] |
+| Wall time | −5% | [−18%, +8%] |
+| Cost | −$0.011 (−4.6%) | [−$0.034, +$0.012] |
+
+The cost difference agrees with `bench_report` on each run: −$0.008 on the first run's 17 tasks and −$0.015 on these 12.
+
+**What the rule commits to:** no flagged miss and the mechanism moved, so a run sized for dollars is a new decision with its own cost. It would add the other 45 tuning tasks × both arms (90 trials, about $23 API-key equivalent, about $28 as sent, about 2 five-hour windows of subscription use) for 74 pairs at about ±5%.
+- At the measured −4.6%, that run has about even odds of showing a saving. Even if it does, the saving is about $0.011 a task for an Opus user.
+- Test lines still fall 14%, which bears on how Opus checks its work.
+- This is a thin lead. `opus-5.5-lean-io` stays an arm; `modelpilot-for-opus` doesn't change.
+- **User decision (October 17): continue with standard Opus.** No Opus prompt lever is adopted, and the dollar run isn't funded.
+
+**Where the Opus question stands.**
+- Of the three levers that leave Opus's reasoning and fix alone, warm starts are already mostly realized, batch saved money only by doing less and missed tomli, and lean-io kept quality but saved too little to show.
+- Opus has no waste to remove, and a prompt that mentions cost makes it write fewer tests. Making Opus itself cheaper by instruction isn't supported.
+- What remains is running Opus only on tasks that need it, which needs a miss predictor that hasn't been found (item 8, the stuck detector, the behavioural vote; the risk-routed arm awaits new tasks).
+
 ### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
 
 User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku passes, the tests are too easy"), so harder tasks come before item 8's labels, from sqlglot (MIT; surveyed October 4, above), in stages. Stage 1 builds 8 tasks and screens them with one low concise and one Opus 5.5 trial each; a full batch follows only if the repository produces misses. sqlglot joins the tuning split; the final split and its lock are unchanged.

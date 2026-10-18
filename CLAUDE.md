@@ -86,4 +86,4 @@ Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 fou
 12. Governor: live checks passed (Oct 12); idle plans wait out the cache TTL, a prompt late; compact if it pays (Oct 13).
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
 14. Haiku 5.5: helper roles only; the read/search explorer doesn't pay (Oct 14).
-15. Opus levers (Oct 17): warm starts settled; `opus-5.5-lean-io`, `-batch` await a run.
+15. Opus levers (Oct 17): none pays; standard Opus stays (user decision).
