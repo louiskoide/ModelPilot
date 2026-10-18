@@ -273,10 +273,11 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(appended['text'], data.decode().strip())
         self.assertTrue(all(len(line) < 400 for line in appended['text'].splitlines()))
         self.assertLess(len(data), 1500)  # written once per session and re-read every step: keep it short
-        for arm in ('sonnet-5.5', 'sonnet-5.5-low', 'jev-compat-o55'):
+        # The Opus ModelPilot arms run standard Opus (user decision, October 17): no appended prompt.
+        for arm in ('sonnet-5.5', 'sonnet-5.5-low', 'jev-compat-o55', 'modelpilot-for-opus', 'modelpilot-for-opus-risk'):
             self.assertIsNone(bench.appended_prompt(bench.ARMS[arm]), arm)
         # The ModelPilot arms start where low concise runs (October 6): low effort, the same prompt.
-        for arm in ('modelpilot', 'modelpilot-delegate'):
+        for arm in ('modelpilot', 'modelpilot-delegate', 'modelpilot-for-sonnet'):
             self.assertEqual(bench.appended_prompt(bench.ARMS[arm]), appended, arm)
             self.assertEqual(bench.ARMS[arm]['effort'], bench.ARMS['sonnet-5.5-low-concise']['effort'])
         command = bench.client_command('/c', 'do it', 'claude-sonnet-5-5', 30, 1.0, ['--session-id', 'x'],

@@ -85,8 +85,11 @@ class RiskRouteTests(unittest.TestCase):
         floors = {r: bench.ARMS[r]['policy_overrides']['quality_floor']['baseline'] for r in arm['routes'].values()}
         self.assertEqual(floors, {'modelpilot-for-opus': 'claude-opus-5-5/medium',
                                   'modelpilot-for-sonnet': 'claude-sonnet-5-5/medium'})
+        # Each route keeps its own prompt (none on Opus since October 17); the arm has none of its own.
+        self.assertIsNone(bench.appended_prompt(arm))
+        self.assertIsNone(bench.appended_prompt(bench.ARMS['modelpilot-for-opus']))
+        self.assertEqual(bench.ARMS['modelpilot-for-sonnet']['append_system_prompt'], 'bench/prompts/concise.md')
         for route in arm['routes'].values():
-            self.assertEqual(bench.appended_prompt(bench.ARMS[route]), bench.appended_prompt(arm), route)
             self.assertLessEqual(set(bench.ARMS[route]['served_models']), set(arm['served_models']), route)
         self.assertIn(rp.MODEL, arm['served_models'])
         self.assertIsNone(bench.arm_adapter(ARM, 1, 1))  # no session of its own: each trial runs a route's
@@ -204,6 +207,8 @@ class RiskRouteTests(unittest.TestCase):
         saved = json.loads((out/'toy-task'/ARM/'0'/'trial.json').read_text())
         self.assertEqual((saved['arm'], saved['risk_route']['risk'], saved['risk_route']['routed_to']),
                          (ARM, 80, 'modelpilot-for-opus'))
+        prompts = json.loads((out/'manifest.json').read_text())['appended_prompts']
+        self.assertEqual(set(prompts), {'modelpilot-for-sonnet'})  # the unflagged route's; Opus has none
         manifest = json.loads((out/'manifest.json').read_text())['risk_route'][ARM]
         self.assertEqual((manifest['threshold'], manifest['routes'], manifest['rater']['predictor_sha256']),
                          (55, bench.ARMS[ARM]['routes'], risk_route.PREDICTOR_SHA256))
