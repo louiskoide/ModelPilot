@@ -276,12 +276,13 @@ User request ("let's run A"), after the own sessions showed a 101,340-token tool
   - **The 16-token stop check didn't run.** The run had loaded `keeper_ping` at 22:07:21, 41 seconds before the check was added, and its result has no `stop_check`.
   - **The go holds:** K_all(4h) repriced at this ping nets $71.85, 6.47%.
 
-#### Cache keeper: built (October 18, offline, $0); the live check is next
+#### Cache keeper: built (October 18, offline, $0); live check passed the same day
 
-The user's decisions: an opt-in `own_sessions --keep`, idle sleep held off while keeping, $3 a day of pings at API rates, and the live check on the subscription. `modelpilot/keeper.py`, hooked into `ProxyServer` (`keeper=`) and `side_call` (`kind: keeper_ping`); detail, departures from the draft and the live check's plan: `docs/cache-keeper-design.md`, "As built" and "Next".
+The user's decisions: an opt-in `own_sessions --keep`, idle sleep held off while keeping, $3 a day of pings at API rates, and the live check on the subscription. `modelpilot/keeper.py`, hooked into `ProxyServer` (`keeper=`) and `side_call` (`kind: keeper_ping`); detail, departures from the draft and the live check: `docs/cache-keeper-design.md`, "As built" and "Live check".
 - **$0 checks first** (the client's transcripts, metadata only): of 104 main-loop pauses of 55 minutes or more inside a session file, 1 spans the client's exit (`cost-state`, which ends 237 of 239 files), so resumes happen in an open client and a per-client keeper sees them. On battery the Mac sleeps 1 minute after idling; the client's `caffeinate` lasts only while it works.
 - **Departures from the draft:** pings aren't streamed; they're timed from the held request's start; a ping is never sent more than 58 minutes after the last read (`late`), and one reading under 95% disables keeping (`ping_missed`). Admission is the dry-run governor's, since every October 17 own session has rows of unknown cost (a 429 at start in all five) that would refuse every ping.
 - **Tests:** `tests/test_keeper.py` (26), including the pinned real client pausing in a Bash `sleep` while the keeper pings its last request.
+- **Live check** (the user's run on the subscription, `runs/own-sessions/20261018-130705-59228` in the cache-keeper worktree): passed. The keeper held the client's recap, sent 3 minutes into the pause, whose prefix is the whole conversation. Its two pings, 55 minutes apart, each read 109,545 of 109,641 tokens and wrote nothing. The return 2 h 12 min after the last real request read 109,545 and wrote 34. Net $0.81 at API rates ($0.045 of pings); the one stop was `client_exit`. In the month's transcripts no subagent request came last before a long pause ($0, metadata only).
 
 ### Test adapter (October 14, cloud batch, offline; off by default)
 

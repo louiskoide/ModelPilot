@@ -85,4 +85,4 @@ Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 fou
 13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
 14. Haiku 5.5: helper roles only; the read/search explorer doesn't pay (Oct 14).
 15. Opus levers (Oct 17): none pays; standard Opus stays (user decision).
-16. Cache keeper: built Oct 18, opt-in (`own_sessions --keep`); live check next.
+16. Cache keeper (`own_sessions --keep`): live check passed Oct 18; month awaits approval.

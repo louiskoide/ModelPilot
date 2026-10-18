@@ -1,6 +1,6 @@
-# Cache keeper: design (October 17) and build (October 18, offline; live check next)
+# Cache keeper: design (October 17), build and live check (October 18)
 
-The governor's one remaining job that could save money on the user's own work without touching which model answers. The transcript replay passed its pre-registered test, and the ping check confirmed its price (`docs/governor.md`, "Cache keeper: transcript replay" and "Cache keeper: result"). This is the design that the pre-registration's "go" called for. On October 18 the user decided how to build it, and it is built and tested offline: `modelpilot/keeper.py`, `own_sessions --keep` ("As built", below). It hasn't sent a live ping yet.
+The governor's one remaining job that could save money on the user's own work without touching which model answers. The transcript replay passed its pre-registered test, and the ping check confirmed its price (`docs/governor.md`, "Cache keeper: transcript replay" and "Cache keeper: result"). This is the design that the pre-registration's "go" called for. On October 18 the user decided how to build it, and it is built and tested offline: `modelpilot/keeper.py`, `own_sessions --keep` ("As built", below). Its live check on the user's subscription passed the same day ("Live check", below).
 
 ## Decisions (the user, October 18)
 
@@ -86,11 +86,20 @@ Where it departs from the mechanism above, the build says why.
   - the pinned 2.1.284 client pausing in a Bash `sleep`. The keeper pinged its last request four times, unchanged but for `max_tokens` and `stream`.
 - **The user's own client, 2.1.302** (`runs/keeper-client-check-20261018.py` → `-2.1.302.json`, $0, loopback, a fake key): the same pause with `CLAUDE_CODE_PROMPT_CACHE_TTL=1h`. It sends adaptive thinking (`display: omitted`) and 1h breakpoints. The keeper held its requests and sent 3 pings, all answered, each differing from the held request only in `max_tokens` and `stream`.
 
-**Not handled:** a background subagent whose request is the last before a pause would be held in place of the main loop's, since the wire doesn't mark which is which. A ping reading less than 95% of that prompt would disable keeping. The replay's long pauses ended with the user's own prompt in 86 of 95, so this should be rare.
+**Other requests in a pause** (October 18, $0; the user's transcripts, metadata only, `runs/keeper-subagent-gap-20261018.py` → `.json`). The keeper holds the last answered request that carries tools, and the wire doesn't mark a subagent's or the client's own side request from the main loop's.
+- **Subagents: no gap seen.**
+  - From September 19 to October 18 (236 sessions, 12,232 main-loop requests), none of the 97 main-loop pauses of 55 minutes or more had a subagent request finish after the main loop's last one.
+  - The month had one Agent call, a foreground one (58 requests). A foreground subagent returns to the main loop, which sends the next request.
+  - Background agents would open the gap. A ping of a subagent's request would read that request's own prefix, so it wouldn't trip `ping_missed`. It would show in the meter instead, as pings with no kept return.
+- **Recaps: held in the main loop's place, harmlessly so far.**
+  - The client's away summary is a request sent about 3 minutes into a pause. 232 of the month's 264 recaps came 3–4 minutes after the last main-loop request, and 51 of the 97 long pauses had one.
+  - On the wire (the live check, below) it is the conversation with all 95 tools and 1h breakpoints, on the session's model, plus a 96-token instruction left uncached. So the keeper holds it and times its pings from it.
+  - Its prefix is the whole conversation, so its pings read the main loop's entry. A client that sent it on another model, or at 5m, would end keeping for that pause (`not_keepable`).
+  - The transcripts record each recap but not its usage, so the replay's $1,110 leaves them out. Each reads the whole conversation; the live check's recap cost $0.041.
 
-## Next: the live check (the user's run, on the subscription)
+## Live check (October 18, the user's run, on the subscription): passed
 
-From the project you'd work on, with this checkout on the import path:
+The plan, from the project you'd work on, with a checkout that has the keeper on the import path:
 
 ```sh
 PYTHONPATH=/Users/louiskoide/ModelPilot-cache-keeper python3.12 -P -m modelpilot.own_sessions --keep          # the plan, $0
@@ -101,12 +110,25 @@ Work as usual. Then leave the client open and the lid open for about 2 hours, se
 
 - **What it should show:** two `keeper_ping` rows, about 55 and 110 minutes into the pause. Each is a 200 that reads at least 95% of the held prompt and writes about nothing. The return's first request then reads the whole previous prompt back. `summary.json`'s `keeper` lists one kept return and its avoided rewrite against the pings.
 - **Pass:** all of that. Anything else (a stop or disable other than `client_exit`, or a write) means the keeper stays unused until it's explained.
-- **What it can't show yet:** whether the subscription's login outlives a long pause. The held headers carry the access token the client had at its last request, and a ping after that token expires gets a 401 (`ping_error`).
 - **Cost:** pings use the subscription's headroom, $0 out of pocket. At API rates a ping of a 160,000-token Opus 5.5 conversation is about $0.032 ($0.20 per million read). The rewrite it avoids is about $1.25 ($8 per million for 1h writes, less the read).
+
+**Result** (`runs/own-sessions/20261018-130705-59228` in `/Users/louiskoide/ModelPilot-cache-keeper`; client 2.1.302, Opus 5.5 at xhigh, 13:07–15:25; 30 requests, $1.91 known at API rates, 3 of unknown cost). All times local.
+- **Held: the recap,** sent at 13:11:27, 3 minutes after the last real request ended (13:08:27). It read 107,560 tokens, wrote 1,985 (the last reply) and sent 96 uncached ("Other requests in a pause", above).
+- **Pings at 14:06:36 and 15:01:46,** each 55 minutes after the last read (the recap's, then the first ping's), plus the 30-second poll.
+  - Each was a 200 that read 109,545 of the held 109,641 tokens (99.9%; the recap's 96-token instruction is the rest).
+  - Each wrote nothing, ended `max_tokens` with 1 output token, and cost $0.0223.
+- **The return** at 15:20:43, 2 h 12 min after the last real request, read 109,545 tokens and wrote 34. Without a ping, after pauses of 75 minutes to 2 hours, 0 of 22 next requests read the previous prompt back (the renewal control).
+- **`summary.json`'s `keeper`:** 2 pings, $0.0446; one kept return, $0.8545 of rewrite avoided; net $0.8098 at API rates. The one stop was `client_exit`, at 15:25:21.
+- **The login outlived the pause this far.** The held headers came from the recap at 13:11:27, and the second ping's 200 came 1 h 50 min later. Whether a token lasts to the window's end (up to 4 hours after the held request) is unknown.
+- **Not explained:** the return's first two tries failed in 0.14–0.16 s, with `SSLError` and then `BrokenPipeError` and no HTTP status. The client retried, and its third try is the return above.
+  - The proxy opens a new upstream connection for each request, so this isn't a stale pooled connection.
+  - The October 17 own sessions, with no keeper, had broken pipes and TLS errors too.
+  - The run's 3 unknown-cost rows are these two and the 429 at start (as in all five October 17 sessions). Their cost stays unknown.
+- **Not measured:** the subscription's weighing (unknown 2). The run started before the proxy logged the usage-limit headers.
 
 ## Unknowns that decide the build
 
-Unknown 1 is settled by the October 18 check above: resumes happen in an open client. Unknowns 2 and 3 remain for the live check and the month.
+Unknown 1 is settled by the October 18 check above: resumes happen in an open client. Unknowns 2 and 3 remain for the month; the live check added to 3.
 
 1. **Where resumes happen.**
    - One proxy runs per client process (`own_sessions`) and stops when the client exits, so it can only keep a session whose terminal stays open. The October 17 4.3-hour pause was in an open client.
@@ -126,6 +148,7 @@ Unknown 1 is settled by the October 18 check above: resumes happen in an open cl
    - One of two 1-token pings ended `refusal` with no output; the other ended `max_tokens` with 1 token. Both had the same cache effect.
    - Why it happens is unexplained. The 16-token check didn't run (the renewal run had loaded the code before it was added).
    - The keeper would treat `refusal` as a normal end and log each ping's stop reason. The live check, and the month after it, would show how often it happens.
+   - **The live check's two pings** both ended `max_tokens` with 1 output token, so 1 of the 4 one-token pings so far ended `refusal` (the first, on the API key).
 
 Settled: **renewal.** A ping keeps an entry past its hour (the renewal run, above).
 
@@ -136,7 +159,7 @@ Settled: **renewal.** A ping keeps an entry past its hour (the renewal run, abov
 
 ## Cost to build
 
-As built (October 18): the wire check was replaced by the $0 transcript check above, and the keeper, its tests and the docs took one session, $0. The live check and the month are next.
+As built (October 18): the wire check was replaced by the $0 transcript check above, and the keeper, its tests and the docs took one session, $0. The live check passed the same day ($0.045 of pings at API rates, net $0.81). The month is next, and turning the keeper on for it is the user's decision.
 
 | Step | Effort | Spend |
 | --- | --- | --- |
