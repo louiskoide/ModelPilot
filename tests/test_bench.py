@@ -128,6 +128,16 @@ class ScheduleTests(unittest.TestCase):
         fixed = {arm['model'] for arm in bench.ARMS.values() if arm['kind'] == 'fixed'}
         self.assertTrue(set(MODELS) <= fixed)
 
+    def test_opus_lever_arms_are_opus_medium_with_one_appended_prompt(self):
+        for arm, prompt in (('opus-5.5-lean-io', 'lean-io.md'), ('opus-5.5-batch', 'batch-calls.md')):
+            self.assertEqual(bench.ARMS[arm], dict(bench.ARMS['opus-5.5'], append_system_prompt=f'bench/prompts/{prompt}'))
+            self.assertTrue(bench.appended_prompt(bench.ARMS[arm])['text'])
+        lean = (bench.ROOT/'bench/prompts/lean-io.md').read_text()
+        concise = (bench.ROOT/'bench/prompts/concise.md').read_text()
+        self.assertIn('Grep before reading', lean)
+        self.assertNotIn('smallest change', lean)  # concise's fix-scope bullets stay out
+        self.assertIn('smallest change', concise)
+
     def test_each_lifetime_arm_is_its_base_arm_with_the_lifetime_set(self):
         for base in ('sonnet-5.5-low-concise', 'opus-5.5'):
             for ttl in ('5m', '1h'):
@@ -263,10 +273,11 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(appended['text'], data.decode().strip())
         self.assertTrue(all(len(line) < 400 for line in appended['text'].splitlines()))
         self.assertLess(len(data), 1500)  # written once per session and re-read every step: keep it short
-        for arm in ('sonnet-5.5', 'sonnet-5.5-low', 'jev-compat-o55'):
+        # The Opus ModelPilot arms run standard Opus (user decision, October 17): no appended prompt.
+        for arm in ('sonnet-5.5', 'sonnet-5.5-low', 'jev-compat-o55', 'modelpilot-for-opus', 'modelpilot-for-opus-risk'):
             self.assertIsNone(bench.appended_prompt(bench.ARMS[arm]), arm)
         # The ModelPilot arms start where low concise runs (October 6): low effort, the same prompt.
-        for arm in ('modelpilot', 'modelpilot-delegate'):
+        for arm in ('modelpilot', 'modelpilot-delegate', 'modelpilot-for-sonnet'):
             self.assertEqual(bench.appended_prompt(bench.ARMS[arm]), appended, arm)
             self.assertEqual(bench.ARMS[arm]['effort'], bench.ARMS['sonnet-5.5-low-concise']['effort'])
         command = bench.client_command('/c', 'do it', 'claude-sonnet-5-5', 30, 1.0, ['--session-id', 'x'],
@@ -855,6 +866,21 @@ class OfflineTrialTests(unittest.TestCase):
         default = self.trial('default-prompt', self.FIX, arm='sonnet-5.5')
         self.assertNotIn('prompt_check', default)
         self.assertIsNone(default['append_system_prompt'])
+
+    def test_the_opus_lever_arms_send_their_prompt_on_a_subscription_at_the_default_effort(self):
+        token = 'sk-ant-oat01-offline-fixture-not-a-token-1234'
+        self.upstream.keep_bodies = True
+        for arm in ('opus-5.5-lean-io', 'opus-5.5-batch'):
+            text = (bench.ROOT/bench.ARMS[arm]['append_system_prompt']).read_text().strip()
+            before = len(self.upstream.bodies)
+            record = self.trial(arm, self.FIX, arm=arm, auth='subscription', oauth_token=token)
+            self.assertTrue(record['passed'], record['grade'])
+            self.assertEqual((record['model'], record['effort']), ('claude-opus-5-5', None))
+            self.assertEqual(record['prompt_check'], {'requested_sha256': record['append_system_prompt']['sha256'],
+                                                      'present': 4, 'missing': 0, 'applied': True}, arm)
+            main = [b for b in (json.loads(x) for x in self.upstream.bodies[before:]) if b.get('tools')]
+            self.assertTrue(main and all(b['model'] == 'claude-opus-5-5' and b['output_config']['effort'] == 'medium' and
+                                         b['system'][-1]['text'].rstrip().endswith(text) for b in main), arm)
 
     def test_a_low_concise_arm_sends_low_effort_and_its_prompt_and_checks_both(self):
         token = 'sk-ant-oat01-offline-fixture-not-a-token-1234'

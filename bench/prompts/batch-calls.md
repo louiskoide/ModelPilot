@@ -1,0 +1,1 @@
+Every response you make re-reads the whole conversation, so fewer responses cost less. When you know of several reads, searches or commands that don't depend on each other's results, request them together as parallel tool calls in one response instead of one per response. Keep a call separate when you need an earlier result to decide it.

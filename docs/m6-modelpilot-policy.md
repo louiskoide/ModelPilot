@@ -165,14 +165,14 @@ User decision, October 8. A missed bug can cost anything from a quick re-prompt 
 | Arm | Baseline | Start | Allowed on today's evidence |
 | --- | --- | --- | --- |
 | `modelpilot-for-sonnet` | Sonnet 5.5 medium (`sonnet-5.5`) | low concise | Every setting, so it decides exactly as `modelpilot` does (a test checks this over a grid of decision points) |
-| `modelpilot-for-opus` | Opus 5.5 medium (`opus-5.5`) | Opus 5.5 medium with the concise prompt | Opus 5.5 at medium or above |
+| `modelpilot-for-opus` | Opus 5.5 medium (`opus-5.5`) | Opus 5.5 medium, no appended prompt (the concise prompt until October 17) | Opus 5.5 at medium or above |
 
 Replayed over `bench-20261006-134508` ($0), neither arm changes any of the 36 recorded decisions. `modelpilot-for-opus` stays at Opus 5.5 medium at every point.
 
 **What it means now:**
 - **A Sonnet 5.5 medium user:** the saving is low concise's, about 20% at the same strict passes on the tuning tasks.
-- **An Opus 5.5 user:** ModelPilot runs Opus 5.5 medium. The saving can come only from three places: the concise prompt, the cache levers, or per-task evidence that some tasks are safe on Sonnet (plan items 8 and 10).
-- **The concise prompt on Opus:** its effect on Opus 5.5's strict passes is unmeasured. The floor assumes it changes none, as measured on Sonnet 5.5 medium.
+- **An Opus 5.5 user:** ModelPilot runs Opus 5.5 medium. The saving can come only from the cache levers or per-task evidence that some tasks are safe on Sonnet (plan items 8 and 10).
+- **No prompt on Opus (October 17, user decision: standard Opus).** The arm carried the concise prompt until then, its effect on Opus unmeasured. The Opus prompt levers that were measured (lean-io, batch-calls; `docs/m6-benchmark-plan.md`, "Opus levers") showed no saving at equal quality, so it now runs exactly its baseline's setting, the one the floor's Opus outcomes were measured on. It had never run live. The risk-routed arm's flagged route is this arm, so it lost the prompt too; its unflagged route keeps it.
 
 **Not built yet:**
 - **Blast radius at the first edit.** `modelpilot/exposure.py` measures public API, callers and the tests that reach a change, but only after the fact. It has to run inside the governor when the agent first edits, starting with the static part. On a wide-reach change it would require stronger evidence before the work stays on a cheaper setting.

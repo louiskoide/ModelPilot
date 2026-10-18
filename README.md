@@ -35,7 +35,7 @@ Every result, failures included, is in [docs/evidence.md](docs/evidence.md) with
 | M6 benchmark | Fixed, Jev and ModelPilot arms run live on 29 tuning tasks | The locked final split |
 | Governor | Dry-run, wired into the proxy and hooks; four live checks | Active mode |
 
-The ModelPilot arm starts at Sonnet 5.5, low effort, with a concise prompt. Haiku 5.5 is not one of its session models, it has no advisor, and delegation is off. Its quality floor is no worse than the user's own model (arms `modelpilot-for-sonnet` and `modelpilot-for-opus`). Details: [docs/m6-modelpilot-policy.md](docs/m6-modelpilot-policy.md).
+The ModelPilot arm starts at Sonnet 5.5, low effort, with a concise prompt. Haiku 5.5 is not one of its session models, it has no advisor, and delegation is off. Its quality floor is no worse than the user's own model (arms `modelpilot-for-sonnet` and `modelpilot-for-opus`; the Opus arm runs standard Opus 5.5 medium, no prompt). Details: [docs/m6-modelpilot-policy.md](docs/m6-modelpilot-policy.md).
 
 ## Run it
 
