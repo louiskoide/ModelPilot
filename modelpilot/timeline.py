@@ -121,7 +121,7 @@ def governor_events(db):
 
 def billed(row):
     """A request someone is billed for: count_tokens, the model catalog and refusals aren't."""
-    return row.get('kind') in ('messages', 'side_call') and row.get('status') != 'refused'
+    return row.get('kind') in ('messages', 'side_call', 'keeper_ping') and row.get('status') != 'refused'
 
 
 def total(values):

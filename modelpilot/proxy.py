@@ -10,6 +10,10 @@ notes), each admitted, settled and logged as kind side_call.
 A benchmark arm may also name a compaction model (compaction_model, fixed arms only): the
 client's compaction request goes to that model instead, so arms can compare who writes the
 summary. Nothing else is changed.
+
+An own session started with `own_sessions --keep` has a cache keeper (keeper.Keeper, user-approved
+October 18): while the client is idle it re-sends the client's last main-loop request with
+max_tokens 1 to keep its 1h cache entry warm, through side_call, logged as kind keeper_ping.
 """
 import argparse
 import hashlib
@@ -26,6 +30,7 @@ from urllib.parse import urlsplit
 import uuid
 from .cache_probe import priced_usage, prompt_tokens, tier, tls_context
 from .governor import Governor
+from .keeper import Keeper
 
 HOP = {'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
        'te', 'trailer', 'transfer-encoding', 'upgrade', 'host', 'content-length'}
@@ -387,10 +392,11 @@ class ProxyServer(ThreadingHTTPServer):
     # Client and upstream socket operations already have 120-second timeouts.
     daemon_threads = False
     def __init__(self, address, upstream, log_path, rates, governor=None, policy=None, catalog=None, system_marker=None,
-                 compaction_model=None):
+                 compaction_model=None, keeper=None):
         """catalog: model ids a model-constrained arm may discover; the model catalog is filtered to them.
         system_marker: text an arm adds to the system prompt; each Messages row records whether it was there.
-        compaction_model: the model the client's compaction requests go to instead of its own (no policy)."""
+        compaction_model: the model the client's compaction requests go to instead of its own (no policy).
+        keeper: keeper.Keeper's settings ({} for its defaults) to keep idle cache entries warm; own sessions only."""
         if system_marker is not None and (not isinstance(system_marker, str) or not system_marker.strip()):
             raise ValueError('system_marker must be non-empty text')
         self.system_marker = system_marker
@@ -423,6 +429,7 @@ class ProxyServer(ThreadingHTTPServer):
                     gov.state.get(self.governor['task'])  # raises for an unknown task
             finally:
                 gov.close()
+        self.keeper = None if keeper is None else Keeper(self, **keeper)
         self.log_lock = threading.Lock()
         # Accepted connections not yet finished, so a proxy that outlives one client session
         # can tell when every request of that session has been logged.
@@ -437,6 +444,8 @@ class ProxyServer(ThreadingHTTPServer):
         except Exception:
             self.log.close()
             raise
+        if self.keeper is not None:
+            self.keeper.start()
 
     def open_governor(self):
         g = self.governor
@@ -446,10 +455,10 @@ class ProxyServer(ThreadingHTTPServer):
     def active(self):
         return bool(self.governor) and getattr(self.policy, 'active', False)
 
-    def admit(self, row, raw, request):
+    def admit(self, row, raw, request, id_prefix='mp-'):
         """Reserve under a fresh shared ID. Dry-run: the decision never blocks forwarding.
         Active: enforced on measured spend (the other arms' stop rule); a refusal reserves nothing."""
-        request_id = row['governor_request_id'] = 'mp-' + uuid.uuid4().hex
+        request_id = row['governor_request_id'] = id_prefix + uuid.uuid4().hex
         gov = self.open_governor()
         try:
             task = self.governor.get('task')
@@ -497,21 +506,23 @@ class ProxyServer(ThreadingHTTPServer):
             return http.client.HTTPSConnection(origin.hostname, context=tls_context(), timeout=timeout)
         return http.client.HTTPConnection(origin.hostname, origin.port, timeout=timeout)
 
-    def side_call(self, headers, purpose, body, timeout):
-        """One request the active policy sends itself (a consult or a handoff note), never streamed, with the client's
-        own headers (its credentials and betas). Admitted on measured spend like the client's requests, settled with
-        its measured cost and logged as kind side_call, so the client-proxy token check sees only the client's rows.
+    def side_call(self, headers, purpose, body, timeout, kind='side_call', mode='active', id_prefix='mp-'):
+        """One request the proxy sends itself, never streamed, with the client's own headers (its credentials and
+        betas): the active policy's consults and handoff notes (kind side_call), or the cache keeper's pings (kind
+        keeper_ping, mode keeper, IDs prefixed mp-keep-). Admitted like the client's requests (on measured spend in the
+        active arm, journaled in dry-run), settled with its measured cost and logged under its own kind, so the
+        client-proxy token check sees only the client's rows.
         Returns {'status', 'http_status', 'message' (the parsed reply, or None), 'cost_usd', 'request_id'}."""
         raw = json.dumps(body).encode()
         tools = body.get('tools')
-        row = {'started_unix': time.time(), 'kind': 'side_call', 'purpose': purpose, 'path': '/v1/messages',
-               'mode': 'active', 'applied': True, 'tool_count': len(tools) if isinstance(tools, list) else 0,
+        row = {'started_unix': time.time(), 'kind': kind, 'purpose': purpose, 'path': '/v1/messages',
+               'mode': mode, 'applied': True, 'tool_count': len(tools) if isinstance(tools, list) else 0,
                'request_sha256': hashlib.sha256(raw).hexdigest(),
                'model': body.get('model') if body.get('model') in self.rates else 'unknown', 'effort': request_effort(body),
                'stream': False, 'http_status': None, 'status': 'transport_error', 'cost_usd': None}
         out = {'status': 'refused', 'http_status': None, 'message': None, 'cost_usd': None}
         try:
-            self.admit(row, raw, body)
+            self.admit(row, raw, body, id_prefix)
         except Exception as e:
             row.update(governor_status='untracked', governor_error=type(e).__name__)
         out['request_id'] = row.get('governor_request_id')
@@ -612,6 +623,8 @@ class ProxyServer(ThreadingHTTPServer):
 
     def server_close(self):
         super().server_close()
+        if self.keeper is not None:
+            self.keeper.close()  # after the handlers: a ping in flight is logged before the log closes
         self.log.close()
 
 
@@ -834,6 +847,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         start = time.monotonic()
         sent_headers = False
         observer = UsageObserver(bool(request.get('stream')))
+        keeper = self.server.keeper if not counting else None
+        if keeper is not None:
+            keeper.request_started()  # no ping while a request is in flight
         try:
             send_request(conn, 'POST', self.path, headers, raw)
             response = conn.getresponse()
@@ -899,7 +915,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     self.server.settle(row)
                 except Exception as e:
                     row.update(governor_status='settle_failed', governor_error=type(e).__name__)
-            self.server.record(row)
+            try:
+                self.server.record(row)
+            finally:
+                if keeper is not None:
+                    keeper.request_finished(request, headers, row)  # always, or its in-flight count never falls
 
 
 def main():
