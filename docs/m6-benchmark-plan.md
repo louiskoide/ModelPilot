@@ -1289,7 +1289,7 @@ The cost difference agrees with `bench_report` on each run: −$0.008 on the fir
 - Test lines still fall 14%, which bears on how Opus checks its work.
 - This is a thin lead. `opus-5.5-lean-io` stays an arm; `modelpilot-for-opus` doesn't change.
 - **User decision (October 17): continue with standard Opus.** No Opus prompt lever is adopted, and the dollar run isn't funded.
-- **Then (user request, October 17): the concise prompt is off both Opus ModelPilot arms.** `modelpilot-for-opus` and the risk-routed arm's flagged route now run Opus 5.5 medium with no appended prompt, `opus-5.5`'s exact setting. Neither had run live. In 4b's pairing above, `modelpilot-for-opus` against `opus-5.5` no longer measures the concise prompt on Opus; on today's evidence it measures only the proxy's overhead.
+- **Then (user request, October 17): the concise prompt is off both Opus ModelPilot arms.** `modelpilot-for-opus` and the risk-routed arm's flagged route now run Opus 5.5 medium with no appended prompt, `opus-5.5`'s exact setting. Neither had run live. In 4b, `modelpilot-for-opus` against `opus-5.5` no longer measures the concise prompt on Opus; on today's evidence it measures only the proxy's overhead (below, "4b: amendments before the run", item 6).
 
 **Where the Opus question stands.**
 - Of the three levers that leave Opus's reasoning and fix alone, warm starts are already mostly realized, batch saved money only by doing less and missed tomli, and lean-io kept quality but saved too little to show.
@@ -1468,6 +1468,11 @@ The user asked what could run without interfering with the governor work in anot
      - every argument check refused;
      - a paid step refused while `bench_report.py` had uncommitted changes, with nothing sent;
      - the plan-only check, run from that checkout at `main` (`607df61`, with this branch's `bench_report` change not yet committed), graded all 24 references and prepared 144 trials. Its text is the same as October 12's (`runs/4b-final-plan-20261016.txt` there).
+
+6. **`modelpilot-for-opus` runs without the concise prompt** (user request, October 17, after the decision to continue with standard Opus; above, "Opus levers: lean-io read on all 29 tasks"). No 4b trial exists, so this too comes before the run.
+   - **What it runs now:** Opus 5.5 medium with no appended prompt, `opus-5.5`'s exact setting. Its pairing with `opus-5.5` now measures the proxy and the policy, which on today's evidence never moves the arm, not the prompt.
+   - **Unchanged:** its comparisons and fail conditions, and n = 1.
+   - **The trial-count stand-in no longer applies.** Its floor pairing's $0.023 half-width (item 3) came from the concise prompt's effect on Sonnet, scaled to Opus. Without the prompt, the expected difference is the overhead alone.
 
 **Still before the run,** in the order given to the user on October 16:
 - the governor work merged and its scored rules settled;
