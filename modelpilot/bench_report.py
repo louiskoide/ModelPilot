@@ -13,13 +13,14 @@ on a Claude subscription instead of an API key are priced as an API key would ha
 billed for the same tokens (api_key_equivalent); their as-sent price is kept alongside.
 
     python3 -m modelpilot.bench_report runs/bench-<ts> [runs/bench-<ts2> ...] [--out FILE] [--price-at DATE]
-                                      [--router-rates FILE]
+                                      [--router-rates FILE] [--pool]
 
 rebuilds the summary from a run's trial records (for example after a crash). Given several
-runs, it pairs their arms by task; an arm in more than one run is labeled arm@<run>. Evidence
-is never overwritten. Each request is priced at the prices of its day; --price-at prices every
-request at one day's instead, so runs from either side of a price change (Sonnet 5.5's cache
-reads, October 7) compare.
+runs, it pairs their arms by task; an arm in more than one run is labeled arm@<run>. With --pool
+an arm keeps its name and its trials are pooled across the runs: a run and the runs that topped
+up its lost trials (4b's top-up rule, October 16). Evidence is never overwritten. Each request
+is priced at the prices of its day; --price-at prices every request at one day's instead, so
+runs from either side of a price change (Sonnet 5.5's cache reads, October 7) compare.
 
 A trial passes on the hidden grader and, where its task has an edge suite, every edge test (user
 decision, October 4). Runs graded before then carry the hidden verdict only; their edge results
@@ -766,19 +767,20 @@ def load_run(run_dir, rates, price_at=None):
     return manifest, records
 
 
-def load_runs(run_dirs, rates, price_at=None):
+def load_runs(run_dirs, rates, price_at=None, pool=False):
     """Several runs' trial records as one set of arms, paired by task.
 
     An arm that appears in more than one run is labeled arm@<run directory name>, so the same arm
-    measured before and after a change stays apart. The runs ran at different times, possibly on
-    different code, clients and auth; each run's manifest facts are listed with the arms it gave.
-    The seed is the first run's."""
+    measured before and after a change stays apart; with pool it keeps its name, and its trials are
+    pooled across the runs (a run and its top-ups, nothing changed in between). The runs ran at
+    different times, possibly on different code, clients and auth; each run's manifest facts are
+    listed with the arms it gave. The seed is the first run's."""
     loaded = [(Path(d),) + load_run(d, rates, price_at) for d in run_dirs]
     seen = Counter(a for _, manifest, _ in loaded for a in manifest['arms'])
     arms, records, runs = [], [], []
     for path, manifest, run_records in loaded:
-        label = {a: f'{a}@{path.name}' if seen[a] > 1 else a for a in manifest['arms']}
-        arms += label.values()
+        label = {a: f'{a}@{path.name}' if seen[a] > 1 and not pool else a for a in manifest['arms']}
+        arms += [a for a in label.values() if a not in arms]
         records += [dict(r, arm=label[r['arm']]) for r in run_records if r['arm'] in label]
         runs.append({'run': str(path), 'arms': list(label.values()), 'code': manifest.get('code'),
                      'client_version': manifest.get('client_version'), 'auth': manifest.get('auth'),
@@ -786,11 +788,12 @@ def load_runs(run_dirs, rates, price_at=None):
     return loaded[0][1].get('seed', 0), arms, records, runs
 
 
-def summary_of(run_dirs, rates, resamples=10000, price_at=None, router_rate=None):
+def summary_of(run_dirs, rates, resamples=10000, price_at=None, router_rate=None, pool=False):
     """price_at: an ISO date or timestamp (naive means UTC) to price every request at that day's prices. router_rate:
-    TypeSafe's price for Jev's decisions (load_router_rate); without it router cost stays unpriced."""
+    TypeSafe's price for Jev's decisions (load_router_rate); without it router cost stays unpriced. pool: see
+    load_runs."""
     when = None if price_at is None else _timestamp(price_at)
-    seed, arms, records, runs = load_runs(run_dirs, rates, when)
+    seed, arms, records, runs = load_runs(run_dirs, rates, when, pool)
     summary = summarize(records, arms, seed=seed, resamples=resamples, router_rate=router_rate)
     summary.update(trials=len(records), priced_at=price_at or 'as recorded: each request at the prices of its day', rebuilt_from=str(run_dirs[0]) if len(run_dirs) == 1 else [r['run'] for r in runs],
                    pass_rule='hidden grader and, where the task has one, its whole edge suite (October 4); '
@@ -799,6 +802,12 @@ def summary_of(run_dirs, rates, resamples=10000, price_at=None, router_rate=None
     if len(run_dirs) > 1:
         summary.update(runs=runs, cross_run='Arms from different runs are paired by task; they ran at different '
                                             'times and possibly on different code, clients and auth (see runs).')
+    if pool:
+        # A top-up runs only what is missing, so a task and arm with two counted trials is a mistake worth seeing.
+        counted = Counter((r['task'], r['arm']) for r in records if r.get('complete', True) and not ineligible_reason(r))
+        runs_of = Counter(a for r in runs for a in r['arms'])
+        summary['pooled'] = {'arms_pooled_across_runs': sorted(a for a, n in runs_of.items() if n > 1),
+                             'task_arms_with_several_counted_trials': sorted([t, a] for (t, a), n in counted.items() if n > 1)}
     return summary
 
 
@@ -807,10 +816,10 @@ def _timestamp(text):
     return (moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)).timestamp()
 
 
-def write_summary(run_dirs, rates, out, resamples=10000, price_at=None, router_rate=None):
+def write_summary(run_dirs, rates, out, resamples=10000, price_at=None, router_rate=None, pool=False):
     """Rebuild one run's summary, or pair several runs' arms (see load_runs). Never overwrites."""
     run_dirs = [run_dirs] if isinstance(run_dirs, (str, Path)) else list(run_dirs)
-    summary = summary_of(run_dirs, rates, resamples, price_at, router_rate)
+    summary = summary_of(run_dirs, rates, resamples, price_at, router_rate, pool)
     with Path(out).open('x') as f:  # never overwrite evidence
         json.dump(summary, f, indent=2)
         f.write('\n')
@@ -828,13 +837,15 @@ def main():
     parser.add_argument('--router-rates', type=Path,
                         help='JSON with TypeSafe\'s price (input_usd_per_mtok, output_usd_per_mtok, per_decision_usd, '
                              'source, as_of) to price Jev\'s routing decisions; default: router cost unpriced')
+    parser.add_argument('--pool', action='store_true',
+                        help='Pool each arm\'s trials across the runs (a run and its top-ups) instead of labeling them per run')
     args = parser.parse_args()
     router_rate = load_router_rate(args.router_rates) if args.router_rates else None
     if args.out:
-        write_summary(args.runs, rates(), args.out, args.resamples, args.price_at, router_rate)
+        write_summary(args.runs, rates(), args.out, args.resamples, args.price_at, router_rate, args.pool)
         print('summary:', args.out)
         return
-    print(json.dumps(summary_of(args.runs, rates(), args.resamples, args.price_at, router_rate), indent=2))
+    print(json.dumps(summary_of(args.runs, rates(), args.resamples, args.price_at, router_rate, args.pool), indent=2))
 
 
 if __name__ == '__main__':
