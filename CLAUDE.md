@@ -80,7 +80,7 @@ Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 fou
 7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
 8. Fail (Oct 11); post-run checks don't pay (Oct 14, 16); pre-edit note fails (Oct 18). Closed with all routing work.
 9. Caveman: parked (user decision).
-11. 4b: n=1, vs-Opus pair (Oct 16); no Jev, final edge suites (Oct 18); freeze, smoke, run.
+11. 4b: n=1, vs-Opus pair (Oct 16); no Jev, final edge suites, frozen (Oct 18); smoke, run.
 12. Governor: live checks passed (Oct 12); idle plans wait out the cache TTL, a prompt late; compact if it pays (Oct 13).
 13. Jev: out of 4b (Oct 18); tuning dollars stay lower bounds.
 14. Haiku 5.5: helper roles only; the read/search explorer doesn't pay (Oct 14).

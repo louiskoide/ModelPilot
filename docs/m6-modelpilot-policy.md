@@ -482,3 +482,4 @@ That result gets reported as it is. Every rule above can be switched off individ
 - Adaptive reasoning is given up (user decision): no further routing work; the arms run as registered.
 - Jev is out of 4b (user decision), so the second fail condition above, against compat Jev, is withdrawn. Jev's tuning-split results are cited instead, as lower bounds.
 - Final trials are graded on their tasks' edge suites as well as the hidden tests (user decision; `bench/edge_tests/README.md`, rule 3).
+- Frozen for 4b as it stands (user decision): `configs/modelpilot-policy.json`, SHA-256 `0c9840d202ac90a3f6a39251a7c6e9305f9635b4a651e8a514111bca2c773273`, with the harness fixed by its Git tree IDs (`docs/m6-benchmark-plan.md`, "4b: amendments of October 18").

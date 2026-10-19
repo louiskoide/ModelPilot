@@ -1612,7 +1612,7 @@ Three user decisions on October 18, all before any final trial exists. Branch `c
    - **The record behind it:** no turn-start rule finds the misses (item 8, October 11); post-run checks don't pay (October 14, 16); the forced pre-edit Opus note fails every bar (option C, October 18); Jev's advice gets a fitted weight of 0.
    - **What it ends:** new routing work. That includes the risk-routed arm (`modelpilot-for-opus-risk`, waiting on new tasks since October 15) and any per-task predictor. The October 11 worry that a later policy change couldn't be judged on the final split no longer holds back 4b.
    - **What 4b then measures:** the ModelPilot arms run as registered. On the tuning record they never left their start (`modelpilot-for-sonnet` low concise, `modelpilot-for-opus` Opus 5.5 medium), so 4b compares fixed settings on held-out tasks, plus the proxy's overhead.
-   - **The policy freeze** (proposed to the user October 18, to be confirmed with the run's go): `configs/modelpilot-policy.json` as it stands at the 4b commit, its version and hash recorded. The rules that could still move an arm (stuck escalation, mid-task steps) stay on as they ran. On the record they never moved one: the stuck detector fires in none of the 146 ModelPilot-arm trials (October 16), and `modelpilot` stayed on low concise through all 29 tuning tasks (`bench-20261006-134508`). Turning them off would send an untested configuration into the one final run.
+   - **The policy is frozen** (user decision, October 18: "okay freeze"), as it stands: `configs/modelpilot-policy.json`, unchanged since `8a748cd` (October 17), SHA-256 `0c9840d202ac90a3f6a39251a7c6e9305f9635b4a651e8a514111bca2c773273`. The file has no version field, so the frozen harness is fixed by its Git tree IDs at this branch: `modelpilot/` `3dace2a8d6c80c660760de919d65a40863808b27`, `configs/` `7d4ef3da8b064da3acf708f54420f425b9315d24`, `bench/` `d3b269369c0d7a864ef7093bce8494aa3eec39c0`. A merge that changes nothing else under them keeps them. The run script refuses any step when HEAD's differ. Nothing was added for the freeze. The rules that could still move an arm (stuck escalation, mid-task steps, the stuck detector v3's edit-oscillation rule) stay on as they ran. On the record they never moved one: the stuck detector fires in none of the 146 ModelPilot-arm trials (October 16), and `modelpilot` stayed on low concise through all 29 tuning tasks (`bench-20261006-134508`). Turning them off would send an untested configuration into the one final run.
 2. **Jev is out of 4b.** The October 8 fail condition "it loses to compat Jev on the same measure" is withdrawn.
    - **Why:** the user's question was what Jev adds once ModelPilot doesn't route. Jev is the outside router the project set out to beat. It served Sonnet 5.5 on all 16 tasks of 4a (`bench-20260929-000001`), and its answers don't predict the misses. The `sonnet-5.5` arm already runs what it would serve, without the router's cost.
    - **What the write-up cites instead:** Jev's recorded results, labelled as tuning-split figures and provider-only lower bounds: 4a's $0.087 a task against Opus 5.5's $0.170; in the October 11 cost table, at least $0.081 a task over 15 tuning tasks (low concise: $0.072 over 29).
@@ -1633,11 +1633,16 @@ Three user decisions on October 18, all before any final trial exists. Branch `c
 
 **Still before the run** (replaces the October 16 list):
 - this branch merged;
-- the policy frozen at that commit, with its version and hash recorded (the user's confirmation);
-- `../ModelPilot-final-split` moved to that commit, and the plan-only check run again there (`runs/4b-final-20261016.sh plan`, with `nojev`'s arms);
-- `doctor`, with the bench venv's site-packages read-only;
-- the smoke trial, about $0.25;
-- then `runs/4b-final-20261016.sh nojev`, started in a fresh subscription usage window.
+- `../ModelPilot-final-split` moved to the merge commit;
+- `runs/4b-final-20261018.sh go` there (not committed, beside the October 16 copy, which is kept unchanged). It runs the steps in order and stops at the first that fails:
+  - the freeze check (the three tree IDs, nothing uncommitted under them);
+  - `doctor` (bench venv site-packages read-only among its checks);
+  - the plan-only check;
+  - the API key and the subscription token, at hidden prompts;
+  - the smoke trial, about $0.25, which must come back complete, eligible and fully priced;
+  - a yes from the user;
+  - then 4b, started in a fresh subscription usage window.
+- The same script's `check` step ran at this branch ($0): freeze check, `doctor` and the plan-only check all passed.
 
 ### Haiku 5.5 (October 8; plan set by user decisions; live runs need the user's go)
 
