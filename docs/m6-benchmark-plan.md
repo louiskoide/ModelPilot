@@ -1296,6 +1296,125 @@ The cost difference agrees with `bench_report` on each run: −$0.008 on the fir
 - Opus has no waste to remove, and a prompt that mentions cost makes it write fewer tests. Making Opus itself cheaper by instruction isn't supported.
 - What remains is running Opus only on tasks that need it, which needs a miss predictor that hasn't been found (item 8, the stuck detector, the behavioural vote; the risk-routed arm awaits new tasks).
 
+### Forced pre-edit Opus note: the October 18 review and its two $0 checks
+
+The user gave two candidates for the governor (pasted text, not in the repository) and asked for a review, then for its two $0 checks. (1) Before the cheap agent's first edit, the host forces one Opus 5.5 call that reads the transcript and returns a short note: the plan, the implied requirements and the conventions to match. It runs on every task, a fixed tax rather than a detector, and the agent doesn't choose when. (2) The October 16 counterpart check (above, "Catching misses").
+
+**Review, against the record:**
+- "With the repo read, Opus solves tomli 34 of 36 dev trials": 36 is Opus's whole dev split, and both its misses are tomli. Opus on tomli is 2/4 in dev and 0.5 on tuning.
+- "Item 5 caught tomli 0/17": that was one Opus suite, scored against 17 saved misses.
+- "The forced review failed because it saw a diff": its 27 trials held one miss. Over both review runs, Opus named the tomli bug in 1 of 4 reviews.
+- "17 of 29 low-concise misses are tomli, so tomli decides": the 29 are saved misses from all arms. Per task against Opus (`opus-vs-modelpilot-20261006.json`) the gaps are parse 1.0, tomli 0.5 and ISMAGS 0.2. Item 8's four tasks where low concise misses and Opus passes count too.
+
+**A: the first change on recorded low-concise trials** (`runs/first-edit-check-20261018.py` → `.json`, code `901def2`; criteria in its docstring, fixed before it ran). All 58 counted dev trials of `sonnet-5.5-low-concise`, 5 misses. **Passes both criteria.**
+- **Trigger.** All 58 can be held before their first change, but only 15 through Edit/Write. 43 (74%) first change the code with a `python3 - <<'E'` script in Bash that reads a file, replaces text and writes it back. A PreToolUse matcher on Edit/Write alone would miss three trials in four. The Bash pattern caught all 43 (each command read), but it fits one idiom. A host check of the workspace after each tool call (git status or file hashes) is the sturdier trigger; it fires just after the first write.
+- **Timing.** The hold comes at the third request (median) of six, never at the first.
+- **What the note would see.** Before the hold the agent has made a median of one Read/Grep/Glob and one Bash call, about 2,200 tokens of tool output. tomli's two misses had about 1,000 and no Read.
+- **Cost.** Median $0.076, 90th percentile $0.098, at most $0.119 (ISMAGS). That is the whole context at Opus 5.5's uncached input price plus the forced-review consults' median 1,702 output tokens: an upper estimate. With Sonnet acting on the note (the forced review added about $0.02 beyond its consult), the arm would cost about $0.17 against $0.248 for Opus 5.5. That is about $0.08 a task at best, for an Opus user only.
+
+**B: the October 16 transcript check, dev split** (`runs/counterpart-transcript-check-20261018.py` → `.json`; criterion in its docstring, fixed before it ran). Every counted dev trial of the three tasks, any arm: 70 trials, 37 misses. **Fail.**
+
+| Task | Passes using the counterpart | Misses using it |
+| --- | --- | --- |
+| parse | 5/12 | 0/10 |
+| tomli | 3/3 | 18/21 |
+| ISMAGS | 18/18 | 6/6 |
+
+- **Each task's instruction names its counterpart:** tomli "the attributes json.JSONDecodeError has", ISMAGS "exactly those that GraphMatcher(...).subgraph_monomorphisms_iter() yields", parse "format(1000000, ',d') == '1,000,000'". The misses had it and used it.
+- **What separates is one behaviour checked.** On tomli, building the error with keywords: 2 of 3 passes, 0 of 21 misses. On parse, a round trip through `format`: 5 of 12 passes (none of Sonnet's 4) and 0 of 10 misses. All 6 ISMAGS misses compared with GraphMatcher and still fail the hidden multigraph-pattern-against-simple-graph tests. Choosing that behaviour is knowing the implied requirement, so the check comes down to item 5's problem.
+- **The holdout isn't read.** Item 8's four tasks are the miss detector's holdout (seed 8), read once after a committed pre-registration and on the user's call. The review offered them as a $0 extension; that was a mistake, caught before any was read. With dev negative, the counterpart check gets no holdout pre-registration.
+
+**What follows.** The counterpart check is dropped. The forced note's trigger and cost hold up; its content is open, since it helps only if Opus names that one behaviour. The evidence so far is item 5's suite catching all 8 parse misses with a round trip, and on tomli Opus naming the bug in 1 of 4 reviews and solving it in 2 of 4. Option C answers it: each recorded Sonnet transcript replayed up to its first change, one Opus request each, scored at $0 (the user will run it, October 18).
+
+### Pre-edit note probe (option C): pre-registration (October 18, before any request)
+
+**The question.** Given what a Sonnet agent had seen before its first change, does Opus 5.5 name, as a check that runs, the behaviour that agent's fix then missed? `modelpilot/pre_edit_note.py`, SHA-256 `80bc19ad187e578fbb17e8779b3ef580672d57621fb2977039adf94378c00ce9` (amended before any request, below; first `d734ca37…`), committed with this section. `write` records the module's hash in `plan.json` and `score` records the hash it ran with. A run whose hash differs from this one is void.
+
+**Population, fixed in code.** Every counted dev trial of parse, tomli and ISMAGS (`miss_detector.counted`, `split_runs('dev')`) whose every response up to its first change came from Sonnet 5.5. The first change is an Edit/Write/MultiEdit/NotebookEdit call or a Bash command matching `BASH_WRITE`, option A's pattern; all 43 Bash cuts were read and are file writes. That gives 46 trials:
+
+| Task | Misses | Passes |
+| --- | --- | --- |
+| parse | 8 | 5 |
+| tomli | 15 | 1 |
+| ISMAGS | 4 | 13 |
+
+24 trials are left out, all served by Opus or Haiku before the cut. The arms are fixed Sonnet 5.5 at medium (14), low (2), concise (2) and low concise (9), plus ModelPilot arms (18) and one Jev trial, all still on Sonnet before the cut. Item 8's holdout isn't read.
+
+**The request.** One a trial: Opus 5.5 at medium effort, `max_tokens` 8,000, no `cache_control`, sent once with no retry or fallback. The system prompt is fixed in the module and the same for every task. It asks for a note under 300 words (plan, implied requirements, conventions to match) and one file of at most 8 unittest checks aimed at the note's requirements, especially the implied ones. The user message holds the task as the agent got it, then the agent's messages, tool calls and the results it saw before the cut, as text, each result cut at 20,000 characters (7 are cut). It never holds the cut message or anything after it, the hidden tests, the reference fix, the edge suite or the label. Misses are sent first, the tasks in turn, 4 at a time.
+
+**Cost.** Estimate $3.74 (each request's bytes ÷ 2.8 at $4/MTok plus 2,500 output tokens at $20/MTok); at most $11.38. Proposed `--limit-usd 6`, a stopping threshold. API key (`ANTHROPIC_API_KEY`).
+
+**The reading.**
+- **Catches:** a note catches its trial when a check the reference fix passes fails on that trial's own saved fix.
+- **Misleading:** a note is misleading when any of its checks fails on the reference fix.
+- **No checks:** a reply without a Python block counts as a note that catches nothing.
+- **No reading** only for a request not sent, a transport error, or a saved fix that can't be rebuilt.
+
+**Pass, all of:**
+- parse: at least 75% of misses caught.
+- tomli: at least 50%.
+- ISMAGS: at least 60%.
+- Misleading notes: at most 25% of notes read.
+
+**Void:** more than 20% of the 46 without a reading, or a module hash other than the one above. **Fail:** anything else.
+
+**Why these bars.** Per task against Opus 5.5 on tuning, low concise trails by 1.0 on parse, 0.5 on tomli (Opus's own rate) and 0.2 on ISMAGS (Opus 3/3 in dev). A note does at most what a check that fails on the miss does: Sonnet still has to run it and act on it. So the bars are necessary, not sufficient. Each is a judgment fixed before the run: parse below 100% for a 4-trial Opus rate, ISMAGS on 4 misses. The misleading bar limits notes that would push a correct fix away from the reference.
+
+**Reported, not scored:**
+- Passes flagged by a check the reference passes.
+- Each note's measured cost against option A's estimate, and its output tokens.
+- The low-concise subset.
+- The notes themselves (`responses/`), for reading.
+
+**What each outcome commits to:**
+- **Pass:** a bench arm (option D, about $14 by the review's estimate) is proposed with its plan, on the user's call. A claim would need the final split. Nothing is adopted on a pass.
+- **Fail:** the forced pre-edit note is dropped, and `modelpilot-for-opus` stays on Opus 5.5.
+- **Void:** recorded; a rerun is a new decision.
+
+**Limits, said in advance.**
+- All three tasks shaped the idea.
+- Most transcripts are Sonnet at medium, not low concise.
+- A catching check is an upper bound on what the note does.
+- One note per trial: Opus's variation and the transcripts' variation aren't separated.
+
+**Commands.** `run` writes into a new `runs/pre-edit-note-<timestamp>`, then scores it. It asks for the key at a hidden prompt when `ANTHROPIC_API_KEY` isn't set, and drops it before scoring. `write` without `--live` prints the plan and sends nothing.
+
+```sh
+python3.12 -m modelpilot.pre_edit_note run --limit-usd 6
+```
+
+**Amendment, before any request (October 18, user request: "just make it so i give it the command and it asks for the key after").** Command line only: `run` (write, then score), and a hidden key prompt in place of refusing without `ANTHROPIC_API_KEY`. The population, the request, the reading and the rule are unchanged. The module's hash moves from `d734ca37f5aa66d9a2987d9125bdbba69e1caaeff45154e4e6653c6304ac8d58` to the one above. No request had been sent: the first attempt refused for the missing key before reading anything.
+
+### Pre-edit note probe (option C): result (October 18, $5.44): fail
+
+**The run** (`runs/pre-edit-note-20261018-175246`). The user's, API key, `run --limit-usd 6`, commit `4e05462` with no uncommitted changes; the module hash in `plan.json` and `score.json` matches the pre-registration.
+- 44 of 46 requests were sent. Two ISMAGS passes went unsent at the limit.
+- 41 replies held checks. 3 ended at `max_tokens` 8,000 without any, all ISMAGS: 2 misses and 1 pass.
+- $5.44, cost complete, no errors.
+- **Not void:** 2 of 46 have no reading.
+
+**Verdict: fail, on every bar.**
+
+| Reading | Result | Bar |
+| --- | --- | --- |
+| parse misses caught | 5/8 (62%) | 75% |
+| tomli misses caught | 4/15 (27%) | 50% |
+| ISMAGS misses caught | 0/4 | 60% |
+| Misleading notes | 19/44 (43%) | at most 25% |
+
+**What the notes did** (reported, not scored):
+- **tomli.** The 4 catches are keyword-construction checks. The prose of 13 of the 15 miss notes mentions keywords (a loose pattern, `keyword|msg=|doc=|pos=`, applied after the run). So Opus names the behaviour far more often than it writes a check that fails on the miss. 7 of the 16 tomli notes require a pickle round trip that the reference fix fails.
+- **parse.** The catches are round trips through `format` and small numbers without separators. 7 of the 13 notes require malformed grouping to be rejected, which the reference fix accepts.
+- **ISMAGS.** No catch. 5 of the 12 notes with checks hold a VF2-agreement or edge-direction check that the reference fails. Its transcripts are the longest, and 3 replies ran out of tokens.
+- **Passes.** No check the reference passes failed on any of the 17 passing fixes read.
+- **Low-concise subset.** 2 of 5 misses caught: parse 1/2, tomli 1/2, ISMAGS 0/1.
+
+**Cost.** $0.124 a note on average (median $0.095; parse $0.082, tomli $0.084, ISMAGS $0.197), 54% above the plan's estimate for the same 44 requests ($3.54). Median output was 3,672 tokens, against 2,500 assumed here and 1,702 in option A. At that price the arm would cost about $0.078 + $0.124 + about $0.02 for Sonnet to act on the note, roughly $0.22 against Opus 5.5's $0.248: about $0.03 a task even if quality matched.
+
+**Reading.** Given what Sonnet saw, Opus often names the implied requirement in prose, but its checks catch the miss in 9 of 27 cases. In 43% of notes it also asserts a requirement the upstream fix doesn't meet. In this run the misleading notes (19) outnumber the catches (9). Option A's estimate also undercounted the note's output by about half.
+
+**What the rule commits to (pre-registered):** the forced pre-edit note is dropped, and `modelpilot-for-opus` stays on Opus 5.5. Option D isn't proposed.
+
 ### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
 
 User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku passes, the tests are too easy"), so harder tasks come before item 8's labels, from sqlglot (MIT; surveyed October 4, above), in stages. Stage 1 builds 8 tasks and screens them with one low concise and one Opus 5.5 trial each; a full batch follows only if the repository produces misses. sqlglot joins the tuning split; the final split and its lock are unchanged.

@@ -197,7 +197,7 @@ class PaidGuardTests(unittest.TestCase):
 
     def test_live_without_a_stop_threshold_is_refused_before_anything_is_sent(self):
         needing = [row for row in commands.paid() if row.needs]
-        self.assertEqual({row.name for row in needing}, {'bench', 'late_fix'})
+        self.assertEqual({row.name for row in needing}, {'bench', 'late_fix', 'pre_edit_note'})
         for row in needing:
             with self.subTest(command=row.name):
                 code, output = self.run_plan(row, row.plans[0], extra=['--live'])
