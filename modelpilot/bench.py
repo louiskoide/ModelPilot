@@ -47,10 +47,11 @@ from .proxy import ProxyServer, read_log
 
 ROOT = Path(__file__).resolve().parents[1]
 # A trial passes only if it also passes its task's edge suite, where it has one (user decision, October 4):
-# tuning tasks only; the locked final tasks have none, so they are graded on their hidden tests alone.
+# tuning tasks, and the final tasks since October 18 (user decision, before any final trial).
 EDGE_ROOT = regrade.EDGE
-PASS_RULE = ('the hidden grader, and every test of the task\'s edge suite where it has one (tuning tasks; '
-             'user decision, October 4); before October 4 runs recorded the hidden grader alone')
+PASS_RULE = ('the hidden grader, and every test of the task\'s edge suite where it has one (tuning tasks since '
+             'October 4, final tasks since October 18; user decisions); before October 4 runs recorded the hidden '
+             'grader alone')
 TOOLS = 'Read,Edit,Write,Bash,Glob,Grep'
 PREAMBLE = ('You are working in a Python repository in the current directory. Complete the task below. '
             'Run the relevant tests with python3 before you finish.\n\nTask: ')
@@ -1333,7 +1334,9 @@ def main():
             expected = preflight(tasks, python, scratch)
         except PreflightError as e:
             raise SystemExit(str(e))
-    print('Preflight passed: ' + ', '.join(f"{i} ({e['hidden_passed']} hidden)" for i, e in expected.items()), flush=True)
+    print('Preflight passed: ' + ', '.join(f"{i} ({e['hidden_passed']} hidden"
+                                           + (f", {e['edge_tests']} edge)" if e.get('edge_tests') else ')')
+                                           for i, e in expected.items()), flush=True)
     runs = len(units or tasks) * len(arms) * args.trials
     plans = [long_session.plan(len(u['tasks']), args.gap, args.compact) for u in units] if units else None
     sessions = max(len(p) for p in plans) if plans else 3 if args.shape == 'split' else 2 if args.shape == 'followup' else 1

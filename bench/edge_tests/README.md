@@ -1,6 +1,6 @@
-# Edge-case tests (tuning split only)
+# Edge-case tests
 
-Extra tests for each tuning task, beyond the upstream fix's own hidden tests: other inputs for the behaviour the
+Extra tests for each tuning task, and since October 18, 2026 each final task, beyond the upstream fix's own hidden tests: other inputs for the behaviour the
 task's instruction asks for, and cases the instruction names that the hidden tests leave out. They look past
 pass/fail: a fix can pass the hidden tests and still be incomplete. `python3 -m modelpilot.regrade <run>` runs
 them against every saved fix of a benchmark run ($0, no model requests).
@@ -12,7 +12,9 @@ Rules (user decision, September 29, 2026):
    seen.
 2. A suite is used only if the task's reference fix passes all of it (`regrade.check_edge`, `usable`), so no
    test checks behaviour the real fix never had. The base (buggy) tree is also run, for information.
-3. Tuning tasks only. Final-split task specs are hash-locked (`bench/splits.json`) and get no edge tests.
+3. Tuning tasks only, until October 18, 2026. Then (user decision, October 18, before any final trial ran) each
+   final task got a suite too, by these same rules. The final task specs stay hash-locked and unchanged
+   (`bench/splits.json`): a suite is a separate file, not part of the spec.
 4. Frozen once results against agent fixes exist: a change is a new suite, recorded with its reason, and every
    re-grade records each file's SHA-256.
 5. Since October 4, 2026 (user decision) edge tests count: a trial passes only if it passes the hidden grader
@@ -20,7 +22,7 @@ Rules (user decision, September 29, 2026):
    (`grade.edge_passed`, `pass_rule`), its run-start check stops a run whose suite the reference doesn't pass in
    full, and the manifest records each suite's SHA-256. `bench_report` takes the edge results of runs graded
    before then from their latest re-grade (`edge_missing` when there is none) and reports hidden-test passes
-   alongside. Final tasks have no suites (rule 3), so they are still graded on their hidden tests alone.
+   alongside. Since October 18 the final tasks have suites too (rule 3), so final trials are graded the same way.
 
 Layout: `bench/edge_tests/<task id>/test_*.py`, plain `unittest`, copied into the graded tree's `_edge/` and run
 as `python -m unittest discover -v -s _edge -t _edge` with the task's `pythonpath`, the grader's isolation (no
@@ -169,3 +171,55 @@ Known label caveat (user decision, October 6, 2026: noted, suite unchanged):
   test; every Sonnet 5.5 miss on the task and both Opus 5.5 misses are this test alone. Strict results on the task
   stand as recorded; read them as partly the instruction's ambiguity, not only the model's
   (`runs/miss-predictability-20261006.json`).
+
+Final split (added October 18, 2026, before any trial ran on any final task, so no agent's fix existed to look at;
+user decision: tuning showed 7 of 8 misses failing only an edge suite, and without suites the final tasks would be
+graded on hidden tests alone). Each was written from its task's instruction, reference fix and hidden tests, checks
+only what the instruction states, and was run with the benchmark Python against fresh reference and base trees, twice,
+with the same results (`regrade.check_edge`). Where they can, they compare against an independent computation:
+`zoneinfo` for the US timezones, a list for `BarrelList` and `IndexedSet`, a Python evaluator for random marker trees,
+the instruction's own rules for random short-help texts. Base passes count distinct tests (a test with failing subtests
+counts once). Corrected before freezing, all found by running the suites, none by looking at an agent's fix:
+
+- `click-short-help`: the random texts used negative limits, where the reference returns an empty text unchanged and
+  the rules as written give `...`; the instruction doesn't settle it, so limits start at 0. A known abbreviation
+  (`vs.`, `e.g.`, `etc.`) is always followed by a lowercase word: whether `vs. Pears` ends a sentence is the one case a
+  fix could read either way.
+- `click-prompt-strip-ansi`: the check outside `CliRunner` reads what reaches the output stream, not the text handed to
+  the prompt function, so a fix that writes the prompt another way isn't failed for that.
+- `packaging-metadata-fold`: two control characters (`\x1f`, `\x0e`) dropped from the "not a line boundary" check: the
+  instruction lists the boundaries but doesn't say every other character must be accepted.
+- `boltons-indexedset-negative`: a pop loop could run forever on the base once a failure left the set and the list
+  apart; a trial now stops at its first failure.
+
+| Task | Tests | Base passes |
+| --- | --- | --- |
+| boltons-bulk-removal | 9 | 4 |
+| boltons-indexedset-negative | 4 | 1 |
+| boltons-isoparse-fraction | 4 | 1 |
+| boltons-jsonl-eof | 4 | 0 |
+| boltons-table-to-text | 4 | 0 |
+| boltons-us-tz-fold | 5 | 1 |
+| click-argument-help-record | 4 | 2 |
+| click-package-name | 5 | 2 |
+| click-prompt-strip-ansi | 3 | 0 |
+| click-sentinel-copy | 4 | 1 |
+| click-short-help | 4 | 1 |
+| click-style-colors | 5 | 1 |
+| humanize-fractional | 4 | 1 |
+| humanize-intword-carry | 4 | 1 |
+| humanize-metric-carry | 5 | 1 |
+| humanize-natural-list | 4 | 0 |
+| humanize-nonfinite-delta | 3 | 2 |
+| humanize-tz-naturalday | 4 | 1 |
+| packaging-content-type | 4 | 2 |
+| packaging-direct-url-file | 4 | 2 |
+| packaging-email-errors | 5 | 1 |
+| packaging-marker-parens | 4 | 1 |
+| packaging-metadata-fold | 4 | 1 |
+| packaging-ranges-unbounded | 4 | 1 |
+
+`click-package-name` also resolves two real import names in the benchmark environment (`dateutil` to
+`python-dateutil`, `_pytest` to `pytest`); if that environment changes, the run-start check stops the run before any
+request. `boltons-us-tz-fold` reads the system's tz database through `zoneinfo` and leaves out 1974-1975, whose
+energy-crisis rules zoneinfo has and boltons' fixed US rules don't.

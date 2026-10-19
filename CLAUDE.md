@@ -17,7 +17,7 @@ Switching model OR effort wrote a new cache prefix in tested M0 conditions. Retu
 - M0 cache harness and M1 pass-through proxy: verified, including an 8-hour soak. Missing: one-hour TTL, other request shapes, broad proxy compatibility.
 - M2 ledger, M3 workers, M4 verifier, M5 controls: bounded harnesses, small live checks; not integrated.
 - M6 benchmark: fixed, Jev and ModelPilot arms run live on 29 tuning tasks; the final split is locked, not yet run.
-- ModelPilot arm: starts at low concise; Haiku 5.5 not a session model (Oct 10); no advisor (Oct 11; stuck: Opus 5.5); delegation off. Quality floor (Oct 8): no worse than the user's own model; arms `modelpilot-for-sonnet`/`-for-opus` (no prompt, Oct 17).
+- ModelPilot arm: no adaptive routing (Oct 18); starts at low concise; Haiku 5.5 not a session model (Oct 10); no advisor (Oct 11; stuck: Opus 5.5); delegation off. Quality floor (Oct 8): no worse than the user's own model; arms `modelpilot-for-sonnet`/`-for-opus` (no prompt, Oct 17).
 - Governor: dry-run, wired into the proxy and hooks; live: a hook correction, turn-end delivery, an observed rebuild, a fallback (Oct 12). Missing: active mode.
 
 The project is a tested set of components and bounded harnesses, not an operational end-to-end governor. Never present the toy benchmark as proof of production quality or savings.
@@ -78,11 +78,11 @@ Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 fou
 
 6. Mid-task compaction: no loss shown (Oct 13), not on Haiku. Long sessions await approval.
 7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
-8. Fail (Oct 11); post-run checks don't pay (Oct 14, 16); pre-edit note fails (Oct 18). Haiku risk rating: thin pass below Opus's floor; `-for-opus-risk` awaits new tasks (Oct 15).
+8. Fail (Oct 11); post-run checks don't pay (Oct 14, 16); pre-edit note fails (Oct 18). Closed with all routing work.
 9. Caveman: parked (user decision).
-11. 4b held (user decision); Oct 16: n=1, vs-Opus pair.
+11. 4b: n=1, vs-Opus pair (Oct 16); no Jev, final edge suites, frozen (Oct 18); smoke, run.
 12. Governor: live checks passed (Oct 12); idle plans wait out the cache TTL, a prompt late; compact if it pays (Oct 13).
-13. Jev: TypeSafe pricing, and whether rejected 400s are billed.
+13. Jev: out of 4b (Oct 18); tuning dollars stay lower bounds.
 14. Haiku 5.5: helper roles only; the read/search explorer doesn't pay (Oct 14).
 15. Opus levers (Oct 17): none pays; standard Opus stays (user decision).
 16. Cache keeper (`own_sessions --keep`): live check passed Oct 18; month awaits approval.
