@@ -1385,6 +1385,36 @@ python3.12 -m modelpilot.pre_edit_note run --limit-usd 6
 
 **Amendment, before any request (October 18, user request: "just make it so i give it the command and it asks for the key after").** Command line only: `run` (write, then score), and a hidden key prompt in place of refusing without `ANTHROPIC_API_KEY`. The population, the request, the reading and the rule are unchanged. The module's hash moves from `d734ca37f5aa66d9a2987d9125bdbba69e1caaeff45154e4e6653c6304ac8d58` to the one above. No request had been sent: the first attempt refused for the missing key before reading anything.
 
+### Pre-edit note probe (option C): result (October 18, $5.44): fail
+
+**The run** (`runs/pre-edit-note-20261018-175246`). The user's, API key, `run --limit-usd 6`, commit `4e05462` with no uncommitted changes; the module hash in `plan.json` and `score.json` matches the pre-registration.
+- 44 of 46 requests were sent. Two ISMAGS passes went unsent at the limit.
+- 41 replies held checks. 3 ended at `max_tokens` 8,000 without any, all ISMAGS: 2 misses and 1 pass.
+- $5.44, cost complete, no errors.
+- **Not void:** 2 of 46 have no reading.
+
+**Verdict: fail, on every bar.**
+
+| Reading | Result | Bar |
+| --- | --- | --- |
+| parse misses caught | 5/8 (62%) | 75% |
+| tomli misses caught | 4/15 (27%) | 50% |
+| ISMAGS misses caught | 0/4 | 60% |
+| Misleading notes | 19/44 (43%) | at most 25% |
+
+**What the notes did** (reported, not scored):
+- **tomli.** The 4 catches are keyword-construction checks. The prose of 13 of the 15 miss notes mentions keywords (a loose pattern, `keyword|msg=|doc=|pos=`, applied after the run). So Opus names the behaviour far more often than it writes a check that fails on the miss. 7 of the 16 tomli notes require a pickle round trip that the reference fix fails.
+- **parse.** The catches are round trips through `format` and small numbers without separators. 7 of the 13 notes require malformed grouping to be rejected, which the reference fix accepts.
+- **ISMAGS.** No catch. 5 of the 12 notes with checks hold a VF2-agreement or edge-direction check that the reference fails. Its transcripts are the longest, and 3 replies ran out of tokens.
+- **Passes.** No check the reference passes failed on any of the 17 passing fixes read.
+- **Low-concise subset.** 2 of 5 misses caught: parse 1/2, tomli 1/2, ISMAGS 0/1.
+
+**Cost.** $0.124 a note on average (median $0.095; parse $0.082, tomli $0.084, ISMAGS $0.197), 54% above the plan's estimate for the same 44 requests ($3.54). Median output was 3,672 tokens, against 2,500 assumed here and 1,702 in option A. At that price the arm would cost about $0.078 + $0.124 + about $0.02 for Sonnet to act on the note, roughly $0.22 against Opus 5.5's $0.248: about $0.03 a task even if quality matched.
+
+**Reading.** Given what Sonnet saw, Opus often names the implied requirement in prose, but its checks catch the miss in 9 of 27 cases. In 43% of notes it also asserts a requirement the upstream fix doesn't meet. In this run the misleading notes (19) outnumber the catches (9). Option A's estimate also undercounted the note's output by about half.
+
+**What the rule commits to (pre-registered):** the forced pre-edit note is dropped, and `modelpilot-for-opus` stays on Opus 5.5. Option D isn't proposed.
+
 ### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
 
 User decisions, October 10: Haiku 5.5 is no longer a session setting ("if Haiku passes, the tests are too easy"), so harder tasks come before item 8's labels, from sqlglot (MIT; surveyed October 4, above), in stages. Stage 1 builds 8 tasks and screens them with one low concise and one Opus 5.5 trial each; a full batch follows only if the repository produces misses. sqlglot joins the tuning split; the final split and its lock are unchanged.

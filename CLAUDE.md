@@ -27,11 +27,11 @@ The project is a tested set of components and bounded harnesses, not an operatio
 Files are under `runs/`; the full table, failures included: `docs/evidence.md`.
 
 - Cheapest at equal quality: `sonnet-5.5-low-concise`, $0.0689 a task, $0.0180 below Sonnet 5.5 medium on 23 tuning tasks (`paired-low-concise-23-20261004.json`).
-- Sonnet 5.5 falls short (strict) on `parse-decimal-grouping` (medium 1/6, Opus 4/4), `tomli-decode-error-attrs` (0/10, 2/4) and `nx-ismags-monomorphism` (5/8, 4/4). Every Sonnet/Opus failure reported success; a redo costs about $0.25 a task (`redo-cost-20261004.json`).
+- Sonnet 5.5 falls short (strict) on `parse-decimal-grouping` (medium 1/6, Opus 4/4), `tomli-decode-error-attrs` (0/10, 2/4) and `nx-ismags-monomorphism` (5/8, 4/4). Every Sonnet/Opus failure reported success; a redo costs ~$0.25 a task (`redo-cost-20261004.json`).
 - The ModelPilot arm never left low concise on the 29 tuning tasks (`bench-20261006-134508`): +$0.0045 a task against it, no difference shown; a third of Opus 5.5's cost, 0.915 against 0.981 strict (`opus-vs-modelpilot-20261006.json`). `jev_weight` 0.03 (maximum likelihood 0): Jev doesn't predict the misses.
 - Item 8: no turn-start rule finds misses (38 tasks; strict low concise 95.5%, Sonnet medium 93.2%, Opus 100%; `item8-prereg-score-20261011.json`).
-- A forced Opus review at the finish rescued none of 27 tuning tasks (26/27 strict either way), +$0.069 a task (`bench-20261006-093401`).
-- Cache writes are about 45% of cost, mostly growth, never rebuilds (`cache-write-sources-20261003.json`). Tool-result bytes are 80–90% source read or searched, 6–10% test output (`tool-result-split-20261005.txt`).
+- A forced Opus review at the finish rescued none of 27 tuning tasks (one miss), +$0.069 a task (`bench-20261006-093401`).
+- Cache writes are about 45% of cost, mostly growth, never rebuilds (`cache-write-sources-20261003.json`). Tool results are 80–90% source reads or searches, 6–10% test output (`tool-result-split-20261005.txt`).
 
 ## Working rules
 
@@ -47,7 +47,7 @@ Files are under `runs/`; the full table, failures included: `docs/evidence.md`.
 - Active mode is approved for the ModelPilot benchmark arm only; everything else stays dry-run.
 - Jev dollars are provider cost only, a lower bound. Never count fail-open Claude or stub-router decisions as Jev routing. Never edit `work/jev-router-baseline`.
 - Never edit a final task spec after the lock (`bench/splits.json`). Lock the bench venv's site-packages read-only before live runs.
-- The TypeSafe key seen in a September 22 screenshot is revoked.
+- The TypeSafe key in a Sept 22 screenshot is revoked.
 - Keep this file under 8 KB (`tests/test_claude_md.py`); detail goes to the docs named at the top.
 
 ## Commands and testing
@@ -78,7 +78,7 @@ Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 fou
 
 6. Mid-task compaction: no loss shown (Oct 13), not on Haiku. Long sessions await approval.
 7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
-8. Fail (Oct 11); post-run checks don't pay (Oct 14, 16). Haiku risk rating: thin pass below Opus's floor; `-for-opus-risk` awaits new tasks (Oct 15).
+8. Fail (Oct 11); post-run checks don't pay (Oct 14, 16); pre-edit note fails (Oct 18). Haiku risk rating: thin pass below Opus's floor; `-for-opus-risk` awaits new tasks (Oct 15).
 9. Caveman: parked (user decision).
 11. 4b held (user decision); Oct 16: n=1, vs-Opus pair.
 12. Governor: live checks passed (Oct 12); idle plans wait out the cache TTL, a prompt late; compact if it pays (Oct 13).
