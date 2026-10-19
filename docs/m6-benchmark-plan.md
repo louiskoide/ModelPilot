@@ -1328,7 +1328,7 @@ The user gave two candidates for the governor (pasted text, not in the repositor
 
 ### Pre-edit note probe (option C): pre-registration (October 18, before any request)
 
-**The question.** Given what a Sonnet agent had seen before its first change, does Opus 5.5 name, as a check that runs, the behaviour that agent's fix then missed? `modelpilot/pre_edit_note.py`, SHA-256 `d734ca37f5aa66d9a2987d9125bdbba69e1caaeff45154e4e6653c6304ac8d58`, committed with this section before any request. `write` records the module's hash in `plan.json` and `score` records the hash it ran with. A run whose hash differs from this one is void.
+**The question.** Given what a Sonnet agent had seen before its first change, does Opus 5.5 name, as a check that runs, the behaviour that agent's fix then missed? `modelpilot/pre_edit_note.py`, SHA-256 `80bc19ad187e578fbb17e8779b3ef580672d57621fb2977039adf94378c00ce9` (amended before any request, below; first `d734ca37…`), committed with this section. `write` records the module's hash in `plan.json` and `score` records the hash it ran with. A run whose hash differs from this one is void.
 
 **Population, fixed in code.** Every counted dev trial of parse, tomli and ISMAGS (`miss_detector.counted`, `split_runs('dev')`) whose every response up to its first change came from Sonnet 5.5. The first change is an Edit/Write/MultiEdit/NotebookEdit call or a Bash command matching `BASH_WRITE`, option A's pattern; all 43 Bash cuts were read and are file writes. That gives 46 trials:
 
@@ -1377,12 +1377,13 @@ The user gave two candidates for the governor (pasted text, not in the repositor
 - A catching check is an upper bound on what the note does.
 - One note per trial: Opus's variation and the transcripts' variation aren't separated.
 
-**Commands.** `write` without `--live` prints the plan and sends nothing.
+**Commands.** `run` writes into a new `runs/pre-edit-note-<timestamp>`, then scores it. It asks for the key at a hidden prompt when `ANTHROPIC_API_KEY` isn't set, and drops it before scoring. `write` without `--live` prints the plan and sends nothing.
 
 ```sh
-python3 -m modelpilot.pre_edit_note write --out runs/pre-edit-note-<ts> --live --limit-usd 6
-python3 -m modelpilot.pre_edit_note score runs/pre-edit-note-<ts>
+python3.12 -m modelpilot.pre_edit_note run --limit-usd 6
 ```
+
+**Amendment, before any request (October 18, user request: "just make it so i give it the command and it asks for the key after").** Command line only: `run` (write, then score), and a hidden key prompt in place of refusing without `ANTHROPIC_API_KEY`. The population, the request, the reading and the rule are unchanged. The module's hash moves from `d734ca37f5aa66d9a2987d9125bdbba69e1caaeff45154e4e6653c6304ac8d58` to the one above. No request had been sent: the first attempt refused for the missing key before reading anything.
 
 ### Harder tasks: sqlglot, stage 1 (October 10, offline, $0)
 

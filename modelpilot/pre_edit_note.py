@@ -2,8 +2,12 @@
 misses miss? Each recorded Sonnet 5.5 transcript of the three miss tasks is cut where the agent first changes the code,
 Opus writes the note and its checks from it, and the host runs the checks at $0.
 
+    python3.12 -m modelpilot.pre_edit_note run --limit-usd 6
     python3 -m modelpilot.pre_edit_note write --out runs/pre-edit-note-<ts> [--live --limit-usd 6] [--jobs 4]
     python3 -m modelpilot.pre_edit_note score runs/pre-edit-note-<ts> [--jobs 4]
+
+run: write --live into a new runs/pre-edit-note-<timestamp>, then score it. --live asks for the Anthropic key at a
+hidden prompt when ANTHROPIC_API_KEY isn't set; it is never echoed or written, and run drops it before scoring.
 
 Population, fixed in code: every counted trial (miss_detector.counted) of the three TASKS in the miss detector's dev
 split, cut at its first change (an Edit/Write/MultiEdit/NotebookEdit call or a Bash command BASH_WRITE recognises, the
@@ -330,6 +334,23 @@ def score(out, python=None, jobs=4, runs=None):
     return report
 
 
+def api_key():
+    """The Anthropic key from the environment, else from a hidden prompt: never echoed, printed or written."""
+    if not os.environ.get('ANTHROPIC_API_KEY'):
+        import getpass
+        key = getpass.getpass('Anthropic API key (hidden): ').strip()
+        if not key:
+            raise SystemExit('No key given; no requests sent.')
+        os.environ['ANTHROPIC_API_KEY'] = key
+
+
+def print_score(out, jobs):
+    report = score(out, jobs=jobs)
+    print(json.dumps({k: report[k] for k in ('verdict', 'population', 'without_reading', 'tasks',
+                                             'misleading', 'misleading_share')}, indent=1))
+    print(out/'score.json')
+
+
 def main():
     from .bench import rates
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -342,19 +363,24 @@ def main():
     s = sub.add_parser('score')
     s.add_argument('out', type=Path)
     s.add_argument('--jobs', type=int, default=4)
+    r = sub.add_parser('run', help='write --live into a new directory, then score it')
+    r.add_argument('--limit-usd', type=float)
+    r.add_argument('--out', type=Path)
+    r.add_argument('--jobs', type=int, default=4)
     args = parser.parse_args()
     if args.step == 'score':
-        report = score(args.out, jobs=args.jobs)
-        print(json.dumps({k: report[k] for k in ('verdict', 'population', 'without_reading', 'tasks',
-                                                 'misleading', 'misleading_share')}, indent=1))
-        print(args.out/'score.json')
+        print_score(args.out, args.jobs)
         return
+    if args.step == 'run':
+        from datetime import datetime
+        args.live = True
+        args.out = args.out or ROOT/'runs'/f"pre-edit-note-{datetime.now():%Y%m%d-%H%M%S}"
     if args.out.exists():
         parser.error(f'{args.out} exists: use a new path')
     if args.live and args.limit_usd is None:
         raise SystemExit('--live needs --limit-usd (a stopping threshold); no requests sent.')
-    if args.live and not os.environ.get('ANTHROPIC_API_KEY'):
-        raise SystemExit('Set ANTHROPIC_API_KEY in the environment; no requests sent.')
+    if args.live:
+        api_key()
     items, left_out = population(rates())
     plan = write(items, args.out, rates(), args.live, args.limit_usd, args.jobs, left_out=left_out)
     summary = {k: plan[k] for k in ('live', 'notes', 'misses', 'estimate_usd', 'max_cost_usd', 'limit_usd')}
@@ -366,6 +392,9 @@ def main():
     else:
         summary['sent'] = 'nothing; --live --limit-usd <usd> sends'
     print(json.dumps(summary, indent=1))
+    if args.step == 'run':
+        os.environ.pop('ANTHROPIC_API_KEY', None)  # scoring runs model-written code; it never needs the key
+        print_score(args.out, args.jobs)
 
 
 if __name__ == '__main__':

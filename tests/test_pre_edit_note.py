@@ -1,9 +1,11 @@
 """Option C's pre-edit note probe: the cut, the rendered transcript, the request, the live write with a scripted
 transport, and the pre-registered reading. $0: nothing is sent."""
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 from modelpilot import bench, bench_tasks, pre_edit_note as pen
 
 TASK = bench_tasks.load('tomli-decode-error-attrs')[0]
@@ -138,6 +140,30 @@ class PreEditNoteTests(unittest.TestCase):
         read = pen.reading(item, {'status': 'written'}, wrong, own)
         self.assertEqual((read['caught'], read['misleading']), (False, True))  # only a check the reference passes counts
         self.assertIsNone(pen.reading(item, {'status': 'written'}, check, {'error': 'diff_did_not_apply'}))
+
+    def test_the_key_is_asked_only_when_missing_and_never_echoed(self):
+        asked = []
+        with mock.patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'from-env'}), \
+                mock.patch('getpass.getpass', lambda prompt: asked.append(prompt) or 'typed'):
+            pen.api_key()
+            self.assertEqual((asked, os.environ['ANTHROPIC_API_KEY']), ([], 'from-env'))
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch('getpass.getpass', lambda prompt: asked.append(prompt) or ' typed '):
+            pen.api_key()
+            self.assertEqual((len(asked), os.environ['ANTHROPIC_API_KEY']), (1, 'typed'))
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch('getpass.getpass', lambda prompt: ''), \
+                self.assertRaises(SystemExit):
+            pen.api_key()
+
+    def test_run_without_a_limit_stops_before_asking_for_the_key(self):
+        def ask(prompt):
+            raise AssertionError('asked for the key')
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch('getpass.getpass', ask), \
+                mock.patch('sys.argv', ['pre_edit_note', 'run', '--out', str(self.root/'out')]), \
+                self.assertRaises(SystemExit) as stop:
+            pen.main()
+        self.assertIn('--limit-usd', str(stop.exception))
+        self.assertFalse((self.root/'out').exists())
 
     def test_the_pre_registered_rule(self):
         def population(caught):  # 4 misses and 1 pass a task; caught: misses caught per task
