@@ -16,7 +16,7 @@ Switching model OR effort wrote a new cache prefix in tested M0 conditions. Retu
 
 - M0 cache harness and M1 pass-through proxy: verified, including an 8-hour soak. Missing: one-hour TTL, other request shapes, broad proxy compatibility.
 - M2 ledger, M3 workers, M4 verifier, M5 controls: bounded harnesses, small live checks; not integrated.
-- M6 benchmark: fixed, Jev and ModelPilot arms run live on 29 tuning tasks; the final split is locked, not yet run.
+- M6 benchmark: 29 tuning tasks live; final split (4b) run Oct 18–19, now spent.
 - ModelPilot arm: no adaptive routing (Oct 18); starts at low concise; Haiku 5.5 not a session model (Oct 10); no advisor (Oct 11; stuck: Opus 5.5); delegation off. Quality floor (Oct 8): no worse than the user's own model; arms `modelpilot-for-sonnet`/`-for-opus` (no prompt, Oct 17).
 - Governor: dry-run, wired into the proxy and hooks; live: a hook correction, turn-end delivery, an observed rebuild, a fallback (Oct 12). Missing: active mode.
 
@@ -28,7 +28,8 @@ Files are under `runs/`; the full table, failures included: `docs/evidence.md`.
 
 - Cheapest at equal quality: `sonnet-5.5-low-concise`, $0.0689 a task, $0.0180 below Sonnet 5.5 medium on 23 tuning tasks (`paired-low-concise-23-20261004.json`).
 - Sonnet 5.5 falls short (strict) on `parse-decimal-grouping` (medium 1/6, Opus 4/4), `tomli-decode-error-attrs` (0/10, 2/4) and `nx-ismags-monomorphism` (5/8, 4/4). Every Sonnet/Opus failure reported success; a redo costs ~$0.25 a task (`redo-cost-20261004.json`).
-- The ModelPilot arm never left low concise on the 29 tuning tasks (`bench-20261006-134508`): +$0.0045 a task against it, no difference shown; a third of Opus 5.5's cost, 0.915 against 0.981 strict (`opus-vs-modelpilot-20261006.json`). `jev_weight` 0.03 (maximum likelihood 0): Jev doesn't predict the misses.
+- 4b, 24 held-out tasks, n=1 (`../ModelPilot-final-split/runs/4b-final-report-20261019.json`): strict passes, $ a pass: `-for-sonnet` 23/24 $0.056, Sonnet medium 22/24 $0.067, Opus 24/24 $0.167, `-for-opus` 24/24 $0.167. No arm left its start; `-for-sonnet` = low concise. Sonnet floor passes, Opus floor fails.
+- `jev_weight` 0.03 (maximum likelihood 0): Jev doesn't predict the misses.
 - Item 8: no turn-start rule finds misses (38 tasks; strict low concise 95.5%, Sonnet medium 93.2%, Opus 100%; `item8-prereg-score-20261011.json`).
 - A forced Opus review at the finish rescued none of 27 tuning tasks (one miss), +$0.069 a task (`bench-20261006-093401`).
 - Cache writes are about 45% of cost, mostly growth, never rebuilds (`cache-write-sources-20261003.json`). Tool results are 80–90% source reads or searches, 6–10% test output (`tool-result-split-20261005.txt`).
@@ -80,7 +81,7 @@ Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 fou
 7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
 8. Fail (Oct 11); post-run checks don't pay (Oct 14, 16); pre-edit note fails (Oct 18). Closed with all routing work.
 9. Caveman: parked (user decision).
-11. 4b: n=1, vs-Opus pair (Oct 16); no Jev, final edge suites, frozen (Oct 18); smoke, run.
+11. 4b: done Oct 19 (above). Next: the write-up.
 12. Governor: live checks passed (Oct 12); idle plans wait out the cache TTL, a prompt late; compact if it pays (Oct 13).
 13. Jev: out of 4b (Oct 18); tuning dollars stay lower bounds.
 14. Haiku 5.5: helper roles only; the read/search explorer doesn't pay (Oct 14).

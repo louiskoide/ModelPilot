@@ -483,3 +483,8 @@ That result gets reported as it is. Every rule above can be switched off individ
 - Jev is out of 4b (user decision), so the second fail condition above, against compat Jev, is withdrawn. Jev's tuning-split results are cited instead, as lower bounds.
 - Final trials are graded on their tasks' edge suites as well as the hidden tests (user decision; `bench/edge_tests/README.md`, rule 3).
 - Frozen for 4b as it stands (user decision): `configs/modelpilot-policy.json`, SHA-256 `0c9840d202ac90a3f6a39251a7c6e9305f9635b4a651e8a514111bca2c773273`, with the harness fixed by its Git tree IDs (`docs/m6-benchmark-plan.md`, "4b: amendments of October 18").
+
+**Result, 4b (October 19):** the policy passes on its Sonnet-floor arm and fails on its Opus-floor arm (`docs/m6-benchmark-plan.md`, "4b: result").
+- `modelpilot-for-sonnet` was cheaper per passed task than `sonnet-5.5`, +$0.011 [0.0023, 0.0235], with no pass-rate drop shown. That saving is low concise's: the arm never left it and shows no difference from it.
+- `modelpilot-for-opus` was not shown cheaper than `opus-5.5`: +$0.0006 [-0.0141, 0.0152], both 24/24.
+- Neither arm ever left its start.
