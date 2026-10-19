@@ -290,7 +290,7 @@ Cost per trial on these two tasks (API-key equivalent, cold): Sonnet $0.081 and 
 - **Router:** the switch policy's calibration counts strict passes: Sonnet 5.5 medium 43/46 (0.917 with the uniform prior, from 0.96) and Opus 5.5 medium 23/23 (0.96). The repeat run is left out because it was chosen for the two misses. Replayed (`runs/policy-replay-strict-20261004.json`), all 30 recorded turn starts still stay at Sonnet 5.5 medium.
 - **Why nothing moves:** on the two gap tasks Jev advised staying, so the gate never weighed Opus, and Jev's estimates don't predict the misses. Its lowest-rated tasks passed, while the misses were at 0.56 and 0.80; refitted on strict outcomes, `jev_weight`'s posterior mean is 0.09 (95% bound 0.25, maximum likelihood 0). `jev_weight` stays 0.2.
 
-The final split has no edge suites (rule 3), so final trials are still graded on hidden tests alone.
+The final split has no edge suites (rule 3), so final trials are still graded on hidden tests alone. (Changed October 18, before any final trial: the final tasks have suites too; see "4b: amendments of October 18".)
 
 **No large tasks left in the tuning repositories (October 4, $0).** `bench_tasks.candidates` with a 2,000-line cap over the five tuning repositories: tomli and parse have no unused change over 60 source lines, toolz's are from 2015–2016, and more-itertools' biggest unused 2026 feature (`random_ordered_range`) nets 44 lines. The one large 2026 change, cachetools' `@cachedmethod` rework (descriptors plus `cache_info()`, 365 source lines over two commits), can't be a fair task: its 1,000 test lines pin exact deprecation behaviour on separate paths for Python before and after 3.13, and the reference's `__get__` reads an attribute it never sets (`self.__deprecated`). The September 29 batch of 100–200-line features in these repositories already passed at every Sonnet setting.
 
@@ -1551,7 +1551,7 @@ So about $19: $9.80 of subscription usage as sent ($0 API) and about $9.10 on th
 2. **The arm set.** The pre-registration names all six. Without Jev it needs no TypeSafe key; without the Opus pair it costs about $7.60 in all.
 3. **A smoke trial first.** `modelpilot-for-opus` has never run live: one tuning task (`parse-hyphen-field`), API key, about $0.25.
 
-`runs/4b-final-20261011.sh plan|smoke|full|nojev` (not committed) runs each step: the plan-only check, the smoke trial, and the run in one bench run (fixed arms on the subscription, the others on the API key, seed 4, `--final`, `--run-budget 15`). The bench refuses final tasks whose specs changed since the lock; checked unchanged October 11 (`bench_tasks.check_lock`). Final tasks have no edge suites (`bench/edge_tests/README.md`, rule 3), so they're graded on their hidden tests alone.
+`runs/4b-final-20261011.sh plan|smoke|full|nojev` (not committed) runs each step: the plan-only check, the smoke trial, and the run in one bench run (fixed arms on the subscription, the others on the API key, seed 4, `--final`, `--run-budget 15`). The bench refuses final tasks whose specs changed since the lock; checked unchanged October 11 (`bench_tasks.check_lock`). Final tasks have no edge suites (`bench/edge_tests/README.md`, rule 3), so they're graded on their hidden tests alone. (Changed October 18: see "4b: amendments of October 18".)
 
 **Plan text fixed.** Since October 11 every ModelPilot arm runs without an advisor, and `bench`'s plan described each one as the exploration arm (random switches to Opus 5.5), without its quality floor. `bench.modelpilot_plan` now describes each arm by what it runs (exploration draw, Jev's advice, or measured rates alone), with its floor and delegation.
 
@@ -1603,6 +1603,41 @@ The user asked what could run without interfering with the governor work in anot
 - then 4b.
 
 Edge suites for the final tasks (amending rule 3) wait for the user's yes. If they are committed before the run, they apply to every arm alike.
+
+### 4b: amendments of October 18 (before any final trial; $0)
+
+Three user decisions on October 18, all before any final trial exists. Branch `claude/final-edge-suites`.
+
+1. **Adaptive reasoning is given up** ("we are officially giving up on adaptive reasoning").
+   - **The record behind it:** no turn-start rule finds the misses (item 8, October 11); post-run checks don't pay (October 14, 16); the forced pre-edit Opus note fails every bar (option C, October 18); Jev's advice gets a fitted weight of 0.
+   - **What it ends:** new routing work. That includes the risk-routed arm (`modelpilot-for-opus-risk`, waiting on new tasks since October 15) and any per-task predictor. The October 11 worry that a later policy change couldn't be judged on the final split no longer holds back 4b.
+   - **What 4b then measures:** the ModelPilot arms run as registered. On the tuning record they never left their start (`modelpilot-for-sonnet` low concise, `modelpilot-for-opus` Opus 5.5 medium), so 4b compares fixed settings on held-out tasks, plus the proxy's overhead.
+   - **The policy freeze** (proposed to the user October 18, to be confirmed with the run's go): `configs/modelpilot-policy.json` as it stands at the 4b commit, its version and hash recorded. The rules that could still move an arm (stuck escalation, mid-task steps) stay on as they ran. On the record they never moved one: the stuck detector fires in none of the 146 ModelPilot-arm trials (October 16), and `modelpilot` stayed on low concise through all 29 tuning tasks (`bench-20261006-134508`). Turning them off would send an untested configuration into the one final run.
+2. **Jev is out of 4b.** The October 8 fail condition "it loses to compat Jev on the same measure" is withdrawn.
+   - **Why:** the user's question was what Jev adds once ModelPilot doesn't route. Jev is the outside router the project set out to beat. It served Sonnet 5.5 on all 16 tasks of 4a (`bench-20260929-000001`), and its answers don't predict the misses. The `sonnet-5.5` arm already runs what it would serve, without the router's cost.
+   - **What the write-up cites instead:** Jev's recorded results, labelled as tuning-split figures and provider-only lower bounds: 4a's $0.087 a task against Opus 5.5's $0.170; in the October 11 cost table, at least $0.081 a task over 15 tuning tasks (low concise: $0.072 over 29).
+   - **What it saves:** 4b runs as `nojev`, with no TypeSafe key, no `jev_check --live` and no unpriced router calls.
+3. **Edge suites for the 24 final tasks** ("sure write them first"; `bench/edge_tests/README.md`, rule 3 amended).
+   - **Why:** final tasks were to be graded on hidden tests alone, and in the tuning record 7 of 8 misses passed the hidden tests and failed only an edge suite. Without suites, "no pass-rate difference shown" would be close to certain and mean little.
+   - **How they were written:** from each task's instruction, reference fix and hidden tests, by the tuning suites' rules, before any final trial. Each checks only what its instruction states. A case the instruction leaves open is left out; the README lists each one dropped and why.
+   - **Checked ($0):**
+     - 104 tests. Every reference passes all of its task's suite, in two runs with the same results. Every base tree fails at least one test.
+     - The plan-only check at this branch, Jev left out, passed: all 24 references graded on hidden tests and edge suites, 120 trials prepared (`runs/4b-final-plan-edge-20261018.txt`). The bench applies a suite to any task that has one, and its manifest records each suite's SHA-256, so no harness change was needed. The preflight's printout now gives each task's edge-test count.
+   - **What changes in the reading:** a final trial passes only on its hidden tests and its whole suite, for every arm alike. The October 16 wording becomes "cheaper per passed task than Opus 5.5, no pass-rate difference shown on 24 tasks graded on hidden tests and edge suites". At one trial a task, a drop still shows only once 4 of the 24 tasks fail on the arm alone.
+
+**Cost and time, `nojev`, n = 1** (October 11's per-task means; `modelpilot-for-opus` at Opus 5.5's $0.248 a task now that it runs without the concise prompt, against the $0.22 assumed then):
+- **Subscription:** about $9.80 as sent, $0 API.
+- **API key:** about $7.75.
+- **Time:** 120 trials, about 2–3 hours.
+- **Note:** the 4b script's header still gives the October 11 figures ($7.20 and $9.10).
+
+**Still before the run** (replaces the October 16 list):
+- this branch merged;
+- the policy frozen at that commit, with its version and hash recorded (the user's confirmation);
+- `../ModelPilot-final-split` moved to that commit, and the plan-only check run again there (`runs/4b-final-20261016.sh plan`, with `nojev`'s arms);
+- `doctor`, with the bench venv's site-packages read-only;
+- the smoke trial, about $0.25;
+- then `runs/4b-final-20261016.sh nojev`, started in a fresh subscription usage window.
 
 ### Haiku 5.5 (October 8; plan set by user decisions; live runs need the user's go)
 

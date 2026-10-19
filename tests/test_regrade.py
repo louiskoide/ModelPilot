@@ -85,5 +85,20 @@ class RegradeTests(unittest.TestCase):
         self.assertFalse(regrade.is_test_path('src/pkg/core.py', 'tests'))
 
 
+class FinalSuitesTests(unittest.TestCase):
+    def test_every_final_task_has_the_suite_its_readme_row_counts(self):
+        # Since October 18 (user decision) the final tasks are graded on edge suites too.
+        root = Path(__file__).resolve().parents[1]
+        final = json.loads((root/'bench'/'splits.json').read_text())['final']
+        readme = (regrade.EDGE/'README.md').read_text(encoding='utf-8')
+        listed = readme.split('\nFinal split', 1)[1]
+        for task in final:
+            with self.subTest(task=task):
+                files = regrade.edge_files(task)
+                self.assertEqual([p.name for p in files], ['test_edge.py'])
+                tests = files[0].read_text(encoding='utf-8').count('\n    def test_')
+                self.assertIn(f'| {task} | {tests} |', listed)
+
+
 if __name__ == '__main__':
     unittest.main()
