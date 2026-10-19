@@ -1,0 +1,13 @@
+{
+  "name": "modelpilot",
+  "displayName": "ModelPilot lean mode",
+  "version": "0.1.0",
+  "description": "Runs the main session on Sonnet 5.5 with a short instruction to work economically. With /effort low saved once, it is the cheapest setting at equal quality on ModelPilot's benchmark",
+  "author": {
+    "name": "Louis Koide",
+    "url": "https://github.com/louiskoide"
+  },
+  "homepage": "https://github.com/louiskoide/ModelPilot/tree/main/plugin",
+  "repository": "https://github.com/louiskoide/ModelPilot",
+  "keywords": ["cost", "sonnet", "effort", "prompt-caching"]
+}

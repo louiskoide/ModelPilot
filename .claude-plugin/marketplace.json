@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "modelpilot",
+  "description": "ModelPilot: a cheaper default setting for Claude Code, measured on a small coding benchmark",
+  "owner": {
+    "name": "Louis Koide",
+    "url": "https://github.com/louiskoide"
+  },
+  "plugins": [
+    {
+      "name": "modelpilot",
+      "source": "./plugin",
+      "category": "productivity"
+    }
+  ]
+}
