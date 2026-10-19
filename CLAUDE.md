@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Updated Oct 18, 2026. History: `docs/changelog/`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
+Updated Oct 19, 2026. History: `docs/changelog/`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
 
 ## Objective
 
@@ -16,7 +16,7 @@ Switching model OR effort wrote a new cache prefix in tested M0 conditions. Retu
 
 - M0 cache harness and M1 pass-through proxy: verified, including an 8-hour soak. Missing: one-hour TTL, other request shapes, broad proxy compatibility.
 - M2 ledger, M3 workers, M4 verifier, M5 controls: bounded harnesses, small live checks; not integrated.
-- M6 benchmark: 29 tuning tasks live; final split (4b) run Oct 18–19, now spent.
+- M6 benchmark: 29 tuning tasks live; final split (4b) run Oct 18–19, spent.
 - ModelPilot arm: no adaptive routing (Oct 18); starts at low concise; Haiku 5.5 not a session model (Oct 10); no advisor (Oct 11; stuck: Opus 5.5); delegation off. Quality floor (Oct 8): no worse than the user's own model; arms `modelpilot-for-sonnet`/`-for-opus` (no prompt, Oct 17).
 - Governor: dry-run, wired into the proxy and hooks; live: a hook correction, turn-end delivery, an observed rebuild, a fallback (Oct 12). Missing: active mode.
 
@@ -81,7 +81,7 @@ Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 fou
 7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
 8. Fail (Oct 11); post-run checks don't pay (Oct 14, 16); pre-edit note fails (Oct 18). Closed with all routing work.
 9. Caveman: parked (user decision).
-11. 4b: done Oct 19 (above). Next: the write-up.
+11. 4b: done Oct 19; write-up `docs/4b-writeup.md`.
 12. Governor: live checks passed (Oct 12); idle plans wait out the cache TTL, a prompt late; compact if it pays (Oct 13).
 13. Jev: out of 4b (Oct 18); tuning dollars stay lower bounds.
 14. Haiku 5.5: helper roles only; the read/search explorer doesn't pay (Oct 14).

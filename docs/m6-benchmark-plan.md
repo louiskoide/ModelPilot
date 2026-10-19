@@ -1696,6 +1696,8 @@ Dollars are cold-equivalent; the fixed arms' subscription trials are priced at t
   - The fixed arms ran on the subscription (1-hour writes, repriced) and the ModelPilot arms on the API key, so the overhead comparisons mix login paths.
   - The final split is now spent: no later change can be judged on it.
 
+**Write-up** (October 19, $0): `docs/4b-writeup.md`.
+
 ### Haiku 5.5 (October 8; plan set by user decisions; live runs need the user's go)
 
 Haiku 5.5 replaced Haiku 4.5 as the policy's bottom tier (`docs/m6-modelpilot-policy.md`, "Tier set"). It isn't a candidate yet, so no ModelPilot arm moves to it. User decisions (October 8): test it as a cheap default and work toward making it a routing candidate; quality first, so the candidate work waits for the arms; handle the client's 40× price with a raised `--budget` rather than a repin; price Sonnet 5.5's cache reads by date; up to $3 of paid spend before the user sees results. In order:
