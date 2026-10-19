@@ -1644,6 +1644,58 @@ Three user decisions on October 18, all before any final trial exists. Branch `c
   - then 4b, started in a fresh subscription usage window.
 - The same script's `check` step ran at this branch ($0): freeze check, `doctor` and the plan-only check all passed.
 
+### 4b: result (October 19, 2026)
+
+**The runs.** The user ran them from `../ModelPilot-final-split` at the frozen merge `b42422b`, and every manifest records no uncommitted changes. User messages: "everything ran", then "ran".
+- **Smoke trial** (`bench-20261018-203249`): `modelpilot-for-opus` on `parse-hyphen-field`, passed, clean, $0.157.
+- **4b** (`bench-20261018-203658`): 120 trials, complete, no stop; $4.69 on the API key and $7.27 of subscription usage as sent.
+- **The top-up rule's two re-runs.** Two trials had each lost the session's last request to an `SSLError` on the proxy's connection to the API, about 0.1 s in (`transport_error`). Both re-runs counted at the first try:
+  - `bench-20261019-064148`: `modelpilot-for-sonnet` on `packaging-email-errors`, $0.070;
+  - `bench-20261019-064253`: `modelpilot-for-opus` on `click-argument-help-record`, $0.158.
+- **Read pooled, as registered:** `bench_report --pool` over the three runs (`runs/4b-final-report-20261019.json` in that checkout). Every task and arm has exactly one counted trial.
+- **Total:** $5.08 on the API key, the two lost requests unpriced; $7.27 of subscription usage as sent.
+
+| Arm | Strict passes | Hidden-test passes | Cost a task [95%] | Cost per pass | Mean wall |
+| --- | --- | --- | --- | --- | --- |
+| `sonnet-5.5-low-concise` | 23/24 | 23 | $0.0533 [0.0487, 0.0585] | $0.0557 | 21.0 s |
+| `sonnet-5.5` (medium) | 22/24 | 23 | $0.0613 [0.0537, 0.0705] | $0.0669 | 25.3 s |
+| `opus-5.5` (medium) | 24/24 | 24 | $0.1670 [0.1472, 0.1889] | $0.1670 | 52.6 s |
+| `modelpilot-for-sonnet` | 23/24 | 23 | $0.0536 [0.0494, 0.0581] | $0.0559 | 23.8 s |
+| `modelpilot-for-opus` | 24/24 | 24 | $0.1665 [0.1463, 0.1932] | $0.1665 | 47.4 s |
+
+Dollars are cold-equivalent; the fixed arms' subscription trials are priced at the API key's 5-minute write rate.
+
+**Misses.**
+- `packaging-email-errors` failed its hidden tests in every Sonnet 5.5 setting: low concise, medium, and `modelpilot-for-sonnet` in both its trials, the lost one and the re-run. Both Opus arms passed it.
+- Sonnet medium also missed `packaging-direct-url-file` on its edge suite alone, its hidden tests passed. That is the one verdict the October 18 suites changed.
+
+**The policy never moved.** `modelpilot-for-sonnet` ran all 24 trials at Sonnet 5.5 low and `modelpilot-for-opus` all 24 at Opus 5.5 medium, with no escalation taken or deferred.
+
+**Registered comparisons** (paired over the 24 tasks, task bootstrap; a difference is the first arm's figure minus the second's):
+1. **`modelpilot-for-sonnet` against `sonnet-5.5`** (fail condition): passes.
+   - Cost per pass: Sonnet medium minus ModelPilot, +$0.011 [0.0023, 0.0235], a difference shown.
+   - Pass rate: -0.042 [-0.125, 0], no drop shown.
+2. **`modelpilot-for-opus` against `opus-5.5`** (fail condition): fails, as expected since October 17. It runs the baseline's exact setting plus the proxy.
+   - Cost per pass: +$0.0006 [-0.0141, 0.0152], no difference shown.
+   - Pass rate: equal, 24/24.
+3. **`modelpilot-for-sonnet` against `opus-5.5`** (registered October 16, reported, not a fail condition), in its fixed wording: **cheaper per passed task than Opus 5.5, no pass-rate difference shown on 24 tasks graded on hidden tests and edge suites.**
+   - Cost per pass: -$0.111 [-0.132, -0.093] for ModelPilot.
+   - Pass rate: Opus minus ModelPilot +0.042 [0, 0.125]. Opus 24/24 against 23/24; the one task between them is `packaging-email-errors`.
+   - Not "Opus quality": at one trial a task, a drop shows only once about 4 of the 24 tasks fail.
+4. **Low concise, the reference:** low concise minus `modelpilot-for-sonnet`, -$0.0003 a pass [-0.0046, 0.0041]; equal pass rates; wall -2.8 s [-6.6, 1.2]. ModelPilot added nothing measurable on top of the cheap setting and cost nothing measurable.
+5. **Compat Jev:** withdrawn October 18.
+
+**Under the October 8 test** ("the policy fails if either of these holds"), the policy fails on its Opus-floor arm and passes on its Sonnet-floor arm. That is reported as it is.
+
+**What it shows.**
+- **The saving against Sonnet medium is low concise's.** Low concise minus Sonnet medium is -$0.011 a pass [-0.023, -0.003], as on the tuning tasks. The policy itself contributed nothing on single-prompt tasks: it never moved.
+- **Against Opus,** the Sonnet-floor arm costs a third as much per pass ($0.056 against $0.167) and loses the one task out of 24 that every Sonnet setting missed.
+- **Caveats:**
+  - One trial a task.
+  - 24 tasks from 4 repositories, smaller than the tuning tasks (Opus $0.167 a task here against $0.248 there).
+  - The fixed arms ran on the subscription (1-hour writes, repriced) and the ModelPilot arms on the API key, so the overhead comparisons mix login paths.
+  - The final split is now spent: no later change can be judged on it.
+
 ### Haiku 5.5 (October 8; plan set by user decisions; live runs need the user's go)
 
 Haiku 5.5 replaced Haiku 4.5 as the policy's bottom tier (`docs/m6-modelpilot-policy.md`, "Tier set"). It isn't a candidate yet, so no ModelPilot arm moves to it. User decisions (October 8): test it as a cheap default and work toward making it a routing candidate; quality first, so the candidate work waits for the arms; handle the client's 40× price with a raised `--budget` rather than a repin; price Sonnet 5.5's cache reads by date; up to $3 of paid spend before the user sees results. In order:
