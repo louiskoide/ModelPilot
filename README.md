@@ -40,6 +40,16 @@ Every result, failures included, is in [docs/evidence.md](docs/evidence.md) with
 
 The ModelPilot arm starts at Sonnet 5.5, low effort, with a concise prompt. Haiku 5.5 is not one of its session models, it has no advisor, and delegation is off. Its quality floor is no worse than the user's own model (arms `modelpilot-for-sonnet` and `modelpilot-for-opus`; the Opus arm runs standard Opus 5.5 medium, no prompt). Details: [docs/m6-modelpilot-policy.md](docs/m6-modelpilot-policy.md).
 
+## Use it in Claude Code
+
+The benchmark's cheapest setting at equal quality, Sonnet 5.5 at low effort with a concise instruction, installs as a Claude Code plugin:
+
+```
+/plugin install modelpilot --marketplace louiskoide/ModelPilot
+```
+
+Then run `/effort low` once and press Enter: a plugin can't set effort itself. What it changes, the evidence and its limits are in [plugin/README.md](plugin/README.md). It doesn't include the proxy, the governor or the cache keeper.
+
 ## Run it
 
 Python 3.10 or newer, standard library only. On macOS, `pip install certifi` supplies TLS roots if Python lacks them; verification always stays on.
@@ -59,6 +69,7 @@ Tests that drive the real Claude Code client, the benchmark or Jev need the pinn
 
 - [docs/code-map.md](docs/code-map.md): what each module does.
 - [docs/4b-writeup.md](docs/4b-writeup.md): the final benchmark, written up.
+- [plugin/README.md](plugin/README.md): the Claude Code plugin, its evidence and its limits.
 - [docs/evidence.md](docs/evidence.md): measured results and their run directories.
 - [docs/changelog/](docs/changelog/) and, before October 14, [docs/changelog.md](docs/changelog.md): what changed, when, at what cost.
 - [docs/governor.md](docs/governor.md): the governor and its limits.

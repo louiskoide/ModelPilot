@@ -10,13 +10,13 @@ This checkout is `/Users/louiskoide/ModelPilot`. `runs/` and `work/` are ignored
 
 ## Core finding
 
-Switching model OR effort wrote a new cache prefix in tested M0 conditions. Returning to an earlier model/effort reused its still-warm entry. Model cache state by exact model/effort/prefix and recent use. Don't assume a switch permanently destroys prior entries. Prewarming is billable even with zero output tokens; maintenance raised cost in the tested sequences. Shadow warming stays off by default.
+Switching model OR effort wrote a new cache prefix in tested M0 conditions. Returning to an earlier model/effort reused its still-warm entry. Model cache state by exact model/effort/prefix and recent use. Don't assume a switch destroys prior entries. Prewarming is billable even with zero output tokens; maintenance raised cost in the tested sequences. Shadow warming stays off by default.
 
 ## Status
 
 - M0 cache harness and M1 pass-through proxy: verified, including an 8-hour soak. Missing: one-hour TTL, other request shapes, broad proxy compatibility.
 - M2 ledger, M3 workers, M4 verifier, M5 controls: bounded harnesses, small live checks; not integrated.
-- M6 benchmark: 29 tuning tasks live; final split (4b) run Oct 18–19, spent.
+- M6 benchmark: 29 tuning tasks live; 4b run Oct 18–19, spent. Plugin `plugin/` (Oct 19); effort: the user's `/effort low`.
 - ModelPilot arm: no adaptive routing (Oct 18); starts at low concise; Haiku 5.5 not a session model (Oct 10); no advisor (Oct 11; stuck: Opus 5.5); delegation off. Quality floor (Oct 8): no worse than the user's own model; arms `modelpilot-for-sonnet`/`-for-opus` (no prompt, Oct 17).
 - Governor: dry-run, wired into the proxy and hooks; live: a hook correction, turn-end delivery, an observed rebuild, a fallback (Oct 12). Missing: active mode.
 
@@ -24,15 +24,15 @@ The project is a tested set of components and bounded harnesses, not an operatio
 
 ## Evidence behind current decisions
 
-Files are under `runs/`; the full table, failures included: `docs/evidence.md`.
+Files under `runs/`; full table with failures: `docs/evidence.md`.
 
 - Cheapest at equal quality: `sonnet-5.5-low-concise`, $0.0689 a task, $0.0180 below Sonnet 5.5 medium on 23 tuning tasks (`paired-low-concise-23-20261004.json`).
 - Sonnet 5.5 falls short (strict) on `parse-decimal-grouping` (medium 1/6, Opus 4/4), `tomli-decode-error-attrs` (0/10, 2/4) and `nx-ismags-monomorphism` (5/8, 4/4). Every Sonnet/Opus failure reported success; a redo costs ~$0.25 a task (`redo-cost-20261004.json`).
 - 4b, 24 held-out tasks, n=1 (`../ModelPilot-final-split/runs/4b-final-report-20261019.json`): strict passes, $ a pass: `-for-sonnet` 23/24 $0.056, Sonnet medium 22/24 $0.067, Opus 24/24 $0.167, `-for-opus` 24/24 $0.167. No arm left its start; `-for-sonnet` = low concise. Sonnet floor passes, Opus floor fails.
-- `jev_weight` 0.03 (maximum likelihood 0): Jev doesn't predict the misses.
+- `jev_weight` 0.03 (max. likelihood 0): Jev doesn't predict misses.
 - Item 8: no turn-start rule finds misses (38 tasks; strict low concise 95.5%, Sonnet medium 93.2%, Opus 100%; `item8-prereg-score-20261011.json`).
 - A forced Opus review at the finish rescued none of 27 tuning tasks (one miss), +$0.069 a task (`bench-20261006-093401`).
-- Cache writes are about 45% of cost, mostly growth, never rebuilds (`cache-write-sources-20261003.json`). Tool results are 80–90% source reads or searches, 6–10% test output (`tool-result-split-20261005.txt`).
+- Cache writes are ~45% of cost, mostly growth, never rebuilds (`cache-write-sources-20261003.json`). Tool results are 80–90% source reads or searches, 6–10% test output (`tool-result-split-20261005.txt`).
 
 ## Working rules
 
@@ -49,7 +49,7 @@ Files are under `runs/`; the full table, failures included: `docs/evidence.md`.
 - Jev dollars are provider cost only, a lower bound. Never count fail-open Claude or stub-router decisions as Jev routing. Never edit `work/jev-router-baseline`.
 - Never edit a final task spec after the lock (`bench/splits.json`). Lock the bench venv's site-packages read-only before live runs.
 - The TypeSafe key in a Sept 22 screenshot is revoked.
-- Keep this file under 8 KB (`tests/test_claude_md.py`); detail goes to the docs named at the top.
+- Keep this file under 8 KB (`tests/test_claude_md.py`); detail to the docs named at the top.
 
 ## Commands and testing
 
@@ -62,7 +62,7 @@ python3 -m modelpilot.m5 --out runs/m5-new-report.json
 python3 -m modelpilot.governor --out runs/governor-demo.json
 ```
 
-- Latest test count and log: the newest `docs/changelog/` entry.
+- Latest test count and log: newest `docs/changelog/` entry.
 - Put the pinned client 2.1.284 (`work/claude-client/node_modules/.bin`) first on PATH: 2.1.289 retries refused requests.
 - Real-client, bench and Jev tests need `work/` and node; CI (3.10, 3.14) skips them.
 - Paid, all behind `--live` (inspect each plan first): `cache_probe`, `claude_check`, `worker_check`, `cascade_check`, `evaluate`, `jev_check`, `jev_route_check`, `governed_session`, `bench`, `thinking_probe`, `risk_predictor`. Limits are stopping thresholds, not billing caps.

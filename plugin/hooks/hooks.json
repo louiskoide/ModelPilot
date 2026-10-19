@@ -1,0 +1,15 @@
+{
+  "description": "Adds ModelPilot's concise instruction once at session start",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/concise.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
