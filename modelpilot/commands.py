@@ -2,7 +2,7 @@
 one-line summary, whether it can send a billable request, and the arguments for a plan-only run.
 
 paid: the module can send a request someone is billed for (Anthropic or TypeSafe), and only does so behind --live.
-That is every name on CLAUDE.md's "Paid" line plus late_fix, cache_replication, miss_checklist and spec_tests, found by
+That is every name on CLAUDE.md's "Paid" line plus late_fix, cache_replication, miss_checklist, spec_tests and pre_edit_note, found by
 reading their code. risk_predictor's plan reads each task's base source under work/bench/repos ($0, local). A module that only forwards what a client sends (proxy), drives the client against a loopback
 fixture (jev_compat, thinking_probe's capture-shape) or runs tests on the host is not paid.
 
@@ -74,6 +74,8 @@ COMMANDS = (
             paid=True, plans=[['--claude', '{claude}'], ['--claude', '{claude}', '--', '--model', 'opus']],
             refusals=['Claude Code is missing']),
     command('policy_replay', "Replay recorded ModelPilot decisions through the current policy ($0)"),
+    command('pre_edit_note', "Option C: Opus's note before the first edit, on recorded Sonnet transcripts; write paid, score $0",
+            paid=True, plans=[['write', '--out', '{tmp}/pre-edit-note']], needs='--limit-usd'),
     command('proxy', 'Loopback Messages API pass-through proxy with dry-run decisions; forwards, originates nothing'),
     command('proxy_overhead', 'What the proxy adds: first byte, per event, throughput, CPU, memory (loopback, $0)'),
     command('regrade', "Re-grade a finished run's saved fixes, edge suites included ($0)"),
