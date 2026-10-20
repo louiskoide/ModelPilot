@@ -29,6 +29,7 @@ COMMANDS = (
     command('bench','Benchmark harness: tasks × arms × trials, isolated, graded, wire-accounted', paid=True,
             plans=[['--tasks', 'parse-decimal-grouping', '--arms', 'sonnet-5.5-low-concise', '--claude', '{claude}']],
             needs='--run-budget'),
+    command('switch_quote', 'Dry-run quote for a model/effort switch: cache rewrite vs a delegated helper, with warning limits ($0)'),
     command('bench_report', "A benchmark run's summary: cold-equivalent cost, paired bootstrap, router pricing ($0)"),
     command('bench_tasks', 'Mine, lock and validate benchmark tasks from cloned repositories ($0)'),
     command('bench_tools', "The ModelPilot arm's stdio MCP tools: run_tests, search, expand_output ($0)"),
