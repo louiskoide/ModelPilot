@@ -268,6 +268,12 @@ class Governor:
             self._journal('context', {'model': model, 'prefix_tokens': prefix_tokens, 'rates': rates, 'ttl': ttl,
                                       'applied': False})
 
+    def latest_context(self):
+        """The newest observe_context payload (model, prefix_tokens, rates, ttl), or None without one."""
+        row = self.db.execute("SELECT payload FROM gov_decisions WHERE session=? AND kind='context' ORDER BY seq DESC "
+                              'LIMIT 1', (self.session,)).fetchone()
+        return json.loads(row['payload']) if row else None
+
     def cache_lifetime(self):
         """The lifetime the session's newest main-loop request asked for (observe_context), or None without one."""
         row = self.db.execute("SELECT payload FROM gov_decisions WHERE session=? AND kind='context' ORDER BY seq DESC "

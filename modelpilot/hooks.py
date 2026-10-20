@@ -26,7 +26,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
-from . import delegation
+from . import delegation, switch_quote
 from .governor import Governor, KINDS, OBSERVABLE
 from .m2 import error_hash
 
@@ -277,7 +277,7 @@ def stuck_notice(gov, task, result):
             f'for task {task}. Nothing was changed.')
 
 
-def rebase_notice(plan):
+def rebase_notice(plan, quote=None):
     hints = {'model': lambda v: f'/model {v}', 'effort': lambda v: f'/effort {v}',
              'compact': lambda v: '/compact', 'prune': lambda v: f'prune {json.dumps(v)}'}
     steps = ', '.join(hints[c['kind']](c['value']) for c in plan['changes'])
@@ -286,7 +286,8 @@ def rebase_notice(plan):
         ack = f'It is acknowledged once this session is seen running it (or run: {ack})'
     else:
         ack = f'After applying it, run: {ack}'  # a prune leaves nothing the host can see
-    return f"ModelPilot (dry-run) suggests one rebuild now ({plan['trigger']}): {steps}. Nothing was changed. {ack}"
+    cost = f' {switch_quote.describe(quote)}' if quote else ''
+    return f"ModelPilot (dry-run) suggests one rebuild now ({plan['trigger']}): {steps}. Nothing was changed.{cost} {ack}"
 
 
 def suite_at_stop(gov, task, owner, payload, declaration):
@@ -341,7 +342,8 @@ def handle(event, payload, env, clock=time.time):
             plan = gov.plan_rebase(gov.state.get(task)['revision'], idle_seconds=idle, in_flight=0,
                                    check_compaction=env.get(COMPACTION_CHECK) != 'off')
             if plan['action'] == 'would_rebase':
-                notices.append(rebase_notice(plan))
+                notices.append(rebase_notice(plan, switch_quote.from_ledger(
+                    gov, plan['changes'], (payload.get('effort') or {}).get('level'))))
         if event == 'Stop':
             block, notice = stop_delivery(gov, task, owner, payload)
             notices += [notice] if notice else []
