@@ -1,5 +1,5 @@
 {
-  "description": "Adds ModelPilot's concise instruction once at session start",
+  "description": "Adds ModelPilot's concise instruction once at session start, and runs helper mode once the user sets it",
   "hooks": {
     "SessionStart": [
       {
@@ -7,6 +7,16 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/concise.sh\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/helper.sh\""
           }
         ]
       }

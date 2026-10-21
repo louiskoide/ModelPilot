@@ -1,6 +1,6 @@
 # ModelPilot lean mode (Claude Code plugin)
 
-This plugin runs your Claude Code sessions in the setting that came out cheapest at equal quality on [ModelPilot's benchmark](../docs/4b-writeup.md): Sonnet 5.5 at low effort, with a short instruction to work economically. Version 0.1.0.
+This plugin runs your Claude Code sessions in the setting that came out cheapest at equal quality on [ModelPilot's benchmark](../docs/4b-writeup.md): Sonnet 5.5 at low effort, with a short instruction to work economically. Version 0.2.0.
 
 ## Install
 
@@ -22,7 +22,24 @@ The startup header shows `@modelpilot:lean` when the plugin is active.
 - **Instruction.** A SessionStart hook adds [this text](../bench/prompts/concise.md) once at the start of each session, about 290 tokens. It asks for the smallest change that solves the task, only the tests that change needs, small tool output, no repeated reads or runs, and short replies. The hook skips it when the session runs a different agent or model.
 - **Effort.** Only through your saved `/effort low`; see Install.
 
-Nothing else changes. No requests go anywhere new, and the plugin runs nothing in the background.
+Nothing else changes until you turn on helper mode. No requests go anywhere new, and the plugin runs nothing in the background.
+
+## Helper mode: another model without the cache rewrite (opt-in, October 20)
+
+Switching the session's model with `/model` makes the next request write the whole conversation again into the new model's cache. Helper mode leaves the session where it is and hands each request to a helper on the model and effort you pick:
+
+```
+/modelpilot:helper opus high     # sonnet, opus or haiku; low, medium (the default), high, xhigh or max
+/modelpilot:helper status
+/modelpilot:helper off
+```
+
+- **The command costs nothing.** A hook handles it and blocks the prompt, so no request is sent. The setting lasts for this session only.
+- **While it's on,** each prompt gets a note of about 140 tokens. It asks the session to call the Agent tool once with the agent `modelpilot:helper-<effort>` and the chosen model, give it a self-contained brief, and relay its reply. The session's model, effort and cache stay as they were. On 2.1.284 and 2.1.305 the helper runs on the chosen model and effort (checked offline, see Checks).
+- **The helper starts with none of the conversation.** At the chosen model's rates, it writes its own system prompt and tools (about 7,500 tokens), the brief, and the files it re-reads. The session still writes the brief and reads the reply. For a long conversation and a self-contained task, that's much less than the rewrite. For work that leans on the conversation, it may not be. `python3 -m modelpilot.switch_quote --from claude-sonnet-5-5/low --to claude-opus-5-5/high --prefix-tokens 120000` estimates both. Its sizes are guesses, apart from the helper's base.
+- **Not measured on real work.** No live session has used it. The benchmark arms never delegated, so there's no evidence yet that it is cheaper at equal quality. The session's model decides whether to follow the note, and it relays the helper's account without checking it.
+
+**Effort alone.** For an effort change on the same model, use `/effort` instead. On 2.1.284 and 2.1.305, resuming a session at a new effort left the earlier messages unchanged. The client sent the new effort as a message at the new turn (checked offline). In ModelPilot's October 1 live probe, that shape kept the cache and changed thinking from the next turn. The interactive `/effort` path wasn't checked separately.
 
 ## The evidence, and its limits
 
@@ -51,9 +68,9 @@ Read these numbers with their limits:
 
 ## Known gaps
 
-- Claude sees `modelpilot:lean` in its list of subagents. Its description tells Claude not to delegate to it, but nothing prevents it.
+- Claude sees `modelpilot:lean` and the five `modelpilot:helper-*` agents in its list of subagents, in every request. Their descriptions tell Claude when to use them, but nothing enforces it.
 - ModelPilot's cache keeper and proxy aren't part of the plugin. A plugin can't route Claude Code's requests through a proxy.
 
 ## Checks
 
-`python3 -m modelpilot.plugin_check` runs a real Claude Code client with this plugin against a local fake API, at no cost. It records what reaches the model: the model, the effort, whether the system prompt changed, and how many times the instruction arrived. It also runs `claude plugin validate --strict`. Results for 2.1.284 and 2.1.303 are in [docs/evidence.md](../docs/evidence.md).
+`python3 -m modelpilot.plugin_check` runs a real Claude Code client with this plugin against a local fake API, at no cost. It records what reaches the model: the model, the effort, whether the system prompt changed, and how many times the instruction and the helper-mode note arrived. Two more cases cover helper mode (the helper's model and effort when the session makes the call the note asks for) and a session resumed at a new effort. It also runs `claude plugin validate --strict`. Results for 2.1.284 and 2.1.303 (v0.1.0), and for 2.1.284 and 2.1.305 (v0.2.0, helper mode included), are in [docs/evidence.md](../docs/evidence.md).
