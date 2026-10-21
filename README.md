@@ -48,7 +48,7 @@ The benchmark's cheapest setting at equal quality, Sonnet 5.5 at low effort with
 /plugin install modelpilot --marketplace louiskoide/ModelPilot
 ```
 
-Then run `/effort low` once and press Enter: a plugin can't set effort itself. What it changes, the evidence and its limits are in [plugin/README.md](plugin/README.md). It doesn't include the proxy, the governor or the cache keeper.
+Then run `/effort low` once and press Enter: a plugin can't set effort itself. What it changes, the evidence and its limits are in [plugin/README.md](plugin/README.md). It doesn't include the proxy, the governor or the cache keeper. Version 0.2.0 adds an opt-in helper mode, `/modelpilot:helper opus high`. It hands each request to a helper on that model and effort, so the session's cache isn't rewritten. It hasn't been measured on real work.
 
 ## Run it
 

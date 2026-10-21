@@ -1,8 +1,8 @@
 {
   "name": "modelpilot",
   "displayName": "ModelPilot lean mode",
-  "version": "0.1.0",
-  "description": "Runs the main session on Sonnet 5.5 with a short instruction to work economically. With /effort low saved once, it is the cheapest setting at equal quality on ModelPilot's benchmark",
+  "version": "0.2.0",
+  "description": "Runs the main session on Sonnet 5.5 with a short instruction to work economically. With /effort low saved once, it is the cheapest setting at equal quality on ModelPilot's benchmark. Optional helper mode hands requests to another model without rewriting the session's cache",
   "author": {
     "name": "Louis Koide",
     "url": "https://github.com/louiskoide"

@@ -4,9 +4,11 @@ delegated helper on that setting is the cheaper way to get the same work done. N
   python3 -m modelpilot.switch_quote --from claude-sonnet-5-5/low --to claude-opus-5-5/high --prefix-tokens 120000
 
 rewrite: the cache rewrite the switch pays beyond the read it replaces (`switch_policy.switch_cost`, target cold).
-delegate: a helper on the target setting starts with no history: its brief plus what it re-reads is written once at the
-target's rate, plus its output; the main session also writes the brief and reads the result. All token counts are
-guesses to override from the ledger (`LIMITS`); the helper does not hold the session's conversation.
+delegate: a helper on the target setting starts with no history: its own system prompt and tools, its brief and what it
+re-reads are written once at the target's rate, plus its output; the main session also writes the brief and reads the
+result. All token counts are guesses to override from the ledger (`LIMITS`), except the helper's base, measured on the
+plugin's helper (October 20: about 30,000 characters of system prompt and tools on client 2.1.284, at about 4 a token);
+the helper does not hold the session's conversation.
 """
 import argparse
 import json
@@ -14,9 +16,9 @@ import sys
 from . import switch_policy as sp
 
 # Guesses, not measurements. warn_usd: a rewrite above this is flagged. max_helper_tokens: a helper whose context
-# would exceed this is not offered (it would re-read too much to stay cheap). margin: delegation must beat the rewrite
-# by this fraction to be recommended.
-LIMITS = {'warn_usd': 0.10, 'max_helper_tokens': 30000, 'margin': 0.25,
+# would exceed this, its base aside, is not offered (it would re-read too much to stay cheap). margin: delegation must
+# beat the rewrite by this fraction to be recommended.
+LIMITS = {'warn_usd': 0.10, 'max_helper_tokens': 30000, 'margin': 0.25, 'helper_base_tokens': 7500,
           'brief_tokens': 1500, 'reread_tokens': 8000, 'helper_output_tokens': 1500, 'result_tokens': 600}
 
 
@@ -31,7 +33,7 @@ def quote(current, target, prefix_tokens, limits=None, cfg=None, rates=None):
     helper_tokens = lim['brief_tokens'] + lim['reread_tokens']
     t, c = sp._rate(rates, target[0], helper_tokens), sp._rate(rates, current[0], prefix_tokens)
     scale = cfg['effort_output_factor'][target[1]] * cfg['models'][target[0]].get('output_factor', 1)
-    delegate = (helper_tokens * t['write_5m'] + lim['helper_output_tokens'] * scale * t['output'] +
+    delegate = ((lim['helper_base_tokens'] + helper_tokens) * t['write_5m'] + lim['helper_output_tokens'] * scale * t['output'] +
                 lim['brief_tokens'] * c['output'] + lim['result_tokens'] * c['read']) / 1e6
     if rewrite <= lim['warn_usd']:
         action, why = 'switch', 'rewrite at or under the warning level'
@@ -41,7 +43,8 @@ def quote(current, target, prefix_tokens, limits=None, cfg=None, rates=None):
         action, why = 'warn', 'rewrite is expensive and a helper is not clearly cheaper or is over its size limit'
     return {'current': list(current), 'target': list(target), 'prefix_tokens': prefix_tokens, 'rewrite_usd': rewrite,
             'delegate_usd': delegate, 'action': action, 'reason': why, 'applied': False,
-            'assumptions': 'target cold, 5m write, guessed helper sizes (LIMITS); a helper has no conversation history'}
+            'assumptions': 'target cold, 5m write, guessed helper sizes (LIMITS) beside its measured base; a helper has '
+                           'no conversation history'}
 
 
 def from_ledger(gov, changes, effort=None, limits=None):

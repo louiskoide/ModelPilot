@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 import unittest
 from modelpilot import plugin_check as pc
 
@@ -24,6 +25,12 @@ def frontmatter(path):
 def hook(payload):
     return subprocess.run(['bash', str(PLUGIN/'hooks/concise.sh')], input=json.dumps(payload), capture_output=True,
                           text=True, timeout=30).stdout
+
+
+def helper(prompt, data, session='s-1'):
+    out = subprocess.run(['bash', str(PLUGIN/'hooks/helper.sh')], input=json.dumps({'session_id': session, 'prompt': prompt}),
+                         capture_output=True, text=True, timeout=30, env={'CLAUDE_PLUGIN_DATA': data}).stdout
+    return json.loads(out) if out else None
 
 
 class PluginFilesTests(unittest.TestCase):
@@ -58,6 +65,37 @@ class PluginFilesTests(unittest.TestCase):
         self.assertEqual(hook({'agent_type': 'reviewer', 'source': 'startup'}), '')
         self.assertEqual(hook({'agent_type': 'modelpilot:lean', 'model': 'claude-opus-5-5'}), '')
 
+    def test_helper_agents_set_their_effort_and_the_command_is_the_hooks(self):
+        for effort in ('low', 'medium', 'high', 'xhigh', 'max'):
+            fields, body = frontmatter(PLUGIN/f'agents/helper-{effort}.md')
+            self.assertEqual((fields['name'], fields['effort']), (f'helper-{effort}', effort))
+            self.assertNotIn('model', fields, 'the Agent call sets the model')
+            self.assertTrue(body.strip())
+        fields, _ = frontmatter(PLUGIN/'commands/helper.md')
+        self.assertEqual(fields['disable-model-invocation'], 'true')
+        [entry] = load(PLUGIN/'hooks/hooks.json')['hooks']['UserPromptSubmit']
+        self.assertIn('${CLAUDE_PLUGIN_ROOT}/hooks/helper.sh', entry['hooks'][0]['command'])
+
+    @unittest.skipUnless(shutil.which('bash'), 'bash not installed')
+    def test_helper_mode_is_set_per_session_and_its_command_sends_nothing(self):
+        with tempfile.TemporaryDirectory() as data:
+            self.assertIsNone(helper('fix the bug', data))
+            self.assertIn('is off', helper('/modelpilot:helper', data)['reason'])
+            for bad in ('/modelpilot:helper gpt', '/modelpilot:helper opus huge', '/modelpilot:helper opus high extra'):
+                self.assertEqual(helper(bad, data)['decision'], 'block')
+                self.assertIn('Nothing was changed', helper(bad, data)['reason'])
+            self.assertEqual(helper('/modelpilot:helper opus high', data)['decision'], 'block')
+            note = helper('fix the bug', data)['hookSpecificOutput']
+            self.assertEqual(note['hookEventName'], 'UserPromptSubmit')
+            self.assertIn('subagent_type modelpilot:helper-high and model opus', note['additionalContext'])
+            self.assertTrue(note['additionalContext'].startswith(pc.HELPER_NOTE))
+            self.assertIsNone(helper('<task-notification>\n<task-id>a1</task-id>', data), 'a finished helper is not handed off')
+            self.assertIsNone(helper('fix the bug', data, session='s-2'), 'another session keeps its own setting')
+            self.assertIn('opus at high', helper('/modelpilot:helper status', data)['reason'])
+            self.assertIn('medium effort', helper('/modelpilot:helper sonnet', data, session='s-2')['reason'])
+            self.assertIn('is off', helper('/modelpilot:helper off', data)['reason'])
+            self.assertIsNone(helper('fix the bug', data))
+
 
 @unittest.skipUnless(pc.PINNED.exists(), 'pinned Claude Code client not installed in work/claude-client')
 class RealClientPluginTests(unittest.TestCase):
@@ -82,6 +120,19 @@ class RealClientPluginTests(unittest.TestCase):
         self.assertEqual(self.found['efforts']['plugin'], ['medium'],
                          "the agent's effort now reaches the main thread: update plugin/README.md's setup step")
         self.assertEqual(self.found['efforts']['plugin_saved_low'], ['low'])
+
+    def test_a_helper_runs_on_the_chosen_setting_and_the_session_stays_put(self):
+        self.assertEqual(self.found['helper']['settings'], [('claude-opus-5-5', 'high'), ('claude-sonnet-5-5', 'medium')])
+        self.assertTrue(self.found['helper']['note_once_in_main'])
+        self.assertTrue(self.found['helper']['note_never_in_helper'])
+        self.assertFalse(self.found['helper']['note_without_mode'])
+
+    def test_the_clients_own_effort_change_adds_a_message_and_keeps_the_prefix(self):
+        resumed = self.found['effort_resume']
+        self.assertEqual(resumed['efforts'], ['low', 'high'])
+        self.assertEqual([e for _, e in resumed['message_efforts']], ['low', 'high'],
+                         'plugin/README.md says /effort keeps the cache: recheck it')
+        self.assertTrue(resumed['prefix_kept'])
 
     def test_strict_validation_passes(self):
         for name, result in self.report['validate'].items():
