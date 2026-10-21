@@ -75,6 +75,7 @@ COMMANDS = (
             paid=True, plans=[['--claude', '{claude}'], ['--claude', '{claude}', '--', '--model', 'opus']],
             refusals=['Claude Code is missing']),
     command('plugin_check', "The Claude Code plugin against a real client and the loopback fixture: what reaches the model ($0)"),
+    command('helper_report', "The plugin's helper-mode log priced from Claude Code's transcripts, beside the /model rewrite ($0)"),
     command('policy_replay', "Replay recorded ModelPilot decisions through the current policy ($0)"),
     command('pre_edit_note', "Option C: Opus's note before the first edit, on recorded Sonnet transcripts; write paid, score $0",
             paid=True, plans=[['write', '--out', '{tmp}/pre-edit-note']], needs='--limit-usd'),

@@ -1,5 +1,5 @@
 {
-  "description": "Adds ModelPilot's concise instruction once at session start, and runs helper mode once the user sets it",
+  "description": "Adds ModelPilot's concise instruction once at session start, runs helper mode once the user sets it, and logs its helpers",
   "hooks": {
     "SessionStart": [
       {
@@ -17,6 +17,27 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/helper.sh\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/helper-log.sh\""
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/helper-log.sh\""
           }
         ]
       }
