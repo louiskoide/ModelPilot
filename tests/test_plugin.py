@@ -27,6 +27,13 @@ def hook(payload):
                           text=True, timeout=30).stdout
 
 
+def helper_log(payload, data):
+    subprocess.run(['bash', str(PLUGIN/'hooks/helper-log.sh')], input=json.dumps(payload), capture_output=True, text=True,
+                   timeout=30, env={'CLAUDE_PLUGIN_DATA': data}, check=True)
+    log = Path(data)/'helper-log.jsonl'
+    return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+
 def helper(prompt, data, session='s-1'):
     out = subprocess.run(['bash', str(PLUGIN/'hooks/helper.sh')], input=json.dumps({'session_id': session, 'prompt': prompt}),
                          capture_output=True, text=True, timeout=30, env={'CLAUDE_PLUGIN_DATA': data}).stdout
@@ -95,6 +102,45 @@ class PluginFilesTests(unittest.TestCase):
             self.assertIn('medium effort', helper('/modelpilot:helper sonnet', data, session='s-2')['reason'])
             self.assertIn('is off', helper('/modelpilot:helper off', data)['reason'])
             self.assertIsNone(helper('fix the bug', data))
+            notes = [(e['session'], e['event'], e['model'], e['effort']) for e in helper_log({}, data)]
+            self.assertEqual(notes, [('s-1', 'note', 'opus', 'high')], 'one line per prompt that got the note')
+
+    def test_the_helper_log_hooks_are_registered(self):
+        hooks = load(PLUGIN/'hooks/hooks.json')['hooks']
+        [launch], [finish] = hooks['PostToolUse'], hooks['SubagentStop']
+        self.assertEqual(launch['matcher'], 'Agent')
+        for entry in (launch, finish):
+            self.assertIn('${CLAUDE_PLUGIN_ROOT}/hooks/helper-log.sh', entry['hooks'][0]['command'])
+
+    @unittest.skipUnless(shutil.which('bash'), 'bash not installed')
+    def test_the_helper_log_keeps_launches_and_finishes_but_no_brief(self):
+        brief = 'Fix it. Config: {"model": "haiku", "agent_id": "x", "level": "max"}'
+        launch = {'session_id': 's-1', 'transcript_path': '/t/s-1.jsonl', 'agent_type': 'modelpilot:lean',
+                  'effort': {'level': 'low'}, 'hook_event_name': 'PostToolUse', 'tool_name': 'Agent',
+                  'tool_input': {'prompt': brief, 'subagent_type': 'modelpilot:helper-high', 'model': 'opus'},
+                  'tool_response': {'isAsync': True, 'agentId': 'a1', 'resolvedModel': 'claude-opus-5-5', 'prompt': brief},
+                  'tool_use_id': 'toolu_1'}
+        nested = dict(launch, agent_id='a1', agent_type='modelpilot:helper-high', effort={'level': 'high'},
+                      tool_response={'agentId': 'a2'}, tool_use_id='toolu_2')
+        other = dict(launch, tool_input={'prompt': brief, 'subagent_type': 'Explore'})
+        stop = {'session_id': 's-1', 'agent_id': 'a1', 'agent_type': 'modelpilot:helper-high',
+                'hook_event_name': 'SubagentStop', 'agent_transcript_path': '/t/s-1/subagents/agent-a1.jsonl',
+                'last_assistant_message': brief, 'background_tasks': []}
+        other_stop = dict(stop, agent_id='e1', agent_type='Explore',
+                          background_tasks=[{'id': 'a2', 'type': 'subagent', 'agent_type': 'modelpilot:helper-high'}])
+        with tempfile.TemporaryDirectory() as data:
+            for payload in (launch, nested, other, stop, other_stop):
+                log = helper_log(payload, data)
+        first, second, done = log
+        self.assertEqual({k: first[k] for k in ('session', 'event', 'helper', 'model', 'agent', 'caller', 'caller_effort',
+                                                'tool_use_id', 'transcript')},
+                         {'session': 's-1', 'event': 'launch', 'helper': 'modelpilot:helper-high', 'model': 'opus',
+                          'agent': 'a1', 'caller': '', 'caller_effort': 'low', 'tool_use_id': 'toolu_1',
+                          'transcript': '/t/s-1.jsonl'})
+        self.assertEqual((second['agent'], second['caller'], second['caller_effort']), ('a2', 'a1', 'high'))
+        self.assertEqual((done['event'], done['agent'], done['agent_transcript']),
+                         ('finish', 'a1', '/t/s-1/subagents/agent-a1.jsonl'))
+        self.assertNotIn('Fix it', json.dumps(log))
 
 
 @unittest.skipUnless(pc.PINNED.exists(), 'pinned Claude Code client not installed in work/claude-client')
@@ -126,6 +172,13 @@ class RealClientPluginTests(unittest.TestCase):
         self.assertTrue(self.found['helper']['note_once_in_main'])
         self.assertTrue(self.found['helper']['note_never_in_helper'])
         self.assertFalse(self.found['helper']['note_without_mode'])
+
+    def test_the_helper_log_records_the_note_the_launch_and_every_finish(self):
+        log = self.found['helper']['log']
+        self.assertEqual(log['notes'], [('opus', 'high')])
+        self.assertEqual(log['session_launches'], [('modelpilot:helper-high', 'opus', 'medium')])
+        self.assertEqual(log['finishes'], 1 + log['nested_launches'])  # the fixture's helper repeats its Agent call
+        self.assertFalse(self.found['helper']['log_without_mode'])
 
     def test_the_clients_own_effort_change_adds_a_message_and_keeps_the_prefix(self):
         resumed = self.found['effort_resume']

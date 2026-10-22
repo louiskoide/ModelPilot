@@ -5,9 +5,9 @@ Cases: `control` (no plugin), `plugin`, `plugin_saved_low` (Sonnet 5.5's effort 
 under modelSettings), `plugin_model_opus` (`--model` over the plugin's agent) and `plugin_helper` (helper mode saved as
 opus high; the fixture makes the Agent call its note asks for). For each main-loop request it records the model, the
 effort, the system prompt's hash and how often the concise text and the helper-mode note arrived in the system prompt
-and in the messages. `effort_resume` (October 20) resumes a low-effort session at high, the client's own effort change,
-and compares the two requests' messages. `validate` is `claude plugin validate --strict` on the plugin and on the
-marketplace.
+and in the messages; each case also keeps the helper-mode log's events (October 21). `effort_resume` (October 20)
+resumes a low-effort session at high, the client's own effort change, and compares the two requests' messages.
+`validate` is `claude plugin validate --strict` on the plugin and on the marketplace.
 
     python3 -m modelpilot.plugin_check --claude work/claude-client/node_modules/.bin/claude --out runs/plugin-check.json
 """
@@ -92,12 +92,16 @@ def capture(cli, plugin=True, args=(), user_settings=None, timeout=180, tools='B
                 command += ['--plugin-dir', str(PLUGIN)]
             done = subprocess.run(command + list(args), env=env, cwd=dirs['workspace'], capture_output=True, text=True,
                                   timeout=timeout, stdin=subprocess.DEVNULL)
+            log = data/'helper-log.jsonl'
+            log = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
     finally:
         server.shutdown()
         server.server_close()
         thread.join()
     bodies = [json.loads(raw) for raw in server.bodies]
-    return {'returncode': done.returncode, 'requests': [summarize(b, tmp_name) for b in bodies if b.get('tools')]}
+    return {'returncode': done.returncode, 'requests': [summarize(b, tmp_name) for b in bodies if b.get('tools')],
+            'helper_log': [{k: e.get(k) for k in ('event', 'helper', 'model', 'effort', 'caller', 'caller_effort')}
+                           for e in log]}
 
 
 def plain(messages):
@@ -177,7 +181,19 @@ def findings(runs):
                        'note_never_in_helper': not any(r['helper_note'] for r in main['plugin_helper']
                                                        if r['model'] != SONNET_5_5),
                        'note_without_mode': any(r['helper_note'] for name, rs in main.items() if name != 'plugin_helper'
-                                                for r in rs)}}
+                                                for r in rs),
+                       'log': log_summary(runs['plugin_helper']['helper_log']),
+                       'log_without_mode': any(run['helper_log'] for name, run in runs.items() if name != 'plugin_helper')}}
+
+
+def log_summary(log):
+    """The helper-mode log (hooks/helper-log.sh) of one session: its notes, its launches from the session itself, and
+    whether every launch, nested ones included, logged its finish."""
+    launches = [e for e in log if e['event'] == 'launch']
+    return {'notes': [(e['model'], e['effort']) for e in log if e['event'] == 'note'],
+            'session_launches': [(e['helper'], e['model'], e['caller_effort']) for e in launches if not e['caller']],
+            'nested_launches': sum(bool(e['caller']) for e in launches),
+            'finishes': sum(e['event'] == 'finish' for e in log)}
 
 
 def check(cli):

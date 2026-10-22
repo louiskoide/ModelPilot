@@ -20,6 +20,9 @@ case "$prompt" in
     read -r model effort < "$state"
     note="ModelPilot helper mode (the user's setting): hand this request to a helper on $model at $effort effort. Call the Agent tool once with subagent_type modelpilot:helper-$effort and model $model. The helper has none of this conversation, so make its prompt self-contained: the request in full, the file paths and facts it needs, and what has been found or decided so far. Then relay its reply in a sentence or two. Answer without a helper only when the request is about this conversation itself or the helper's last reply."
     printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}}\n' "$note"
+    # The helper-mode log (hooks/helper-log.sh): one line per prompt that got the note, to compare with launches.
+    printf '{"ts":%s,"session":"%s","event":"note","model":"%s","effort":"%s"}\n' "$(date +%s)" "$session" "$model" \
+      "$effort" >> "$CLAUDE_PLUGIN_DATA/helper-log.jsonl" 2>/dev/null
     exit 0 ;;
 esac
 set -f
