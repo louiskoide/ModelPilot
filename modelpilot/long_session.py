@@ -21,6 +21,7 @@ import argparse
 import hashlib
 import json
 import os
+from collections import Counter
 from pathlib import Path
 import shutil
 import subprocess
@@ -41,6 +42,7 @@ COMPACT_MODES = ('none', 'warm', 'cold')
 MIN_TASKS, MAX_TASKS = 3, 5
 # Delegation briefs read one checkout's diff against its base commit; a sequence has one per subtask.
 UNSUPPORTED_ARMS = ('modelpilot-delegate',)
+HELPER_ALIASES = {'claude-opus-5-5': 'opus', 'claude-sonnet-5-5': 'sonnet', 'claude-haiku-5-5': 'haiku'}
 
 
 def base_time(task):
@@ -134,7 +136,8 @@ class SequenceTrial(bench.Trial):
                            sequence={'id': sequence['id'], 'tasks': [t['id'] for t in tasks],
                                      'dirs': [directory(i) for i in range(len(tasks))]},
                            spec_sha256={t['id']: bench_tasks.spec_hash(t) for t in tasks},
-                           compact=compact, autocompact=autocompact, steps=self.steps)
+                           compact=compact, autocompact=autocompact, steps=self.steps,
+                           last_task=self.arm.get('last_task'))
 
     def next_gap(self):
         return self.steps[len(self.sessions)]['gap_before'] if len(self.sessions) < len(self.steps) else 0
@@ -161,6 +164,14 @@ class SequenceTrial(bench.Trial):
                 self.env['PYTHONPATH'] = os.pathsep.join(paths)
             else:
                 self.env.pop('PYTHONPATH', None)
+        last = self.arm.get('last_task')
+        if last and step['kind'] == 'task' and step['index'] == len(self.tasks) - 1:
+            if last['via'] == 'switch':  # the session itself on the new model, as /model and /effort would set it
+                self.turn_setting = {'model': last['model'], 'effort': last['effort']}
+            else:  # what /modelpilot:helper opus medium saves (plugin/hooks/helper.sh); the prompt itself is unchanged
+                self.plugin_data.mkdir(parents=True, exist_ok=True)
+                (self.plugin_data/f'helper-{self.session_id}').write_text(
+                    f"{HELPER_ALIASES[last['model']]} {last['effort']}\n")
         before = self.sessions[-1]['ended_unix'] if self.sessions else None
         super().run_session(index)
         session = self.sessions[-1]
@@ -241,7 +252,8 @@ def turns(record, rows, rates):
         first = first_request(mine)
         usage = (first or {}).get('usage') or {}
         compaction = [r for r in mine if r.get('compaction')]
-        out.append({'prompt': session.get('prompt'), 'subtask': session.get('subtask'),
+        models = Counter(r.get('model') for r in mine if r.get('kind') == 'messages' and r.get('tool_count'))
+        out.append({'prompt': session.get('prompt'), 'subtask': session.get('subtask'), 'models': dict(models),
                     'gap_seconds': session.get('gap_seconds'), 'stop': session.get('stop'),
                     'requests': session.get('requests'),
                     'cost_usd': sum(costs) if costs and None not in costs else None,
@@ -284,12 +296,15 @@ def report(trials, rng_seed=0, resamples=10000):
     sequence and per subtask, how returns found the conversation, and compaction; per pair of arms, paired
     differences per subtask (each subtask's turn, with its preparing compaction, is one pair), bootstrap 95%."""
     import random
-    by_arm = {}
+    by_arm, ineligible = {}, Counter()
     for record, turn_list in trials:
         if record.get('complete') and record.get('shape') == 'sequence':
+            if bench_report.ineligible_reason(record):  # e.g. a last_task setting that didn't reach the wire
+                ineligible[record['arm']] += 1
+                continue
             by_arm.setdefault(record['arm'], []).append((record, turn_list))
     arms = {}
-    per_subtask, by_subtask_runs = {}, {}
+    per_subtask, by_subtask_runs, last_ids = {}, {}, {}
     for arm, items in sorted(by_arm.items()):
         costs, passes, returns, compaction = {}, {}, [], []
         sequence_costs = [r.get('cache', {}).get('cold_equivalent_cost_usd') for r, _ in items]
@@ -301,6 +316,12 @@ def report(trials, rng_seed=0, resamples=10000):
             returns += [t['return_read_fraction'] for t in turn_list if t['prompt'] == 'task' and t['subtask']]
             compaction += [t for t in turn_list if t['prompt'] == 'compact']
         by_subtask_runs[arm] = set(costs)
+        last_ids[arm] = {r['sequence']['tasks'][-1] for r, _ in items}
+        # The last task's turn: where a last_task arm switches or hands off. Which models its requests went to.
+        last_turns = [t for r, ts in items for t in ts
+                      if t['prompt'] == 'task' and t['subtask'] == len(r['sequence']['tasks']) - 1]
+        last_costs = [c for t, v in costs.items() if t in last_ids[arm] for c in v]
+        last_passes = [x for t, v in passes.items() if t in last_ids[arm] for x in v]
         per_subtask[arm] = ({t: sum(v) / len(v) for t, v in costs.items() if None not in v},
                             {t: sum(v) / len(v) for t, v in passes.items()})
         known = [c for c in sequence_costs if c is not None]
@@ -317,7 +338,12 @@ def report(trials, rng_seed=0, resamples=10000):
                      'compaction_turns': len(compaction),
                      # Unknown when any compaction turn's is (October 15 audit: an unknown turn counted $0 here).
                      'compaction_usd': None if None in compaction_usd else sum(compaction_usd),
-                     'compaction_output_tokens': None if None in compaction_tokens else sum(compaction_tokens)}
+                     'compaction_output_tokens': None if None in compaction_tokens else sum(compaction_tokens),
+                     'ineligible_sequences': ineligible[arm],
+                     'last_task': {'subtasks': len(last_passes), 'passed': sum(last_passes),
+                                   'mean_usd': (sum(last_costs) / len(last_costs)
+                                                if last_costs and None not in last_costs else None),
+                                   'turns_using_model': dict(Counter(m for t in last_turns for m in t.get('models') or {}))}}
     pairs = []
     names = sorted(per_subtask)
     for i, a in enumerate(names):
@@ -336,6 +362,17 @@ def report(trials, rng_seed=0, resamples=10000):
                 entry['pass_rate'] = bench_report.difference(
                     mean_diff(passed, 1)['value'],
                     bench_report.bootstrap(passed, lambda s: mean_diff(s, 1), rng, resamples)['value'], len(passed))
+                last = [t for t in shared if t in last_ids[a] & last_ids[b]]
+                last_passed = [t for t in passed if t in last_ids[a] & last_ids[b]]
+                if last:  # the sequences' last tasks alone, where the arms' settings differ
+                    entry['last_task'] = {
+                        'cost_usd': bench_report.difference(
+                            mean_diff(last)['value'],
+                            bench_report.bootstrap(last, mean_diff, rng, resamples)['value'], len(last)),
+                        'pass_rate': bench_report.difference(
+                            mean_diff(last_passed, 1)['value'],
+                            bench_report.bootstrap(last_passed, lambda s: mean_diff(s, 1), rng, resamples)['value'],
+                            len(last_passed)) if last_passed else None}
             pairs.append(entry)
     return {'arms': arms, 'pairs': pairs,
             'pairing': 'per subtask: its task turn plus the compaction turn that prepared it, cold-equivalent dollars'}
