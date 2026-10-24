@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Updated Oct 19, 2026. History: `docs/changelog/`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
+Updated Oct 23, 2026. History: `docs/changelog/`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
 
 ## Objective
 
@@ -10,17 +10,17 @@ This checkout is `/Users/louiskoide/ModelPilot`. `runs/` and `work/` are ignored
 
 ## Core finding
 
-Switching model OR effort wrote a new cache prefix in tested M0 conditions. Returning to an earlier model/effort reused its still-warm entry. Model cache state by exact model/effort/prefix and recent use. Don't assume a switch destroys prior entries. Prewarming is billable even with zero output tokens; maintenance raised cost in the tested sequences. Shadow warming stays off by default.
+Switching model OR effort wrote a new cache prefix in tested M0 conditions. Returning to an earlier model/effort reused its still-warm entry. Model cache state by exact model/effort/prefix and recent use. Don't assume a switch destroys prior entries. Prewarming is billable even with zero output tokens; maintenance raised cost in tests. Shadow warming stays off by default.
 
 ## Status
 
-- M0 cache harness and M1 pass-through proxy: verified, including an 8-hour soak. Missing: one-hour TTL, other request shapes, broad proxy compatibility.
-- M2 ledger, M3 workers, M4 verifier, M5 controls: bounded harnesses, small live checks; not integrated.
-- M6 benchmark: 29 tuning tasks live; 4b run Oct 18–19, spent. Plugin `plugin/` (Oct 19); effort: the user's `/effort low`.
+- M0 cache harness and M1 pass-through proxy: verified, including an 8-hour soak. Missing: one-hour TTL, other request shapes, wide compatibility.
+- M2 ledger, M3 workers, M4 verifier, M5 controls: bounded harnesses, small live checks, unintegrated.
+- M6 benchmark: 29 tuning tasks live; 4b run Oct 18–19, spent. Plugin `plugin/` (Oct 19; helper mode Oct 20; helper-vs-`/model` arms built Oct 23). Effort: the user's `/effort low`.
 - ModelPilot arm: no adaptive routing (Oct 18); starts at low concise; Haiku 5.5 not a session model (Oct 10); no advisor (Oct 11; stuck: Opus 5.5); delegation off. Quality floor (Oct 8): no worse than the user's own model; arms `modelpilot-for-sonnet`/`-for-opus` (no prompt, Oct 17).
 - Governor: dry-run, wired into the proxy and hooks; live: a hook correction, turn-end delivery, an observed rebuild, a fallback (Oct 12). Missing: active mode.
 
-The project is a tested set of components and bounded harnesses, not an operational end-to-end governor. Never present the toy benchmark as proof of production quality or savings.
+The project is tested components and bounded harnesses, not an end-to-end governor. Never present the toy benchmark as proof of quality or savings.
 
 ## Evidence behind current decisions
 
