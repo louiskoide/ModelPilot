@@ -84,6 +84,18 @@ ARMS = {
     # makes for an Opus user has to come from the cache levers (plan item 6). Plain opus-5.5 plus the lifetime.
     'opus-5.5-5m': {'kind': 'fixed', 'model': 'claude-opus-5-5', 'prompt_cache_ttl': '5m'},
     'opus-5.5-1h': {'kind': 'fixed', 'model': 'claude-opus-5-5', 'prompt_cache_ttl': '1h'},
+    # Helper mode against /model (user request, October 23; sequence shape only): low concise with the Agent tool and
+    # the plugin's helpers (plugin/ without its settings.json, so the arm's own model and prompt apply), the same
+    # prefix in all three until the sequence's last task. There the session stays, resumes on Opus 5.5 medium (what
+    # /model and /effort do), or gets helper mode for Opus 5.5 medium (the plugin's hook and helper agents).
+    'low-concise-stay': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low',
+                         'append_system_prompt': 'bench/prompts/concise.md', 'helper_plugin': True},
+    'low-concise-switch-opus': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low',
+                                'append_system_prompt': 'bench/prompts/concise.md', 'helper_plugin': True,
+                                'last_task': {'via': 'switch', 'model': 'claude-opus-5-5', 'effort': 'medium'}},
+    'low-concise-helper-opus': {'kind': 'fixed', 'model': 'claude-sonnet-5-5', 'effort': 'low',
+                                'append_system_prompt': 'bench/prompts/concise.md', 'helper_plugin': True,
+                                'last_task': {'via': 'helper', 'model': 'claude-opus-5-5', 'effort': 'medium'}},
     # Opus levers that leave its reasoning and its fix alone (user request, October 17; docs/m6-benchmark-plan.md,
     # "Opus levers"): Opus 5.5 medium with one appended prompt each. lean-io is concise's tool-output bullets without
     # its fix-scope and prose ones (tool results are 81% of what an Opus trial reads back); batch-calls asks for
@@ -374,22 +386,28 @@ def budget_text(usd):
     return ('%.10f' % usd).rstrip('0').rstrip('.')
 
 
-def client_command(cli, prompt, model, max_turns, budget_usd, session, extra=(), effort=None, append_prompt=None):
+def client_command(cli, prompt, model, max_turns, budget_usd, session, extra=(), effort=None, append_prompt=None,
+                   tools=TOOLS):
     # The stop threshold applies per invocation: a resumed session gets its own. No model
     # (Jev arms) leaves the client on the sentinel the router's environment sets.
     return [str(cli), '-p', prompt, *(['--model', model] if model else []), *(['--effort', effort] if effort else []),
             *(['--append-system-prompt-file', str(append_prompt)] if append_prompt else []),
             '--output-format', 'stream-json', '--verbose',
             '--max-turns', str(max_turns), '--max-budget-usd', budget_text(budget_usd), '--setting-sources', '',
-            '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--tools', TOOLS, '--allowedTools', TOOLS,
+            '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--tools', tools, '--allowedTools', tools,
             *session, *extra]
 
 
 def effort_check(rows, effort):
     """Whether a fixed arm's main-loop requests ran at the effort it asked for (a client could ignore --effort).
-    None without any such request: the session's stop reason, not this check, says what happened."""
-    sent = Counter(r.get('effective_effort') or r.get('effort') for r in rows
-                   if r.get('kind') == 'messages' and r.get('tool_count'))
+    effort may be {model: effort} (an arm with a last_task setting): each request at its own model's effort, and no
+    other model. None without any such request: the session's stop reason, not this check, says what happened."""
+    main = [r for r in rows if r.get('kind') == 'messages' and r.get('tool_count')]
+    if isinstance(effort, dict):
+        sent = Counter(f"{r.get('model')} {r.get('effective_effort') or r.get('effort')}" for r in main)
+        return {'requested': effort, 'sent': dict(sorted(sent.items())),
+                'applied': set(sent) <= {f'{m} {e}' for m, e in effort.items()} if sent else None}
+    sent = Counter(r.get('effective_effort') or r.get('effort') for r in main)
     return {'requested': effort, 'sent': {str(k): n for k, n in sorted(sent.items(), key=str)},
             'applied': set(sent) == {effort} if sent else None}
 
@@ -434,10 +452,12 @@ def appended_prompt(arm):
             'sha256': hashlib.sha256(data).hexdigest()}
 
 
-def prompt_check(rows, sha256):
-    """Whether every main-loop request carried the arm's appended system prompt (the proxy's system_marker).
-    None without any such request: the session's stop reason, not this check, says what happened."""
-    seen = Counter(r.get('system_marker') for r in rows if r.get('kind') == 'messages' and r.get('tool_count'))
+def prompt_check(rows, sha256, model=None):
+    """Whether every main-loop request carried the arm's appended system prompt (the proxy's system_marker), only
+    those on model when given (a helper's requests have the helper's own prompt). None without any such request:
+    the session's stop reason, not this check, says what happened."""
+    seen = Counter(r.get('system_marker') for r in rows if r.get('kind') == 'messages' and r.get('tool_count')
+                   and model in (None, r.get('model')))
     return {'requested_sha256': sha256, 'present': seen[True], 'missing': sum(n for k, n in seen.items() if k is not True),
             'applied': set(seen) == {True} if seen else None}
 
@@ -615,7 +635,9 @@ class Trial:
         self.dir = Path(trial_dir).absolute()
         self.cli, self.api_key, self.upstream, self.rates = cli, key, upstream, price_table
         self.python = python or bench_tasks.interpreter()
-        self.limits = {'max_turns': max_turns, 'budget_usd': budget_usd, 'timeout_s': timeout, 'tools': TOOLS}
+        self.limits = {'max_turns': max_turns, 'budget_usd': budget_usd, 'timeout_s': timeout,
+                       'tools': TOOLS + ',Agent' if arm.get('helper_plugin') else TOOLS}
+        self.turn_setting = {}  # a model and effort for the next session in place of the arm's (long_session)
         self.grace, self.gap, self.expected, self.version = grace, gap, expected_hidden_passed, client_version
         self.prompts = [PREAMBLE + task['instruction']] + ([FOLLOW_UP] if shape == 'followup' else [])
         self.session_id = str(uuid.uuid4())
@@ -690,6 +712,11 @@ class Trial:
             subscription_login(env, self.oauth_token)
         if self.arm.get('prompt_cache_ttl'):  # the main conversation's cache lifetime, whatever the login
             env['CLAUDE_CODE_PROMPT_CACHE_TTL'] = self.arm['prompt_cache_ttl']
+        if self.arm.get('helper_plugin'):  # the plugin's hooks and helper agents; its settings.json would set the model
+            shutil.copytree(ROOT/'plugin', self.dir/'plugin')
+            (self.dir/'plugin/settings.json').unlink()
+            self.client_extra = self.client_extra + ['--plugin-dir', str(self.dir/'plugin')]
+            self.plugin_data = dirs['config']/'plugins/data/modelpilot-inline'  # CLAUDE_PLUGIN_DATA (plugin_check)
         # The agent's python3/pip/pytest are the grader's interpreter, not whatever the system has.
         env['PATH'] = os.pathsep.join([str(Path(self.python).parent), env['PATH']])
         # Same import paths as the grader, as an editable install would give a developer.
@@ -740,9 +767,11 @@ class Trial:
         model, extra = (None, ['--add-dir', self.route['add_dir']]) if self.router else (self.arm['model'], [])
         extra = extra + self.client_extra
         fixed_effort = self.arm.get('effort') if self.arm['kind'] == 'fixed' else None  # the adapter sets its own
+        model, fixed_effort = self.turn_setting.get('model', model), self.turn_setting.get('effort', fixed_effort)
         command = client_command(self.cli, self.prompts[index], model, self.limits['max_turns'],
                                  self.limits['budget_usd'], session, extra, effort=fixed_effort,
-                                 append_prompt=self.appended['file'] if self.appended else None)
+                                 append_prompt=self.appended['file'] if self.appended else None,
+                                 tools=self.limits['tools'])
         env = self.env
         if self.adapter:
             command = self.adapter.command(command, env['ANTHROPIC_BASE_URL'])
@@ -809,10 +838,14 @@ class Trial:
             cost_components=bench_report.cost_components(bench_report.priced_rows(self.record, rows, self.rates), self.rates),
             write_sources=bench_report.write_sources(bench_report.priced_rows(self.record, rows, self.rates), self.rates))
         self.record['transport_check'] = bench_report.transport_check(rows)
+        last_task = self.arm.get('last_task')
         if self.arm['kind'] == 'fixed' and self.arm.get('effort'):
-            self.record['effort_check'] = effort_check(rows, self.arm['effort'])
+            self.record['effort_check'] = effort_check(rows, {self.arm['model']: self.arm['effort'],
+                                                              last_task['model']: last_task['effort']}
+                                                       if last_task else self.arm['effort'])
         if self.appended:
-            self.record['prompt_check'] = prompt_check(rows, self.appended['sha256'])
+            self.record['prompt_check'] = prompt_check(rows, self.appended['sha256'],
+                                                       self.arm['model'] if last_task and last_task['via'] == 'helper' else None)
         if self.arm.get('prompt_cache_ttl'):
             self.record['ttl_check'] = ttl_check(rows, self.arm['prompt_cache_ttl'])
         if self.check_compaction:
@@ -1112,6 +1145,8 @@ def run_bench(tasks, arms, trials, seed, out, cli, key, upstream, price_table, *
         unsupported = [a for a in arms if a in long_session.UNSUPPORTED_ARMS]
         if unsupported:
             raise ValueError(f'Not supported in sequences: {unsupported}')
+    elif any('last_task' in ARMS[a] for a in arms):  # its setting starts at a sequence's last task
+        raise ValueError('Arms with a last_task setting run in the sequence shape only')
     subscription_arms = tuple(subscription_arms)
     wrong = [a for a in subscription_arms if a not in arms or ARMS[a]['kind'] not in SUBSCRIPTION_KINDS]
     if wrong or (subscription_arms and not oauth_token):
@@ -1275,6 +1310,8 @@ def main():
         raise SystemExit(f'Unknown arm. Arms: {", ".join(ARMS)}')
     if units and any(a in long_session.UNSUPPORTED_ARMS for a in arms):
         raise SystemExit(f'Not supported in sequences: {", ".join(long_session.UNSUPPORTED_ARMS)}.')
+    if not units and any('last_task' in ARMS[a] for a in arms):
+        raise SystemExit('Arms with a last_task setting run in the sequence shape only (--shape sequence).')
     if args.autocompact is not None and not 100_000 <= args.autocompact <= 1_000_000:
         raise SystemExit('--autocompact takes 100000 to 1000000 tokens.')
     if args.gap and args.shape in ('single', 'split'):
@@ -1406,6 +1443,9 @@ def main():
         if not jev_key or any(c.isspace() for c in jev_key):
             raise SystemExit('Missing or malformed TypeSafe key. No billable requests sent.')
     out = ROOT/'runs'/('bench-' + time.strftime('%Y%m%d-%H%M%S'))
+    while out.exists():  # another run started this second (two runs side by side, one subscription each)
+        time.sleep(1)
+        out = ROOT/'runs'/('bench-' + time.strftime('%Y%m%d-%H%M%S'))
     print(f'Running {runs} billable trials with {cli} ({version}); stop at ${args.run_budget:.2f} known spend; '
           f'results: {out}', flush=True)
     summary = run_bench(units or tasks, arms, args.trials, args.seed, out, cli, key, 'https://api.anthropic.com', table,

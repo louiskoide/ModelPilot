@@ -167,6 +167,11 @@ class ReportTests(unittest.TestCase):
         self.assertAlmostEqual(pair['cost_per_subtask_usd']['estimate'], (-.01 + .01 + .02) / 3)
         self.assertTrue(pair['cost_per_subtask_usd']['shows_difference'])  # 36 pairs, every one the same
         self.assertAlmostEqual(pair['pass_rate']['estimate'], -3 / 36)
+        # The last tasks alone: a .09 and 9 of 12, b .07 (its compaction included) and 12 of 12.
+        self.assertEqual((a['last_task']['subtasks'], a['last_task']['passed'], b['last_task']['passed']), (12, 9, 12))
+        self.assertAlmostEqual(a['last_task']['mean_usd'] - b['last_task']['mean_usd'], .02)
+        self.assertAlmostEqual(pair['last_task']['cost_usd']['estimate'], .02)
+        self.assertAlmostEqual(pair['last_task']['pass_rate']['estimate'], -3 / 12)
 
 
 def fix_steps(work, index):
@@ -269,6 +274,26 @@ class OfflineSequenceTests(unittest.TestCase):
             self.assertEqual(record['ttl_check']['marked'], {ttl: 3}, arm)
             self.assertTrue(record['ttl_check']['applied'], arm)
             self.assertIn('none', record['accounting']['repricing'])  # priced as sent: the lifetime is the variable
+
+    def test_a_last_task_arm_switches_or_turns_helper_mode_on_at_the_last_task_only(self):
+        rates = dict(RATES, **{'claude-opus-5-5': dict(input=4, output=20, read=.2, write_5m=5, write_1h=8)})
+        note = "ModelPilot helper mode (the user's setting)"
+        for arm, models, efforts, notes in (
+                ('low-concise-switch-opus', ['claude-sonnet-5-5'] * 2 + ['claude-opus-5-5'], ['low', 'low', 'medium'],
+                 [0, 0, 0]),
+                ('low-concise-helper-opus', ['claude-sonnet-5-5'] * 3, ['low'] * 3, [0, 0, 1])):
+            start = len(self.upstream.bodies)
+            record = self.run_sequence(arm, [{'text': 'Done.'}], arm, rates=rates)
+            main = [b for b in map(json.loads, self.upstream.bodies[start:]) if b.get('tools')]
+            self.assertEqual([b['model'] for b in main], models, arm)
+            self.assertEqual([b['output_config']['effort'] for b in main], efforts, arm)
+            self.assertEqual([json.dumps(b['messages'][-1]).count(note) for b in main], notes, arm)
+            self.assertTrue(all('Agent' in [t['name'] for t in b['tools']] for b in main), arm)
+            self.assertTrue(record['effort_check']['applied'] and record['prompt_check']['applied'], arm)
+            self.assertEqual(record['last_task']['via'], arm.split('-')[2])
+        with self.assertRaisesRegex(ValueError, 'last_task'):  # its setting starts at a sequence's last task
+            bench.run_bench([self.sequence['tasks'][0]], ['low-concise-helper-opus'], 1, 0, self.out/'single',
+                            self.cli, None, 'http://x', RATES)
 
     @unittest.skipUnless(shutil.which('node'), 'Node not installed (the advisor bridge)')
     def test_the_modelpilot_arm_decides_at_each_task_turn(self):
