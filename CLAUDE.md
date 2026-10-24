@@ -1,6 +1,6 @@
 # ModelPilot: Claude Code working context
 
-Updated Oct 23, 2026. History: `docs/changelog/`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read this first, then the relevant milestone doc before changing code.
+Updated Oct 24, 2026. History: `docs/changelog/`. Runs: `docs/evidence.md`. Modules: `docs/code-map.md`. Read the relevant milestone doc before changing code.
 
 ## Objective
 
@@ -16,7 +16,7 @@ Switching model OR effort wrote a new cache prefix in tested M0 conditions. Retu
 
 - M0 cache harness and M1 pass-through proxy: verified, including an 8-hour soak. Missing: one-hour TTL, other request shapes, wide compatibility.
 - M2 ledger, M3 workers, M4 verifier, M5 controls: bounded harnesses, small live checks, unintegrated.
-- M6 benchmark: 29 tuning tasks live; 4b run Oct 18–19, spent. Plugin `plugin/` (Oct 19; helper mode Oct 20; helper-vs-`/model` arms built Oct 23). Effort: the user's `/effort low`.
+- M6 benchmark: 29 tuning tasks live; 4b run Oct 18–19, spent. Plugin `plugin/` (Oct 19; helper mode Oct 20). Effort: the user's `/effort low`.
 - ModelPilot arm: no adaptive routing (Oct 18); starts at low concise; Haiku 5.5 not a session model (Oct 10); no advisor (Oct 11; stuck: Opus 5.5); delegation off. Quality floor (Oct 8): no worse than the user's own model; arms `modelpilot-for-sonnet`/`-for-opus` (no prompt, Oct 17).
 - Governor: dry-run, wired into the proxy and hooks; live: a hook correction, turn-end delivery, an observed rebuild, a fallback (Oct 12). Missing: active mode.
 
@@ -28,11 +28,12 @@ Files under `runs/`; full table with failures: `docs/evidence.md`.
 
 - Cheapest at equal quality: `sonnet-5.5-low-concise`, $0.0689 a task, $0.0180 below Sonnet 5.5 medium on 23 tuning tasks (`paired-low-concise-23-20261004.json`).
 - Sonnet 5.5 falls short (strict) on `parse-decimal-grouping` (medium 1/6, Opus 4/4), `tomli-decode-error-attrs` (0/10, 2/4) and `nx-ismags-monomorphism` (5/8, 4/4). Every Sonnet/Opus failure reported success; a redo costs ~$0.25 a task (`redo-cost-20261004.json`).
-- 4b, 24 held-out tasks, n=1 (`../ModelPilot-final-split/runs/4b-final-report-20261019.json`): strict passes, $ a pass: `-for-sonnet` 23/24 $0.056, Sonnet medium 22/24 $0.067, Opus 24/24 $0.167, `-for-opus` 24/24 $0.167. No arm left its start; `-for-sonnet` = low concise. Sonnet floor passes, Opus floor fails.
+- 4b, 24 held-out tasks, n=1 (`../ModelPilot-final-split/runs/4b-final-report-20261019.json`): strict passes, $ a pass: `-for-sonnet` 23/24 $0.056, Sonnet medium 22/24 $0.067, Opus 24/24 $0.167, `-for-opus` 24/24 $0.167. No arm left its start. Sonnet floor passes, Opus floor fails.
 - `jev_weight` 0.03 (max. likelihood 0): Jev doesn't predict misses.
-- Item 8: no turn-start rule finds misses (38 tasks; strict low concise 95.5%, Sonnet medium 93.2%, Opus 100%; `item8-prereg-score-20261011.json`).
-- A forced Opus review at the finish rescued none of 27 tuning tasks (one miss), +$0.069 a task (`bench-20261006-093401`).
-- Cache writes are ~45% of cost, mostly growth, never rebuilds (`cache-write-sources-20261003.json`). Tool results are 80–90% source reads or searches, 6–10% test output (`tool-result-split-20261005.txt`).
+- Item 8: no turn-start rule finds misses (`item8-prereg-score-20261011.json`).
+- A forced Opus review at the finish rescued none of 27 tuning tasks, +$0.069 a task (`bench-20261006-093401`).
+- Helper vs `/model` (`helper-vs-switch-report-20261023.json`, tuning), last task: helper 19/20 $0.267, switch 18/19 $0.272, stay 15/19 $0.074; the helper's context ate the rewrite.
+- Cache writes are ~45% of cost, mostly growth, never rebuilds (`cache-write-sources-20261003.json`); tool results 80–90% reads or searches, 6–10% test output (`tool-result-split-20261005.txt`).
 
 ## Working rules
 
@@ -75,7 +76,7 @@ python3 -m modelpilot.governor --out runs/governor-demo.json
 
 ## Plan, in order
 
-Built offline first; live runs need the user's approval. 1–4 done Oct 6; 4 found no pre-run miss signal. 5, 10 dropped (Oct 8, 11).
+Built offline first; live runs need approval. 1–4 done Oct 6; 4 found no pre-run miss signal. 5, 10 dropped (Oct 8, 11).
 
 6. Mid-task compaction: no loss shown (Oct 13), not on Haiku. Long sessions await approval.
 7. Done: a late fix repaired 28/28, $0.056 each (`late-fix-analysis-20261007.json`).
